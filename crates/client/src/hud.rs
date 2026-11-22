@@ -429,6 +429,13 @@ fn update_status(
         format!("{} : {left} récoltes restantes", block.name())
     } else if player.inventory.is_empty() {
         String::new()
+    } else if let Some((item, weapon)) = player.held().and_then(|i| i.ranged().map(|w| (i, w))) {
+        let ammo = player.inventory.count(weapon.ammo);
+        if ammo == 0 {
+            format!("{} : plus de munitions ({})", item.name(), weapon.ammo.name())
+        } else {
+            format!("{} : {ammo} × {}", item.name(), weapon.ammo.name())
+        }
     } else if player.held().is_some_and(|i| i.food().is_some()) {
         "Clic droit : manger".into()
     } else {

@@ -19,7 +19,7 @@ use crate::world::{Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
 
 /// Change si le format du fichier change de façon incompatible.
-const SAVE_VERSION: u32 = 2;
+pub const SAVE_VERSION: u32 = 2;
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";

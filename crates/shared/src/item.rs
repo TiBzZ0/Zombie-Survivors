@@ -19,6 +19,22 @@ pub enum Item {
     Bandage,
     Sword(Tier),
     Pickaxe(Tier),
+    Bow,
+    Arrow,
+    Rifle,
+    Ammo,
+}
+
+/// Caractéristiques d'une arme à distance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ranged {
+    /// Munition consommée à chaque tir.
+    pub ammo: Item,
+    pub damage: f32,
+    /// Portée en mètres.
+    pub range: f32,
+    /// Délai minimal entre deux tirs, en secondes.
+    pub cooldown: f32,
 }
 
 /// Qualité d'un outil.
@@ -52,6 +68,10 @@ impl Item {
             Item::Bandage => "Bandage".into(),
             Item::Sword(t) => format!("Épée {}", t.label()),
             Item::Pickaxe(t) => format!("Pioche {}", t.label()),
+            Item::Bow => "Arc".into(),
+            Item::Arrow => "Flèche".into(),
+            Item::Rifle => "Fusil".into(),
+            Item::Ammo => "Cartouche".into(),
         }
     }
 
@@ -77,7 +97,26 @@ impl Item {
     }
 
     pub const fn is_tool(self) -> bool {
-        matches!(self, Item::Sword(_) | Item::Pickaxe(_))
+        matches!(self, Item::Sword(_) | Item::Pickaxe(_) | Item::Bow | Item::Rifle)
+    }
+
+    /// Caractéristiques de tir, si l'objet est une arme à distance.
+    pub const fn ranged(self) -> Option<Ranged> {
+        match self {
+            Item::Bow => Some(Ranged {
+                ammo: Item::Arrow,
+                damage: 30.0,
+                range: 40.0,
+                cooldown: 0.8,
+            }),
+            Item::Rifle => Some(Ranged {
+                ammo: Item::Ammo,
+                damage: 55.0,
+                range: 80.0,
+                cooldown: 0.45,
+            }),
+            _ => None,
+        }
     }
 }
 
