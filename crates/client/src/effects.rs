@@ -45,6 +45,8 @@ struct Tracer {
     origin: Vec3,
     end: Vec3,
     rifle: bool,
+    /// Crachat d'acide d'un cracheur.
+    acid: bool,
     age: f32,
 }
 
@@ -117,6 +119,14 @@ fn collect_shots(
                 origin: *origin - Vec3::Y * 0.25,
                 end: *end,
                 rifle: *rifle,
+                acid: false,
+                age: 0.0,
+            }),
+            NetEvent::Acid { origin, end } => tracers.0.push(Tracer {
+                origin: *origin,
+                end: *end,
+                rifle: false,
+                acid: true,
                 age: 0.0,
             }),
             NetEvent::BlockDamage { pos, damage: 0 } => {
@@ -205,7 +215,15 @@ fn draw_tracers(time: Res<Time>, mut tracers: ResMut<Tracers>, mut gizmos: Gizmo
     let dt = time.delta_secs();
     tracers.0.retain_mut(|t| {
         t.age += dt;
-        if t.rifle {
+        if t.acid {
+            // Acide : une boule verte qui file en cloche.
+            let duration = (t.origin.distance(t.end) / 18.0).max(0.05);
+            let k = (t.age / duration).min(1.0);
+            let arc = Vec3::Y * (k * (1.0 - k) * 2.0);
+            let head = t.origin.lerp(t.end, k) + arc;
+            gizmos.sphere(Isometry3d::from_translation(head), 0.15, Color::srgb(0.5, 0.95, 0.15));
+            t.age < duration + 0.05
+        } else if t.rifle {
             // Balle : un trait jaune très bref.
             let alpha = (1.0 - t.age / 0.12).max(0.0);
             gizmos.line(t.origin, t.end, Color::srgba(1.0, 0.9, 0.4, alpha));
