@@ -17,6 +17,7 @@ use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid};
 use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMessage, decode, encode};
 
 use crate::ServerConfig;
+use crate::save::{SavedPlayer, SavedPlayers};
 use crate::world::{GameWorld, SpawnPoint};
 use crate::zombies::{Zombie, ZombieBody};
 
@@ -177,6 +178,7 @@ fn on_server_event(
     event: On<RenetServerEvent>,
     mut server: ResMut<RenetServer>,
     mut lobby: ResMut<Lobby>,
+    mut saved: ResMut<SavedPlayers>,
     spawn: Res<SpawnPoint>,
 ) {
     match **event {
@@ -188,6 +190,7 @@ fn on_server_event(
                 && player.is_ready()
             {
                 info!("{} est parti ({reason})", player.name);
+                saved.0.insert(player.name.clone(), SavedPlayer::from_player(&player));
                 broadcast(&mut server, &ServerMessage::PlayerLeft { id: client_id });
             }
         }
@@ -202,6 +205,7 @@ fn receive_messages(
     mut zombies: Query<(&mut Zombie, &ZombieBody)>,
     spawn: Res<SpawnPoint>,
     time: Res<Time>,
+    mut saved: ResMut<SavedPlayers>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -217,6 +221,7 @@ fn receive_messages(
                 version: &mut version,
                 spawn: spawn.0,
                 now: time.elapsed_secs_f64(),
+                saved: &mut saved,
             };
             handle_reliable(client, message, &mut ctx, &mut zombies);
         }
@@ -235,6 +240,7 @@ struct Context<'a> {
     version: &'a mut WorldVersion,
     spawn: Vec3,
     now: f64,
+    saved: &'a mut SavedPlayers,
 }
 
 fn handle_reliable(
@@ -250,6 +256,7 @@ fn handle_reliable(
         version,
         spawn,
         now,
+        saved,
     } = ctx;
     let (spawn, now) = (*spawn, *now);
     let ready = lobby.players.get(&client).is_some_and(ConnectedPlayer::is_ready);
@@ -257,13 +264,17 @@ fn handle_reliable(
         ClientMessage::Hello { name } if !ready => {
             let name = sanitize_name(&name, client);
             info!("{name} a rejoint la partie");
+            // Un joueur qui revient retrouve sa position, sa santé et son inventaire.
+            let name_taken = lobby.players.values().any(|p| p.name == name);
+            let returning = if name_taken { None } else { saved.0.remove(&name) };
+            let start = returning.as_ref().map_or(spawn, |r| r.position);
             send(
                 server,
                 client,
                 &ServerMessage::Welcome {
                     your_id: client,
                     world: world.config().clone(),
-                    spawn,
+                    spawn: start,
                 },
             );
             let edits: Vec<_> = world.edits().iter().map(|(p, b)| (*p, *b)).collect();
@@ -290,8 +301,23 @@ fn handle_reliable(
             );
             if let Some(player) = lobby.players.get_mut(&client) {
                 player.name = name;
+                if let Some(back) = returning {
+                    player.state.position = back.position;
+                    player.health = back.health;
+                    player.hunger = back.hunger;
+                    player.inventory = back.inventory;
+                }
                 send_inventory(server, client, player);
                 send_vitals(server, client, player);
+                if player.health <= 0.0 {
+                    send(
+                        server,
+                        client,
+                        &ServerMessage::Died {
+                            cause: "Mort avant de partir".into(),
+                        },
+                    );
+                }
             }
         }
         _ if !ready => {}

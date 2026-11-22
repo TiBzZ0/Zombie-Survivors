@@ -12,6 +12,11 @@ services:
       WORLD_SEED: "42"
       WORLD_SIZE_CHUNKS: "32"
     volumes:
-      - ./data:/data
+      # Volume nommé : les droits d'écriture sont déjà bons pour l'utilisateur du conteneur.
+      # Copie de secours : docker compose cp server:/data/world.sav ./world.sav
+      - partie:/data
     # Laisse au serveur le temps de sauvegarder après un docker stop.
     stop_grace_period: 30s
+
+volumes:
+  partie:

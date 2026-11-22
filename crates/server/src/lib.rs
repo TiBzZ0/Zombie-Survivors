@@ -16,6 +16,7 @@ use shared::TICK_RATE_HZ;
 pub mod config;
 pub mod daynight;
 pub mod net;
+pub mod save;
 pub mod world;
 pub mod zombies;
 
@@ -37,6 +38,7 @@ impl Plugin for ServerPlugin {
                 net::NetPlugin,
                 daynight::DayNightPlugin,
                 zombies::ZombiePlugin,
+                save::SavePlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)
@@ -99,7 +101,7 @@ impl ShutdownFlag {
     }
 }
 
-fn exit_on_shutdown(flag: Res<ShutdownFlag>, mut exit: MessageWriter<AppExit>) {
+pub(crate) fn exit_on_shutdown(flag: Res<ShutdownFlag>, mut exit: MessageWriter<AppExit>) {
     if flag.0.load(Ordering::Relaxed) {
         info!("Arrêt demandé, fermeture du serveur");
         exit.write(AppExit::Success);
