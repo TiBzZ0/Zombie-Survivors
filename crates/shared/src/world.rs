@@ -32,6 +32,8 @@ pub struct WorldState {
     edits: HashMap<BlockPos, Block>,
     /// Chunks déjà générés (modifications comprises), pour des lectures rapides.
     cache: Mutex<HashMap<ChunkPos, Arc<Chunk>>>,
+    /// Blocs changés depuis le dernier `take_changes`, si le suivi est activé (serveur).
+    changes: Option<Vec<BlockPos>>,
 }
 
 impl WorldState {
@@ -40,7 +42,18 @@ impl WorldState {
             generator: Arc::new(WorldGenerator::new(config)),
             edits: HashMap::new(),
             cache: Mutex::new(HashMap::new()),
+            changes: None,
         }
+    }
+
+    /// Active le suivi des blocs changés (lus avec `take_changes`).
+    pub fn track_changes(&mut self) {
+        self.changes.get_or_insert_with(Vec::new);
+    }
+
+    /// Blocs changés depuis le dernier appel (vide si le suivi n'est pas activé).
+    pub fn take_changes(&mut self) -> Vec<BlockPos> {
+        self.changes.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     pub fn config(&self) -> &WorldConfig {
@@ -99,6 +112,9 @@ impl WorldState {
     pub fn set_block(&mut self, pos: BlockPos, block: Block) -> bool {
         if !self.in_bounds(pos) {
             return false;
+        }
+        if let Some(changes) = self.changes.as_mut() {
+            changes.push(pos);
         }
         if self.generator.block_at(pos.x, pos.y, pos.z) == block {
             self.edits.remove(&pos);

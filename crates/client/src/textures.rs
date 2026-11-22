@@ -151,7 +151,7 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
                 [0.35, 0.3, 0.25]
             }
         }
-        Block::Water => {
+        Block::Water | Block::FlowingWater => {
             // Vaguelettes claires.
             let ripple = (x + 2 * (y / 3) + (hash(0, y / 3, salt) * 4.0) as u32).is_multiple_of(7);
             gray(if ripple { 1.0 } else { 0.85 + 0.08 * coarse })
@@ -213,7 +213,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 29] = [
+const ALL_BLOCKS: [Block; 30] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -243,6 +243,7 @@ const ALL_BLOCKS: [Block; 29] = [
     Block::Water,
     Block::Snow,
     Block::Cactus,
+    Block::FlowingWater,
 ];
 
 #[cfg(test)]

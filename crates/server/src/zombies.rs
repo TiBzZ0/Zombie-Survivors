@@ -229,7 +229,7 @@ pub(crate) fn find_spawn_spot(world: &GameWorld, around: Vec3, min: f32, max: f3
         if !world.in_bounds(feet) {
             continue;
         }
-        let dry = world.block(feet) != Block::Water;
+        let dry = !world.block(feet).is_water();
         if dry && world.is_solid(feet - IVec3::Y) && !world.is_solid(feet) && !world.is_solid(feet + IVec3::Y) {
             return Some(Vec3::new(x as f32 + 0.5, feet.y as f32, z as f32 + 0.5));
         }
@@ -1054,7 +1054,7 @@ fn surroundings(world: &GameWorld, position: Vec3, night: bool) -> shared::clima
     let near_fire = (-3..=3)
         .any(|dx| (-2..=2).any(|dy| (-3..=3).any(|dz| world.block(feet + IVec3::new(dx, dy, dz)) == Block::Campfire)));
     let sheltered = (1..=6).any(|dy| world.block(head + IVec3::Y * dy).is_opaque());
-    let in_water = world.block(feet) == Block::Water;
+    let in_water = world.block(feet).is_water();
     shared::climate::Surroundings {
         night,
         near_fire,

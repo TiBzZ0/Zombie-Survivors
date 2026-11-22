@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_000F;
+pub const PROTOCOL_ID: u64 = 0x5A53_0010;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -97,6 +97,10 @@ pub enum ClientMessage {
     },
     /// Boit à la source visée (de l'eau) ; remplit plutôt une gourde vide tenue en main.
     Drink {
+        pos: IVec3,
+    },
+    /// Vide le seau d'eau tenu en main dans cette case : une source y naît.
+    PourWater {
         pos: IVec3,
     },
     /// Parle à un survivant : le recrute, change son ordre, le renvoie (`dismiss`)

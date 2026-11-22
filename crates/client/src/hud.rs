@@ -496,6 +496,10 @@ fn update_status(
         "Clic droit : boire".into()
     } else if player.held() == Some(shared::item::Item::Antidote) {
         "Clic droit : prendre l'antidote".into()
+    } else if player.aimed_water.is_some() && player.held() == Some(shared::item::Item::Bucket) {
+        "Clic droit : remplir le seau".into()
+    } else if player.held() == Some(shared::item::Item::WaterBucket) && player.target.is_some() {
+        "Clic droit : verser l'eau".into()
     } else if player.aimed_water.is_some() && player.held() == Some(shared::item::Item::Flask) {
         "Clic droit : remplir la gourde".into()
     } else if player.aimed_water.is_some() && !player.held().is_some_and(|i| matches!(i, shared::item::Item::Block(_)))

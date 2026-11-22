@@ -376,7 +376,11 @@ fn move_player(
         speed
     };
     // Dans l'eau : on avance plus lentement, on coule doucement, Espace fait remonter.
-    let wet = |y: f32| world.block((player.position + Vec3::Y * y).floor().as_ivec3()) == Block::Water;
+    let wet = |y: f32| {
+        world
+            .block((player.position + Vec3::Y * y).floor().as_ivec3())
+            .is_water()
+    };
     player.swimming = wet(0.6) || wet(0.05);
     let speed = if player.swimming { speed * SWIM_FACTOR } else { speed };
     let wish = Quat::from_rotation_y(player.yaw) * wish.normalize_or_zero() * speed;
@@ -435,10 +439,10 @@ fn interact(
     // L'eau ne se vise pas comme un bloc (on pose et on casse à travers), mais on y boit.
     player.aimed_water = raycast(player.eye(), player.look_direction(), REACH, |p| {
         let b = world.block(p);
-        b.is_targetable() || b == Block::Water
+        b.is_targetable() || b.is_water()
     })
     .map(|h| h.block)
-    .filter(|p| world.block(*p) == Block::Water);
+    .filter(|p| world.block(*p).is_water());
     let block_dist = player
         .target
         .map(|h| (h.block.as_vec3() + Vec3::splat(0.5)).distance(player.eye()))
@@ -613,6 +617,14 @@ fn interact(
                         block: Block::Sprout,
                     },
                 );
+                player.cooldown = ACTION_COOLDOWN;
+            }
+        }
+        Some(Item::WaterBucket) => {
+            let Some(hit) = player.target else { return };
+            let pos = hit.block + hit.normal;
+            if matches!(world.block(pos), Block::Air | Block::FlowingWater) {
+                send_reliable(&mut client, &ClientMessage::PourWater { pos });
                 player.cooldown = ACTION_COOLDOWN;
             }
         }
