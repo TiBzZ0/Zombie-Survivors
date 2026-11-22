@@ -173,6 +173,7 @@ pub fn drop_for(block: Block) -> Option<Item> {
         // Les filons donnent leur ressource, jamais le bloc lui-même (qui serait un filon neuf).
         Block::IronOre => Some(Item::RawIron),
         Block::CoalOre => Some(Item::Coal),
+        Block::DoorOpen => Some(Item::Block(Block::Door)),
         other => Some(Item::Block(other)),
     }
 }

@@ -91,6 +91,16 @@ pub const RECIPES: &[Recipe] = &[
         inputs: &[(Item::IronIngot, 1), (Item::Coal, 2)],
     },
     Recipe {
+        output: b(Block::Door),
+        count: 2,
+        inputs: &[(b(Block::Planks), 6)],
+    },
+    Recipe {
+        output: b(Block::Chest),
+        count: 1,
+        inputs: &[(b(Block::Planks), 8)],
+    },
+    Recipe {
         output: Item::Ration,
         count: 1,
         inputs: &[(Item::Apple, 3)],

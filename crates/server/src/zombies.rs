@@ -19,7 +19,7 @@ use shared::zombie::{ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_REACH, ZombieKind};
 
 use crate::daynight::Clock;
 use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, WorldVersion, send_vitals};
-use crate::world::{GameWorld, SpawnPoint};
+use crate::world::{Chests, GameWorld, SpawnPoint};
 
 /// Rayon exploré par le champ de flux autour des joueurs, en blocs.
 const FLOW_RADIUS: i32 = 48;
@@ -346,6 +346,7 @@ fn zombie_ai(
     mut lobby: ResMut<Lobby>,
     mut server: Option<ResMut<RenetServer>>,
     mut zombies: Query<(&mut Zombie, &mut ZombieBody)>,
+    mut chests: ResMut<Chests>,
 ) {
     let dt = time.delta_secs();
     let players: Vec<(ClientId, Vec3)> = lobby
@@ -417,6 +418,10 @@ fn zombie_ai(
                         if world.set_block(block_pos, Block::Air) {
                             version.0 += 1;
                             if let Some(server) = server.as_deref_mut() {
+                                if wall_block == Block::Chest {
+                                    // Le coffre est détruit avec son contenu.
+                                    crate::net::chest_destroyed(server, &mut lobby, &mut chests, block_pos, None);
+                                }
                                 server.broadcast_message(
                                     DefaultChannel::ReliableOrdered,
                                     encode(&ServerMessage::BlockChanged {

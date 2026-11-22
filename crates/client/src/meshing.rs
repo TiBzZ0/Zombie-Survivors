@@ -39,7 +39,7 @@ pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> 
     let size = CHUNK_SIZE as i32;
     let solid = |x: i32, y: i32, z: i32| {
         if (0..size).contains(&x) && (0..size).contains(&y) && (0..size).contains(&z) {
-            chunk.get(x as usize, y as usize, z as usize).is_solid()
+            chunk.get(x as usize, y as usize, z as usize).is_opaque()
         } else {
             solid_outside(x, y, z)
         }
@@ -54,8 +54,10 @@ pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> 
                     continue;
                 }
                 let [r, g, b] = block.color();
+                let shape = block.partial_shape();
                 for (normal, corners) in FACES {
-                    if solid(x + normal[0], y + normal[1], z + normal[2]) {
+                    // Une forme partielle (porte ouverte) montre toutes ses faces.
+                    if shape.is_none() && solid(x + normal[0], y + normal[1], z + normal[2]) {
                         continue;
                     }
                     // Ombrage fixe par orientation, faute de vraie lumière ambiante pour l'instant.
@@ -67,6 +69,10 @@ pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> 
                     };
                     let base = mesh.positions.len() as u32;
                     for c in corners {
+                        let c = match shape {
+                            Some((min, max)) => [0, 1, 2].map(|i| min[i] + c[i] * (max[i] - min[i])),
+                            None => c,
+                        };
                         mesh.positions.push([x as f32 + c[0], y as f32 + c[1], z as f32 + c[2]]);
                         mesh.normals.push(normal.map(|n| n as f32));
                         mesh.colors.push(srgb_to_linear([r * shade, g * shade, b * shade]));
@@ -119,6 +125,23 @@ mod tests {
         chunk.set(0, 0, 0, Block::Stone);
         let mesh = build_chunk_mesh(&chunk, |_, _, _| true);
         assert_eq!(mesh.indices.len(), 3 * 6);
+    }
+
+    #[test]
+    fn open_door_is_drawn_but_hides_nothing() {
+        let mut chunk = Chunk::default();
+        chunk.set(5, 5, 5, Block::DoorOpen);
+        chunk.set(6, 5, 5, Block::Stone);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| false);
+        // 6 faces pour la porte, 6 pour la pierre (rien n'est caché).
+        assert_eq!(mesh.indices.len(), 12 * 6);
+        let max_x = mesh
+            .positions
+            .iter()
+            .filter(|p| p[0] < 6.0)
+            .map(|p| p[0])
+            .fold(0.0, f32::max);
+        assert!(max_x < 5.2, "le battant doit être fin");
     }
 
     #[test]

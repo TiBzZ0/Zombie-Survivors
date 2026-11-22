@@ -94,8 +94,8 @@ fn spawn_task(commands: &mut Commands, world: &WorldState, pos: ChunkPos) {
         build_chunk_mesh(&chunk, |x, y, z| {
             let p = origin + IVec3::new(x, y, z);
             match edits.get(&p) {
-                Some(b) => b.is_solid(),
-                None => generator.block_at(p.x, p.y, p.z).is_solid(),
+                Some(b) => b.is_opaque(),
+                None => generator.block_at(p.x, p.y, p.z).is_opaque(),
             }
         })
     });
