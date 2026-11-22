@@ -68,6 +68,13 @@ pub struct SurvivorView {
     walk_phase: f32,
 }
 
+impl SurvivorView {
+    /// Le survivant est en train de travailler (récolte, réparation, cuisine, semis).
+    pub fn working(&self) -> bool {
+        self.flags & SurvivorState::WORKING != 0
+    }
+}
+
 #[derive(Component)]
 struct Limb {
     side: f32,
