@@ -22,6 +22,7 @@ pub mod net;
 pub mod save;
 pub mod survivors;
 pub mod turrets;
+pub mod water;
 pub mod world;
 pub mod zombies;
 
@@ -49,6 +50,7 @@ impl Plugin for ServerPlugin {
                 explosives::ExplosivesPlugin,
                 farming::FarmingPlugin,
                 animals::AnimalPlugin,
+                water::WaterPlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)

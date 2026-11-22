@@ -740,7 +740,7 @@ fn handle_reliable(
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
             };
-            if !player.is_alive() || world.block(pos) != Block::Water || !within_reach(player, pos) {
+            if !player.is_alive() || !world.block(pos).is_water() || !within_reach(player, pos) {
                 return;
             }
             if player.held_item() == Some(Item::Flask) {
@@ -750,9 +750,48 @@ fn handle_reliable(
                     player.held = Some(Item::WaterFlask);
                 }
                 send_inventory(server, client, player);
+            } else if player.held_item() == Some(Item::Bucket) {
+                player.inventory.remove(Item::Bucket, 1);
+                player.inventory.add(Item::WaterBucket, 1);
+                if !player.inventory.has(Item::Bucket, 1) {
+                    player.held = Some(Item::WaterBucket);
+                }
+                // Une source versée au seau se reprend ; un lac reste un lac.
+                if world.edits().get(&pos) == Some(&Block::Water) && world.set_block(pos, Block::Air) {
+                    version.0 += 1;
+                    broadcast(server, &ServerMessage::BlockChanged { pos, block: Block::Air });
+                }
+                send_inventory(server, client, player);
             } else {
                 player.thirst = MAX_THIRST;
                 send_vitals(server, client, player);
+            }
+        }
+        ClientMessage::PourWater { pos } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            let allowed = player.is_alive()
+                && player.held_item() == Some(Item::WaterBucket)
+                && within_reach(player, pos)
+                && world.in_bounds(pos)
+                && pos.y > 0
+                && matches!(world.block(pos), Block::Air | Block::FlowingWater);
+            if allowed && world.set_block(pos, Block::Water) {
+                player.inventory.remove(Item::WaterBucket, 1);
+                player.inventory.add(Item::Bucket, 1);
+                if !player.inventory.has(Item::WaterBucket, 1) {
+                    player.held = Some(Item::Bucket);
+                }
+                version.0 += 1;
+                broadcast(
+                    server,
+                    &ServerMessage::BlockChanged {
+                        pos,
+                        block: Block::Water,
+                    },
+                );
+                send_inventory(server, client, player);
             }
         }
         ClientMessage::BreakBlock { pos } => {

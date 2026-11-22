@@ -58,6 +58,10 @@ pub enum Item {
     StrawHat,
     /// Antidote : guérit l'infection.
     Antidote,
+    /// Seau vide : se remplit à l'eau.
+    Bucket,
+    /// Seau plein : se vide au clic droit et crée une source d'eau (douves, champs).
+    WaterBucket,
 }
 
 /// Caractéristiques d'un explosif qu'on lance.
@@ -164,6 +168,8 @@ impl Item {
             Item::FurCoat => "Manteau de fourrure".into(),
             Item::StrawHat => "Chapeau de paille".into(),
             Item::Antidote => "Antidote".into(),
+            Item::Bucket => "Seau".into(),
+            Item::WaterBucket => "Seau d'eau".into(),
         }
     }
 

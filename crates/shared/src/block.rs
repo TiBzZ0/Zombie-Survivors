@@ -57,6 +57,8 @@ pub enum Block {
     Snow,
     /// Cactus du désert : il pique.
     Cactus,
+    /// Eau qui s'écoule depuis une source (lac ou seau vidé) ; disparaît si la source tarit.
+    FlowingWater,
 }
 
 /// Distance maximale entre un joueur et l'arme fixe qu'il pilote.
@@ -93,8 +95,13 @@ impl Block {
     pub const fn is_solid(self) -> bool {
         !matches!(
             self,
-            Block::Air | Block::DoorOpen | Block::BarbedWire | Block::Campfire | Block::Water
+            Block::Air | Block::DoorOpen | Block::BarbedWire | Block::Campfire | Block::Water | Block::FlowingWater
         ) && !self.is_crop()
+    }
+
+    /// Eau, de source ou qui s'écoule.
+    pub const fn is_water(self) -> bool {
+        matches!(self, Block::Water | Block::FlowingWater)
     }
 
     /// Culture qui pousse sur la terre.
@@ -146,17 +153,17 @@ impl Block {
 
     /// Bloc qu'un joueur peut poser depuis son inventaire.
     pub const fn is_placeable(self) -> bool {
-        !matches!(self, Block::Air | Block::DoorOpen | Block::Water)
+        !matches!(self, Block::Air | Block::DoorOpen | Block::Water | Block::FlowingWater)
     }
 
     /// Case où l'on peut poser un bloc : vide ou pleine d'eau.
     pub const fn is_replaceable(self) -> bool {
-        matches!(self, Block::Air | Block::Water)
+        matches!(self, Block::Air | Block::Water | Block::FlowingWater)
     }
 
     /// Un bloc visable par le joueur (pour casser ou utiliser), même s'il ne bloque pas.
     pub const fn is_targetable(self) -> bool {
-        !matches!(self, Block::Air | Block::Water)
+        !matches!(self, Block::Air | Block::Water | Block::FlowingWater)
     }
 
     /// Forme d'un bloc qui n'est pas un cube plein : coin minimal et maximal dans le bloc.
@@ -207,7 +214,7 @@ impl Block {
             Block::YoungWheat => [0.50, 0.70, 0.25],
             Block::RipeWheat => [0.85, 0.72, 0.30],
             Block::Campfire => [0.80, 0.40, 0.15],
-            Block::Water => [0.20, 0.40, 0.75],
+            Block::Water | Block::FlowingWater => [0.20, 0.40, 0.75],
             Block::Snow => [0.95, 0.97, 1.0],
             Block::Cactus => [0.25, 0.55, 0.25],
         }
@@ -242,6 +249,7 @@ impl Block {
             Block::RipeWheat => "Blé mûr",
             Block::Campfire => "Feu de camp",
             Block::Water => "Eau",
+            Block::FlowingWater => "Eau courante",
             Block::Snow => "Neige",
             Block::Cactus => "Cactus",
         }
@@ -271,7 +279,7 @@ impl Block {
             Block::Catapult => 260,
             Block::Sprout | Block::YoungWheat | Block::RipeWheat => 4,
             Block::Campfire => 60,
-            Block::Water => 1,
+            Block::Water | Block::FlowingWater => 1,
             Block::Snow => 30,
             Block::Cactus => 30,
         }

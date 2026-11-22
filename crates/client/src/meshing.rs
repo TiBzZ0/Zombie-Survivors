@@ -113,17 +113,28 @@ fn axes(normal: [i32; 3]) -> (usize, usize, usize) {
     }
 }
 
+/// Hauteur dont la surface de l'eau est abaissée sous le haut du bloc.
+const WATER_DROP: f32 = 0.125;
+
+/// Un bloc qui cache entièrement la face de son voisin (l'eau, transparente, ne cache rien).
+pub fn hides_faces(block: Block) -> bool {
+    block.is_opaque() && !block.is_water()
+}
+
 /// Construit les maillages d'un chunk.
 ///
-/// `solid_outside` répond pour les blocs voisins hors du chunk (coordonnées locales
-/// pouvant valoir -1 ou `CHUNK_SIZE`), pour ne pas dessiner les faces collées au chunk d'à côté.
-pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> bool) -> ChunkMeshes {
+/// `outside` donne les blocs voisins hors du chunk (coordonnées locales pouvant valoir
+/// -1 ou `CHUNK_SIZE`), pour ne pas dessiner les faces collées au chunk d'à côté.
+///
+/// L'eau est transparente : elle ne cache pas le fond, et seule sa surface (contre l'air)
+/// est dessinée, un peu plus bas que le haut du bloc.
+pub fn build_chunk_mesh(chunk: &Chunk, outside: impl Fn(i32, i32, i32) -> Block) -> ChunkMeshes {
     let size = CHUNK_SIZE as i32;
-    let solid = |x: i32, y: i32, z: i32| {
+    let get = |x: i32, y: i32, z: i32| {
         if (0..size).contains(&x) && (0..size).contains(&y) && (0..size).contains(&z) {
-            chunk.get(x as usize, y as usize, z as usize).is_opaque()
+            chunk.get(x as usize, y as usize, z as usize)
         } else {
-            solid_outside(x, y, z)
+            outside(x, y, z)
         }
     };
     let n = CHUNK_SIZE;
@@ -153,7 +164,8 @@ pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> 
     }
 
     // Blocs pleins : un masque par tranche et par direction, puis fusion en rectangles.
-    let mut mask: Vec<Option<Block>> = vec![None; n * n];
+    // Chaque case du masque garde le bloc et si le haut de sa face est abaissé (surface de l'eau).
+    let mut mask: Vec<Option<(Block, bool)>> = vec![None; n * n];
     for (normal, corners) in FACES {
         let (d, u, v) = axes(normal);
         for slice in 0..n {
@@ -164,32 +176,32 @@ pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> 
                     p[u] = pu;
                     p[v] = pv;
                     let block = chunk.get(p[0], p[1], p[2]);
+                    let (x, y, z) = (p[0] as i32, p[1] as i32, p[2] as i32);
+                    let neighbour = get(x + normal[0], y + normal[1], z + normal[2]);
                     let visible = block != Block::Air
                         && block.partial_shape().is_none()
-                        && !solid(
-                            p[0] as i32 + normal[0],
-                            p[1] as i32 + normal[1],
-                            p[2] as i32 + normal[2],
-                        );
-                    mask[pv * n + pu] = visible.then_some(block);
+                        && !hides_faces(neighbour)
+                        && !(block.is_water() && neighbour.is_water());
+                    let lowered = block.is_water() && !get(x, y + 1, z).is_water();
+                    mask[pv * n + pu] = visible.then_some((block, lowered));
                 }
             }
             for pv in 0..n {
                 let mut pu = 0;
                 while pu < n {
-                    let Some(block) = mask[pv * n + pu] else {
+                    let Some(key) = mask[pv * n + pu] else {
                         pu += 1;
                         continue;
                     };
                     // Largeur, puis hauteur tant que toute la rangée correspond.
                     let mut w = 1;
-                    while pu + w < n && mask[pv * n + pu + w] == Some(block) {
+                    while pu + w < n && mask[pv * n + pu + w] == Some(key) {
                         w += 1;
                     }
                     let mut h = 1;
                     'grow: while pv + h < n {
                         for k in 0..w {
-                            if mask[(pv + h) * n + pu + k] != Some(block) {
+                            if mask[(pv + h) * n + pu + k] != Some(key) {
                                 break 'grow;
                             }
                         }
@@ -207,10 +219,17 @@ pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> 
                     let mut extent = [1.0f32; 3];
                     extent[u] = w as f32;
                     extent[v] = h as f32;
+                    let (block, lowered) = key;
                     out.part(block).push_quad(
                         normal,
                         corners,
-                        |c| [0, 1, 2].map(|i| offset[i] + c[i] * extent[i]),
+                        |c| {
+                            let mut p = [0, 1, 2].map(|i| offset[i] + c[i] * extent[i]);
+                            if lowered && c[1] == 1.0 {
+                                p[1] -= WATER_DROP;
+                            }
+                            p
+                        },
                         face_color(block, normal),
                         [w as f32, h as f32],
                     );
@@ -242,7 +261,7 @@ mod tests {
     fn single_block_has_six_faces() {
         let mut chunk = Chunk::default();
         chunk.set(5, 5, 5, Block::Stone);
-        let mesh = build_chunk_mesh(&chunk, |_, _, _| false);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
         assert_eq!(mesh.quads(), 6);
         assert_eq!(mesh.parts[0].1.positions.len(), 6 * 4);
     }
@@ -252,7 +271,7 @@ mod tests {
         let mut chunk = Chunk::default();
         chunk.set(5, 5, 5, Block::Stone);
         chunk.set(6, 5, 5, Block::Dirt);
-        let mesh = build_chunk_mesh(&chunk, |_, _, _| false);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
         assert_eq!(mesh.quads(), 10);
         assert_eq!(mesh.parts.len(), 2);
     }
@@ -262,7 +281,7 @@ mod tests {
         let mut chunk = Chunk::default();
         chunk.set(5, 5, 5, Block::Stone);
         chunk.set(6, 5, 5, Block::Stone);
-        let mesh = build_chunk_mesh(&chunk, |_, _, _| false);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
         assert_eq!(mesh.quads(), 6);
         // La texture se répète deux fois sur la face du dessus.
         let max_u = mesh.parts[0].1.uvs.iter().map(|uv| uv[0]).fold(0.0, f32::max);
@@ -278,9 +297,9 @@ mod tests {
             }
         }
         // Dessus seulement : le reste touche des voisins pleins.
-        let mesh = build_chunk_mesh(&chunk, |_, y, _| y <= 0);
+        let mesh = build_chunk_mesh(&chunk, |_, y, _| if y <= 0 { Block::Stone } else { Block::Air });
         assert_eq!(mesh.quads(), 1);
-        let mesh = build_chunk_mesh(&chunk, |_, _, _| false);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
         assert_eq!(mesh.quads(), 6);
     }
 
@@ -288,7 +307,7 @@ mod tests {
     fn faces_against_solid_neighbour_chunk_are_skipped() {
         let mut chunk = Chunk::default();
         chunk.set(0, 0, 0, Block::Stone);
-        let mesh = build_chunk_mesh(&chunk, |_, _, _| true);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Stone);
         assert_eq!(mesh.quads(), 3);
     }
 
@@ -297,7 +316,7 @@ mod tests {
         let mut chunk = Chunk::default();
         chunk.set(5, 5, 5, Block::DoorOpen);
         chunk.set(6, 5, 5, Block::Stone);
-        let mesh = build_chunk_mesh(&chunk, |_, _, _| false);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
         // 6 faces pour la porte, 6 pour la pierre (rien n'est caché).
         assert_eq!(mesh.quads(), 12);
         let door = &mesh.parts.iter().find(|(b, _)| *b == Block::DoorOpen).unwrap().1;
@@ -311,13 +330,35 @@ mod tests {
         for x in 0..4 {
             chunk.set(x, 0, 0, if x % 2 == 0 { Block::Stone } else { Block::Dirt });
         }
-        let mesh = build_chunk_mesh(&chunk, |_, _, _| false);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
         // Dessus, dessous, avant, arrière : 4 faces par bloc ; plus les 2 bouts.
         assert_eq!(mesh.quads(), 4 * 4 + 2);
     }
 
     #[test]
     fn empty_chunk_gives_empty_mesh() {
-        assert!(build_chunk_mesh(&Chunk::default(), |_, _, _| false).is_empty());
+        assert!(build_chunk_mesh(&Chunk::default(), |_, _, _| Block::Air).is_empty());
+    }
+
+    #[test]
+    fn water_shows_the_lake_bed_and_only_its_surface() {
+        let mut chunk = Chunk::default();
+        for x in 4..8 {
+            for z in 4..8 {
+                chunk.set(x, 4, z, Block::Sand);
+                chunk.set(x, 5, z, Block::Water);
+                chunk.set(x, 6, z, Block::Water);
+            }
+        }
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
+        let water = &mesh.parts.iter().find(|(b, _)| *b == Block::Water).unwrap().1;
+        // Aucune face entre deux blocs d'eau ni contre le fond : 4 côtés sur 2 couches
+        // (la couche du haut a son bord abaissé), plus la surface.
+        assert_eq!(water.indices.len() / 6, 9);
+        let top = water.positions.iter().map(|p| p[1]).fold(0.0, f32::max);
+        assert_eq!(top, 7.0 - WATER_DROP);
+        // Le dessus du sable reste dessiné sous l'eau.
+        let sand = &mesh.parts.iter().find(|(b, _)| *b == Block::Sand).unwrap().1;
+        assert_eq!(sand.indices.len() / 6, 6);
     }
 }

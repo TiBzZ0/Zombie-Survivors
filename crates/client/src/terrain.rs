@@ -68,12 +68,27 @@ fn setup_material(
     let handles = crate::textures::all_blocks()
         .map(|block| {
             let texture = images.add(crate::textures::build_block_texture(block));
-            let material = materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                base_color_texture: Some(texture),
-                perceptual_roughness: 1.0,
-                ..default()
-            });
+            let material = if block.is_water() {
+                // Eau translucide, visible des deux côtés (depuis la berge ou en nageant).
+                StandardMaterial {
+                    base_color: Color::srgba(0.8, 0.9, 1.0, 0.8),
+                    base_color_texture: Some(texture),
+                    alpha_mode: AlphaMode::Blend,
+                    perceptual_roughness: 0.6,
+                    reflectance: 0.15,
+                    cull_mode: None,
+                    double_sided: true,
+                    ..default()
+                }
+            } else {
+                StandardMaterial {
+                    base_color: Color::WHITE,
+                    base_color_texture: Some(texture),
+                    perceptual_roughness: 1.0,
+                    ..default()
+                }
+            };
+            let material = materials.add(material);
             (block, material)
         })
         .collect();
@@ -107,8 +122,8 @@ fn spawn_task(commands: &mut Commands, world: &WorldState, pos: ChunkPos) {
         build_chunk_mesh(&chunk, |x, y, z| {
             let p = origin + IVec3::new(x, y, z);
             match edits.get(&p) {
-                Some(b) => b.is_opaque(),
-                None => generator.block_at(p.x, p.y, p.z).is_opaque(),
+                Some(b) => *b,
+                None => generator.block_at(p.x, p.y, p.z),
             }
         })
     });
