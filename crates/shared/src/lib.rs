@@ -7,7 +7,9 @@
 pub mod block;
 pub mod chunk;
 pub mod config;
+pub mod crafting;
 pub mod daytime;
+pub mod item;
 pub mod pathfinding;
 pub mod physics;
 pub mod protocol;

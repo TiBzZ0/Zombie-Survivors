@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::block::Block;
 use crate::config::WorldConfig;
 use crate::daytime::GameTime;
+use crate::item::{Inventory, Item};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0001;
+pub const PROTOCOL_ID: u64 = 0x5A53_0002;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -35,9 +36,14 @@ pub enum ClientMessage {
     },
     /// Position du joueur (canal non fiable, envoyé en continu).
     State(PlayerState),
+    /// Le joueur commence à miner ce bloc (le serveur vérifie la durée avant `BreakBlock`).
+    StartMining {
+        pos: IVec3,
+    },
     BreakBlock {
         pos: IVec3,
     },
+    /// Pose un bloc de l'inventaire.
     PlaceBlock {
         pos: IVec3,
         block: Block,
@@ -48,6 +54,18 @@ pub enum ClientMessage {
     },
     /// Demande de réapparition après la mort.
     Respawn,
+    /// Objet tenu en main (dégâts et vitesse de minage).
+    Hold {
+        item: Option<Item>,
+    },
+    /// Fabrique la recette `RECIPES[recipe]`.
+    Craft {
+        recipe: u16,
+    },
+    /// Mange ou utilise un consommable.
+    Eat {
+        item: Item,
+    },
 }
 
 /// Position compacte d'un zombie (12 octets environ une fois sérialisée).
@@ -135,10 +153,13 @@ pub enum ServerMessage {
         time: GameTime,
         zombies_alive: u32,
     },
-    /// Santé du joueur après un changement.
-    Health {
+    /// Santé et faim du joueur.
+    Vitals {
         health: f32,
+        hunger: f32,
     },
+    /// Contenu complet de l'inventaire après un changement.
+    Inventory(Inventory),
     /// Le joueur est mort ; il peut demander à réapparaître.
     Died {
         cause: String,

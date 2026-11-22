@@ -18,7 +18,7 @@ use shared::world::{block_containing, chunk_of};
 use shared::zombie::{ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_REACH, ZombieKind};
 
 use crate::daynight::Clock;
-use crate::net::{Lobby, MAX_HEALTH, WorldVersion};
+use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, WorldVersion, send_vitals};
 use crate::world::{GameWorld, SpawnPoint};
 
 /// Rayon exploré par le champ de flux autour des joueurs, en blocs.
@@ -57,7 +57,7 @@ impl Plugin for ZombiePlugin {
                     separate_zombies,
                     sun_and_cleanup,
                     kill_dead_zombies,
-                    player_regeneration,
+                    player_survival,
                     broadcast_zombies,
                 )
                     .chain(),
@@ -361,6 +361,13 @@ fn zombie_ai(
         zombie.attacking -= dt;
         zombie.hurt_timer -= dt;
 
+        // Debout sur des piques : le zombie se blesse.
+        let below = block_containing(body.position - Vec3::Y * 0.1);
+        if body.on_ground && world.block(below) == Block::Spikes {
+            zombie.health -= SPIKE_DPS * dt;
+            zombie.hurt_timer = zombie.hurt_timer.max(0.1);
+        }
+
         let nearest = players
             .iter()
             .map(|(id, p)| (*id, *p, p.distance(body.position)))
@@ -378,7 +385,13 @@ fn zombie_ai(
                     zombie.attack_cooldown = ZOMBIE_ATTACK_COOLDOWN;
                     zombie.attacking = 0.4;
                     if let Some(player) = lobby.players.get_mut(&player_id) {
-                        hurt_player(player_id, player, stats.damage, &zombie.kind, server.as_deref_mut());
+                        hurt_player(
+                            player_id,
+                            player,
+                            stats.damage,
+                            death_cause(zombie.kind),
+                            server.as_deref_mut(),
+                        );
                     }
                 }
             } else if let Some(node) = flow.field.get(feet) {
@@ -391,7 +404,12 @@ fn zombie_ai(
                     // Contre le mur à casser : on tape dedans.
                     face = Some(block_pos.as_vec3() + Vec3::splat(0.5));
                     zombie.attacking = 0.4;
-                    let hp = world.block(block_pos).max_health() as f32;
+                    let wall_block = world.block(block_pos);
+                    if wall_block == Block::Spikes {
+                        zombie.health -= SPIKE_DPS * dt;
+                        zombie.hurt_timer = zombie.hurt_timer.max(0.1);
+                    }
+                    let hp = wall_block.max_health() as f32;
                     let dealt = damage.0.entry(block_pos).or_insert(0.0);
                     *dealt += stats.block_dps * dt;
                     if *dealt >= hp {
@@ -443,31 +461,30 @@ fn zombie_ai(
     }
 }
 
-fn hurt_player(
+/// Dégâts par seconde des piques aux zombies qui les touchent.
+const SPIKE_DPS: f32 = 12.0;
+
+/// Retire de la vie à un joueur et annonce sa mort si besoin.
+pub fn hurt_player(
     id: ClientId,
     player: &mut crate::net::ConnectedPlayer,
     amount: f32,
-    kind: &ZombieKind,
+    cause: &str,
     server: Option<&mut RenetServer>,
 ) {
     if player.health <= 0.0 {
         return; // déjà mort (plusieurs zombies peuvent frapper dans le même tick)
     }
+    let before = player.health.ceil();
     player.health = (player.health - amount).max(0.0);
     player.since_hit = 0.0;
     let Some(server) = server else { return };
-    server.send_message(
-        id,
-        DefaultChannel::ReliableOrdered,
-        encode(&ServerMessage::Health { health: player.health }),
-    );
+    if player.health.ceil() != before || player.health <= 0.0 {
+        send_vitals(server, id, player);
+    }
     if player.health <= 0.0 {
-        let cause = match kind {
-            ZombieKind::Walker => "Dévoré par un zombie",
-            ZombieKind::Runner => "Rattrapé par un coureur",
-            ZombieKind::Brute => "Écrasé par une brute",
-        };
         info!("{} est mort : {cause}", player.name);
+        player.mining = None;
         server.send_message(
             id,
             DefaultChannel::ReliableOrdered,
@@ -480,6 +497,14 @@ fn hurt_player(
                 text: format!("{} : {cause}", player.name),
             }),
         );
+    }
+}
+
+fn death_cause(kind: ZombieKind) -> &'static str {
+    match kind {
+        ZombieKind::Walker => "Dévoré par un zombie",
+        ZombieKind::Runner => "Rattrapé par un coureur",
+        ZombieKind::Brute => "Écrasé par une brute",
     }
 }
 
@@ -575,27 +600,38 @@ fn kill_dead_zombies(
     }
 }
 
-/// Les joueurs récupèrent 2 points de vie par seconde après 8 secondes sans être touchés.
-fn player_regeneration(time: Res<Time>, mut lobby: ResMut<Lobby>, mut server: Option<ResMut<RenetServer>>) {
+/// Faim perdue par seconde : un joueur rassasié tient environ 15 minutes.
+const HUNGER_PER_SEC: f32 = MAX_HUNGER / 900.0;
+/// Vie perdue par seconde quand la faim est à zéro.
+const STARVATION_DPS: f32 = 1.0;
+/// En dessous de cette faim, la vie ne remonte plus.
+const REGEN_MIN_HUNGER: f32 = 30.0;
+
+/// Faim et régénération : 2 points de vie par seconde après 8 secondes sans coup, si le joueur a mangé.
+fn player_survival(time: Res<Time>, mut lobby: ResMut<Lobby>, mut server: Option<ResMut<RenetServer>>) {
     let dt = time.delta_secs();
     for (id, player) in lobby.players.iter_mut() {
         player.attack_cooldown -= dt;
         if !player.is_alive() {
             continue;
         }
+        let hunger_before = player.hunger.ceil();
+        player.hunger = (player.hunger - HUNGER_PER_SEC * dt).max(0.0);
+        if player.hunger <= 0.0 {
+            let since_hit = player.since_hit;
+            hurt_player(*id, player, STARVATION_DPS * dt, "Mort de faim", server.as_deref_mut());
+            player.since_hit = since_hit + dt;
+            continue;
+        }
         player.since_hit += dt;
-        if player.since_hit > 8.0 && player.health < MAX_HEALTH {
-            let before = player.health.ceil();
+        let health_before = player.health.ceil();
+        if player.since_hit > 8.0 && player.health < MAX_HEALTH && player.hunger > REGEN_MIN_HUNGER {
             player.health = (player.health + 2.0 * dt).min(MAX_HEALTH);
-            if player.health.ceil() != before
-                && let Some(server) = server.as_deref_mut()
-            {
-                server.send_message(
-                    *id,
-                    DefaultChannel::ReliableOrdered,
-                    encode(&ServerMessage::Health { health: player.health }),
-                );
-            }
+        }
+        if (player.health.ceil() != health_before || player.hunger.ceil() != hunger_before)
+            && let Some(server) = server.as_deref_mut()
+        {
+            send_vitals(server, *id, player);
         }
     }
 }

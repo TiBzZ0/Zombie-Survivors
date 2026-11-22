@@ -10,7 +10,10 @@ use bevy_renet::netcode::NetcodeClientTransport;
 use bevy_renet::renet::{ConnectionConfig, DefaultChannel, RenetClient};
 use server::{ServerConfig, spawn_local};
 use shared::block::Block;
+use shared::config::WorldConfig;
+use shared::item::{Item, break_time, drop_for};
 use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, ServerMessage, decode, encode};
+use shared::worldgen::WorldGenerator;
 
 struct TestClient {
     client: RenetClient,
@@ -123,8 +126,34 @@ fn two_players_share_the_world() {
             .is_some()
     );
 
-    // Alice casse le bloc sous ses pieds : Bob doit recevoir le changement.
+    // Casser sans avoir miné assez longtemps est refusé.
     let below = (spawn - Vec3::Y).floor().as_ivec3();
+    let ground = WorldGenerator::new(WorldConfig::default()).block_at(below.x, below.y, below.z);
+    alice.received.clear();
+    alice.send(&ClientMessage::BreakBlock { pos: below }, true);
+    pump_until(&mut [&mut alice, &mut bob], "cassage trop rapide refusé", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::BlockChanged { pos, block } if *pos == below => Some(*block),
+            _ => None,
+        })
+        .is_some()
+    });
+    let corrected = alice.find(|m| match m {
+        ServerMessage::BlockChanged { pos, block } if *pos == below => Some(*block),
+        _ => None,
+    });
+    assert_eq!(corrected, Some(ground));
+
+    // Alice mine le bloc sous ses pieds : Bob reçoit le changement, Alice récupère le bloc.
+    alice.send(&ClientMessage::StartMining { pos: below }, true);
+    let needed = break_time(ground, None).expect("le sol se casse à la main");
+    let start = Instant::now();
+    while start.elapsed().as_secs_f32() < needed + 0.1 {
+        alice.pump();
+        bob.pump();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    alice.received.clear();
     alice.send(&ClientMessage::BreakBlock { pos: below }, true);
     pump_until(&mut [&mut alice, &mut bob], "bloc cassé reçu par Bob", |c| {
         c[1].find(|m| match m {
@@ -133,23 +162,64 @@ fn two_players_share_the_world() {
         })
         .is_some()
     });
+    let dropped = drop_for(ground).unwrap();
+    pump_until(&mut [&mut alice, &mut bob], "bloc récupéré par Alice", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Inventory(inv) if inv.has(dropped, 1) => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+    let Item::Block(dropped_block) = dropped else {
+        panic!("le sol donne un bloc")
+    };
 
-    // Bob pose un bloc à portée : Alice le reçoit.
-    // Au-dessus de la tête : toujours de l'air au point d'apparition.
+    // Bob n'a pas ce bloc : il ne peut pas le poser.
     let placed = below + IVec3::new(1, 4, 0);
+    bob.received.clear();
     bob.send(
         &ClientMessage::PlaceBlock {
             pos: placed,
-            block: Block::Wood,
+            block: dropped_block,
         },
         true,
     );
-    pump_until(&mut [&mut alice, &mut bob], "bloc posé reçu par Alice", |c| {
-        c[0].find(|m| match m {
-            ServerMessage::BlockChanged {
-                pos,
-                block: Block::Wood,
-            } if *pos == placed => Some(()),
+    pump_until(&mut [&mut alice, &mut bob], "pose refusée sans le bloc", |c| {
+        c[1].find(|m| match m {
+            ServerMessage::BlockChanged { pos, block } if *pos == placed => Some(*block),
+            _ => None,
+        })
+        .is_some()
+    });
+    let refused = bob.find(|m| match m {
+        ServerMessage::BlockChanged { pos, block } if *pos == placed => Some(*block),
+        _ => None,
+    });
+    assert_eq!(refused, Some(Block::Air));
+
+    // Alice pose son bloc à portée : Bob le reçoit.
+    // Au-dessus de la tête : toujours de l'air au point d'apparition.
+    alice.send(
+        &ClientMessage::PlaceBlock {
+            pos: placed,
+            block: dropped_block,
+        },
+        true,
+    );
+    pump_until(&mut [&mut alice, &mut bob], "bloc posé reçu par Bob", |c| {
+        c[1].find(|m| match m {
+            ServerMessage::BlockChanged { pos, block } if *pos == placed && *block == dropped_block => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+
+    // Bob mange une de ses trois pommes de départ.
+    bob.received.clear();
+    bob.send(&ClientMessage::Eat { item: Item::Apple }, true);
+    pump_until(&mut [&mut alice, &mut bob], "pomme mangée", |c| {
+        c[1].find(|m| match m {
+            ServerMessage::Inventory(inv) if inv.count(Item::Apple) == 2 => Some(()),
             _ => None,
         })
         .is_some()
@@ -196,7 +266,7 @@ fn two_players_share_the_world() {
             c[2].find(|m| match m {
                 ServerMessage::WorldEdits(edits) => edits
                     .iter()
-                    .any(|(p, b)| *p == placed && *b == Block::Wood)
+                    .any(|(p, b)| *p == placed && *b == dropped_block)
                     .then_some(()),
                 _ => None,
             })

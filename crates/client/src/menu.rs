@@ -130,7 +130,7 @@ fn spawn_menu(mut commands: Commands, options: Res<LaunchOptions>, mut notice: R
                 ),
                 label(&notice_text, 18.0, Color::srgb(1.0, 0.55, 0.45)),
                 label(
-                    "ZQSD/WASD : se déplacer · Espace : sauter · Clic gauche : frapper / casser · Clic droit : poser · 1-7 : bloc",
+                    "ZQSD/WASD : se déplacer · Espace : sauter · Clic gauche : frapper / miner · Clic droit : poser / manger · 1-9, molette : objet · C : fabriquer",
                     14.0,
                     Color::srgb(0.6, 0.6, 0.6)
                 ),

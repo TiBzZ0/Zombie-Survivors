@@ -11,6 +11,8 @@ use bevy_renet::netcode::{
 use bevy_renet::renet::{ClientId, ConnectionConfig, DefaultChannel, ServerEvent};
 use bevy_renet::{RenetServer, RenetServerEvent, RenetServerPlugin};
 use shared::block::Block;
+use shared::crafting::RECIPES;
+use shared::item::{Inventory, Item, break_time, drop_for};
 use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid};
 use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMessage, decode, encode};
 
@@ -20,7 +22,6 @@ use crate::zombies::{Zombie, ZombieBody};
 
 /// Portée d'un coup de mêlée, en mètres.
 pub const MELEE_REACH: f32 = 3.0;
-const PLAYER_MELEE_DAMAGE: f32 = 15.0;
 const PLAYER_ATTACK_COOLDOWN: f32 = 0.35;
 
 /// Nombre de blocs modifiés par message lors du rattrapage d'un joueur qui arrive.
@@ -53,10 +54,66 @@ pub struct ConnectedPlayer {
     pub since_hit: f32,
     /// Temps avant de pouvoir frapper à nouveau.
     pub attack_cooldown: f32,
+    /// Faim : 100 = rassasié, 0 = le joueur perd de la vie.
+    pub hunger: f32,
+    pub inventory: Inventory,
+    /// Objet en main, toujours présent dans l'inventaire.
+    pub held: Option<Item>,
+    /// Bloc en cours de minage et instant du début (secondes depuis le lancement du serveur).
+    pub mining: Option<(IVec3, f64)>,
 }
 
 /// Santé maximale d'un joueur.
 pub const MAX_HEALTH: f32 = 100.0;
+/// Faim maximale d'un joueur.
+pub const MAX_HUNGER: f32 = 100.0;
+/// Chance qu'un bloc de feuilles donne aussi une pomme.
+const APPLE_CHANCE: f32 = 0.25;
+/// Tolérance sur la durée de minage (latence, horloges).
+const MINING_TOLERANCE: f64 = 0.75;
+
+impl ConnectedPlayer {
+    pub fn new(position: Vec3) -> Self {
+        let mut inventory = Inventory::default();
+        inventory.add(Item::Apple, 3);
+        Self {
+            name: String::new(),
+            state: PlayerState {
+                position,
+                yaw: 0.0,
+                pitch: 0.0,
+            },
+            health: MAX_HEALTH,
+            since_hit: 0.0,
+            attack_cooldown: 0.0,
+            hunger: MAX_HUNGER,
+            inventory,
+            held: None,
+            mining: None,
+        }
+    }
+
+    /// Objet en main s'il est encore dans l'inventaire.
+    pub fn held_item(&self) -> Option<Item> {
+        self.held.filter(|item| self.inventory.has(*item, 1))
+    }
+}
+
+/// Envoie au joueur sa santé et sa faim.
+pub fn send_vitals(server: &mut RenetServer, client: ClientId, player: &ConnectedPlayer) {
+    send(
+        server,
+        client,
+        &ServerMessage::Vitals {
+            health: player.health,
+            hunger: player.hunger,
+        },
+    );
+}
+
+fn send_inventory(server: &mut RenetServer, client: ClientId, player: &ConnectedPlayer) {
+    send(server, client, &ServerMessage::Inventory(player.inventory.clone()));
+}
 
 impl ConnectedPlayer {
     pub fn is_ready(&self) -> bool {
@@ -124,20 +181,7 @@ fn on_server_event(
 ) {
     match **event {
         ServerEvent::ClientConnected { client_id } => {
-            lobby.players.insert(
-                client_id,
-                ConnectedPlayer {
-                    name: String::new(),
-                    state: PlayerState {
-                        position: spawn.0,
-                        yaw: 0.0,
-                        pitch: 0.0,
-                    },
-                    health: MAX_HEALTH,
-                    since_hit: 0.0,
-                    attack_cooldown: 0.0,
-                },
-            );
+            lobby.players.insert(client_id, ConnectedPlayer::new(spawn.0));
         }
         ServerEvent::ClientDisconnected { client_id, ref reason } => {
             if let Some(player) = lobby.players.remove(&client_id)
@@ -157,6 +201,7 @@ fn receive_messages(
     mut version: ResMut<WorldVersion>,
     mut zombies: Query<(&mut Zombie, &ZombieBody)>,
     spawn: Res<SpawnPoint>,
+    time: Res<Time>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -171,6 +216,7 @@ fn receive_messages(
                 world: &mut world,
                 version: &mut version,
                 spawn: spawn.0,
+                now: time.elapsed_secs_f64(),
             };
             handle_reliable(client, message, &mut ctx, &mut zombies);
         }
@@ -188,6 +234,7 @@ struct Context<'a> {
     world: &'a mut GameWorld,
     version: &'a mut WorldVersion,
     spawn: Vec3,
+    now: f64,
 }
 
 fn handle_reliable(
@@ -202,8 +249,9 @@ fn handle_reliable(
         world,
         version,
         spawn,
+        now,
     } = ctx;
-    let spawn = *spawn;
+    let (spawn, now) = (*spawn, *now);
     let ready = lobby.players.get(&client).is_some_and(ConnectedPlayer::is_ready);
     match message {
         ClientMessage::Hello { name } if !ready => {
@@ -242,6 +290,8 @@ fn handle_reliable(
             );
             if let Some(player) = lobby.players.get_mut(&client) {
                 player.name = name;
+                send_inventory(server, client, player);
+                send_vitals(server, client, player);
             }
         }
         _ if !ready => {}
@@ -259,7 +309,7 @@ fn handle_reliable(
                 let center = body.position + Vec3::Y * z.kind.stats().size.height * 0.5;
                 if center.distance(eye) <= MELEE_REACH + 1.0 {
                     player.attack_cooldown = PLAYER_ATTACK_COOLDOWN;
-                    z.health -= PLAYER_MELEE_DAMAGE;
+                    z.health -= Item::melee_damage(player.held_item());
                     z.hurt_timer = 0.3;
                     z.knockback = Vec3::new(look.x, 0.0, look.z).normalize_or_zero() * 6.0 + Vec3::Y * 3.0;
                     z.last_attacker = Some(client);
@@ -272,21 +322,72 @@ fn handle_reliable(
             };
             if player.health <= 0.0 {
                 player.health = MAX_HEALTH;
+                player.hunger = player.hunger.max(MAX_HUNGER * 0.5);
                 player.since_hit = 0.0;
                 player.state.position = spawn;
                 send(server, client, &ServerMessage::Teleport { position: spawn });
-                send(server, client, &ServerMessage::Health { health: MAX_HEALTH });
+                send_vitals(server, client, player);
             }
         }
+        ClientMessage::StartMining { pos } => {
+            if let Some(player) = lobby.players.get_mut(&client) {
+                player.mining = Some((pos, now));
+            }
+        }
+        ClientMessage::Hold { item } => {
+            if let Some(player) = lobby.players.get_mut(&client) {
+                player.held = item;
+            }
+        }
+        ClientMessage::Craft { recipe } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if let Some(recipe) = RECIPES.get(recipe as usize)
+                && player.is_alive()
+            {
+                recipe.craft(&mut player.inventory);
+            }
+            send_inventory(server, client, player);
+        }
+        ClientMessage::Eat { item } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if let Some((hunger, health)) = item.food()
+                && player.is_alive()
+                && player.inventory.remove(item, 1)
+            {
+                player.hunger = (player.hunger + hunger).min(MAX_HUNGER);
+                player.health = (player.health + health).min(MAX_HEALTH);
+                send_vitals(server, client, player);
+            }
+            send_inventory(server, client, player);
+        }
         ClientMessage::BreakBlock { pos } => {
-            let player = &lobby.players[&client];
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
             if !player.is_alive() {
                 return;
             }
-            let allowed = pos.y > 0 && within_reach(player, pos) && world.is_solid(pos);
+            let block = world.block(pos);
+            let mined_long_enough = match (player.mining, break_time(block, player.held_item())) {
+                (Some((p, start)), Some(needed)) => p == pos && now - start >= needed as f64 * MINING_TOLERANCE - 0.1,
+                _ => false,
+            };
+            let allowed = pos.y > 0 && within_reach(player, pos) && block.is_solid() && mined_long_enough;
             if allowed && world.set_block(pos, Block::Air) {
+                player.mining = None;
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block: Block::Air });
+                if let Some(item) = drop_for(block) {
+                    player.inventory.add(item, 1);
+                }
+                if block == Block::Leaves && fastrand::f32() < APPLE_CHANCE {
+                    player.inventory.add(Item::Apple, 1);
+                }
+                send_inventory(server, client, player);
             } else {
                 // Corrige le client qui avait anticipé.
                 send(
@@ -300,20 +401,24 @@ fn handle_reliable(
             }
         }
         ClientMessage::PlaceBlock { pos, block } => {
-            let player = &lobby.players[&client];
-            if !player.is_alive() {
-                return;
-            }
             let blocked_by_player = lobby
                 .players
                 .values()
                 .any(|p| overlaps_solid(p.state.position, PLAYER_SIZE, &|b| b == pos));
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if !player.is_alive() {
+                return;
+            }
             let allowed = block.is_solid()
+                && player.inventory.has(Item::Block(block), 1)
                 && within_reach(player, pos)
                 && !world.is_solid(pos)
                 && !blocked_by_player
                 && world.in_bounds(pos);
             if allowed && world.set_block(pos, block) {
+                player.inventory.remove(Item::Block(block), 1);
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block });
             } else {
@@ -326,6 +431,7 @@ fn handle_reliable(
                     },
                 );
             }
+            send_inventory(server, client, player);
         }
     }
 }
