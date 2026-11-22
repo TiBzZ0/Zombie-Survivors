@@ -71,6 +71,26 @@ pub const RECIPES: &[Recipe] = &[
         inputs: &[(Item::IronIngot, 1), (Item::Stick, 3)],
     },
     Recipe {
+        output: Item::Bow,
+        count: 1,
+        inputs: &[(Item::Stick, 3), (b(Block::Leaves), 3)],
+    },
+    Recipe {
+        output: Item::Arrow,
+        count: 8,
+        inputs: &[(Item::Stick, 2), (b(Block::Stone), 1)],
+    },
+    Recipe {
+        output: Item::Rifle,
+        count: 1,
+        inputs: &[(Item::IronIngot, 5), (b(Block::Planks), 2)],
+    },
+    Recipe {
+        output: Item::Ammo,
+        count: 12,
+        inputs: &[(Item::IronIngot, 1), (Item::Coal, 2)],
+    },
+    Recipe {
         output: Item::Ration,
         count: 1,
         inputs: &[(Item::Apple, 3)],

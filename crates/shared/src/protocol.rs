@@ -11,7 +11,7 @@ use crate::item::{Inventory, Item};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0003;
+pub const PROTOCOL_ID: u64 = 0x5A53_0004;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -61,6 +61,10 @@ pub enum ClientMessage {
     /// Fabrique la recette `RECIPES[recipe]`.
     Craft {
         recipe: u16,
+    },
+    /// Tir avec l'arme à distance en main, dans la direction donnée.
+    Shoot {
+        direction: Vec3,
     },
     /// Mange ou utilise un consommable.
     Eat {
@@ -160,6 +164,13 @@ pub enum ServerMessage {
     },
     /// Contenu complet de l'inventaire après un changement.
     Inventory(Inventory),
+    /// Un joueur a tiré : trajectoire pour l'effet visuel et le son.
+    Shot {
+        from: PlayerId,
+        origin: Vec3,
+        end: Vec3,
+        rifle: bool,
+    },
     /// Récoltes restantes d'un bloc de filon, après une récolte.
     Deposit {
         pos: IVec3,

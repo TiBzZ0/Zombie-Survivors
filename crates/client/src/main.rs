@@ -10,6 +10,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod crafting;
+mod effects;
 mod hud;
 mod menu;
 mod meshing;
@@ -106,6 +107,7 @@ fn main() {
             sky::SkyPlugin,
             zombies::ZombiesPlugin,
             crafting::CraftingPlugin,
+            effects::EffectsPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)

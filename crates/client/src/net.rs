@@ -70,6 +70,7 @@ pub enum NetEvent {
     Vitals { health: f32, hunger: f32 },
     Inventory(shared::item::Inventory),
     Deposit { pos: IVec3, remaining: u8 },
+    Shot { origin: Vec3, end: Vec3, rifle: bool },
     Died(String),
     ZombieKilled(u32),
 }
@@ -252,6 +253,9 @@ fn receive_messages(
             }
             ServerMessage::Time { time, zombies_alive } => {
                 events.write(NetEvent::Time { time, zombies_alive });
+            }
+            ServerMessage::Shot { origin, end, rifle, .. } => {
+                events.write(NetEvent::Shot { origin, end, rifle });
             }
             ServerMessage::Deposit { pos, remaining } => {
                 events.write(NetEvent::Deposit { pos, remaining });

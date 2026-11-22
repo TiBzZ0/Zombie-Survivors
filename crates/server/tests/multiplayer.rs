@@ -11,8 +11,10 @@ use bevy_renet::renet::{ConnectionConfig, DefaultChannel, RenetClient};
 use server::{ServerConfig, spawn_local};
 use shared::block::Block;
 use shared::config::WorldConfig;
-use shared::item::{Item, break_time, drop_for};
+use shared::daytime::GameTime;
+use shared::item::{Inventory, Item, break_time, drop_for};
 use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, ServerMessage, decode, encode};
+use shared::world::WorldState;
 use shared::worldgen::WorldGenerator;
 
 struct TestClient {
@@ -412,5 +414,78 @@ fn deposits_are_harvested_many_times() {
         })
         .is_some()
     });
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[test]
+fn bow_shoots_and_uses_arrows() {
+    let port = 19_000 + (std::process::id() % 1000) as u16;
+    let data_dir = std::env::temp_dir().join(format!("zs-test-arc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data_dir);
+
+    // Eve revient d'une partie précédente avec un arc et 5 flèches.
+    let world = WorldState::new(WorldConfig::default());
+    let spawn = server::world::find_spawn(&world);
+    let mut inventory = Inventory::default();
+    inventory.add(Item::Bow, 1);
+    inventory.add(Item::Arrow, 5);
+    let save = server::save::SaveFile {
+        version: server::save::SAVE_VERSION,
+        world: WorldConfig::default(),
+        time: GameTime::START,
+        edits: Vec::new(),
+        players: vec![(
+            "Eve".into(),
+            server::save::SavedPlayer {
+                position: spawn,
+                health: 100.0,
+                hunger: 100.0,
+                inventory,
+            },
+        )],
+        deposits: Vec::new(),
+    };
+    server::save::write(&data_dir, &save).unwrap();
+
+    let config = ServerConfig {
+        port,
+        data_dir: data_dir.clone(),
+        ..ServerConfig::default()
+    };
+    let _server = spawn_local(config).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let mut eve = TestClient::connect(port, 1, "Eve");
+    pump_until(&mut [&mut eve], "inventaire d'Eve", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Inventory(inv) if inv.has(Item::Bow, 1) => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+
+    // Sans l'arc en main, le tir est ignoré ; avec, une flèche part.
+    eve.send(&ClientMessage::Shoot { direction: Vec3::X }, true);
+    eve.send(&ClientMessage::Hold { item: Some(Item::Bow) }, true);
+    eve.send(&ClientMessage::Shoot { direction: Vec3::X }, true);
+    pump_until(&mut [&mut eve], "tir reçu", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Shot { from: 1, .. } => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+    pump_until(&mut [&mut eve], "flèche consommée", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Inventory(inv) if inv.count(Item::Arrow) == 4 => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+    let shots = eve
+        .received
+        .iter()
+        .filter(|m| matches!(m, ServerMessage::Shot { .. }))
+        .count();
+    assert_eq!(shots, 1, "le premier tir, sans arc en main, devait être ignoré");
     let _ = std::fs::remove_dir_all(&data_dir);
 }

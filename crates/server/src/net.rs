@@ -15,6 +15,7 @@ use shared::crafting::RECIPES;
 use shared::item::{Inventory, Item, break_time, drop_for};
 use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid};
 use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMessage, decode, encode};
+use shared::raycast::{ray_aabb, raycast};
 
 use crate::ServerConfig;
 use crate::save::{SavedPlayer, SavedPlayers};
@@ -345,6 +346,59 @@ fn handle_reliable(
                     z.last_attacker = Some(client);
                 }
             }
+        }
+        ClientMessage::Shoot { direction } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            let Some(weapon) = player.held_item().and_then(Item::ranged) else {
+                return;
+            };
+            let dir = direction.normalize_or_zero();
+            if !player.is_alive() || player.attack_cooldown > 0.0 || dir == Vec3::ZERO || !dir.is_finite() {
+                return;
+            }
+            if !player.inventory.remove(weapon.ammo, 1) {
+                send_inventory(server, client, player);
+                return;
+            }
+            // Petite marge : le client et le serveur ne mesurent pas le temps tout à fait pareil.
+            player.attack_cooldown = weapon.cooldown * 0.85;
+            let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
+            let wall = raycast(eye, dir, weapon.range, |p| world.is_solid(p))
+                .map(|hit| ray_aabb(eye, dir, hit.block.as_vec3(), hit.block.as_vec3() + Vec3::ONE).unwrap_or(0.0))
+                .unwrap_or(weapon.range);
+            let target = zombies
+                .iter_mut()
+                .filter_map(|(z, body)| {
+                    let size = z.kind.stats().size;
+                    let half = Vec3::new(size.half_width + 0.1, 0.0, size.half_width + 0.1);
+                    let top = Vec3::Y * size.height;
+                    ray_aabb(eye, dir, body.position - half, body.position + half + top)
+                        .filter(|t| *t < wall)
+                        .map(|t| (z, t))
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            let end = match target {
+                Some((mut z, t)) => {
+                    z.health -= weapon.damage;
+                    z.hurt_timer = 0.3;
+                    z.knockback = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 3.0;
+                    z.last_attacker = Some(client);
+                    eye + dir * t
+                }
+                None => eye + dir * wall,
+            };
+            send_inventory(server, client, player);
+            broadcast(
+                server,
+                &ServerMessage::Shot {
+                    from: client,
+                    origin: eye,
+                    end,
+                    rifle: weapon.ammo == Item::Ammo,
+                },
+            );
         }
         ClientMessage::Respawn => {
             let Some(player) = lobby.players.get_mut(&client) else {

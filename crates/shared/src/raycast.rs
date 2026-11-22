@@ -75,6 +75,17 @@ pub fn raycast(origin: Vec3, direction: Vec3, max_distance: f32, solid: impl Fn(
     None
 }
 
+/// Distance d'entrée d'un rayon dans une boîte alignée sur les axes, s'il la touche.
+/// `dir` doit être normalisé pour que la distance soit en mètres.
+pub fn ray_aabb(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let inv = dir.recip();
+    let t1 = (min - origin) * inv;
+    let t2 = (max - origin) * inv;
+    let near = t1.min(t2).max_element();
+    let far = t1.max(t2).min_element();
+    (far >= near.max(0.0)).then_some(near.max(0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,5 +107,14 @@ mod tests {
     #[test]
     fn misses_beyond_range() {
         assert!(raycast(Vec3::ZERO, Vec3::X, 3.0, |p| p.x == 10).is_none());
+    }
+
+    #[test]
+    fn ray_hits_box_in_front_only() {
+        let min = Vec3::new(2.0, 0.0, -0.5);
+        let max = Vec3::new(3.0, 2.0, 0.5);
+        assert_eq!(ray_aabb(Vec3::new(0.0, 1.0, 0.0), Vec3::X, min, max), Some(2.0));
+        assert_eq!(ray_aabb(Vec3::new(0.0, 1.0, 0.0), Vec3::NEG_X, min, max), None);
+        assert_eq!(ray_aabb(Vec3::new(0.0, 5.0, 0.0), Vec3::X, min, max), None);
     }
 }
