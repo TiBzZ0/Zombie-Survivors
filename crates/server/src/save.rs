@@ -14,13 +14,14 @@ use shared::daytime::GameTime;
 use shared::item::{Inventory, Item};
 use shared::survivor::{Order, SurvivorStats};
 
+use crate::claims::Claims;
 use crate::daynight::Clock;
 use crate::net::{ConnectedPlayer, Lobby, WorldVersion};
 use crate::world::{Chests, Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
 
 /// Change si le format du fichier change de façon incompatible.
-pub const SAVE_VERSION: u32 = 8;
+pub const SAVE_VERSION: u32 = 9;
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";
@@ -201,6 +202,8 @@ pub struct SaveFile {
     pub survivors: Vec<SavedSurvivor>,
     /// Joueurs infectés et avancée de l'infection (depuis la version 8).
     pub infections: Vec<(String, f32)>,
+    /// Bannières plantées et leur propriétaire (depuis la version 9).
+    pub claims: Vec<(IVec3, String)>,
 }
 
 pub fn save_path(data_dir: &Path) -> PathBuf {
@@ -249,7 +252,12 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
     } else {
         (Vec::new(), rest)
     };
-    let infections: Vec<(String, f32)> = if version >= 8 {
+    let (infections, rest): (Vec<(String, f32)>, &[u8]) = if version >= 8 {
+        postcard::take_from_bytes(rest).map_err(invalid)?
+    } else {
+        (Vec::new(), rest)
+    };
+    let claims: Vec<(IVec3, String)> = if version >= 9 {
         postcard::take_from_bytes(rest).map_err(invalid)?.0
     } else {
         Vec::new()
@@ -276,6 +284,7 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
         chests,
         survivors,
         infections,
+        claims,
     };
     Ok(Some(save))
 }
@@ -290,6 +299,7 @@ pub fn write(data_dir: &Path, save: &SaveFile) -> io::Result<()> {
     std::fs::rename(&tmp, save_path(data_dir))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn snapshot(
     world: &GameWorld,
     clock: &Clock,
@@ -298,6 +308,7 @@ fn snapshot(
     deposits: &Deposits,
     chests: &Chests,
     survivors: &SavedSurvivors,
+    claims: &Claims,
 ) -> SaveFile {
     let mut players = saved.0.clone();
     for player in lobby.players.values().filter(|p| p.is_ready()) {
@@ -326,9 +337,15 @@ fn snapshot(
         chests,
         survivors: survivors.0.clone(),
         infections,
+        claims: {
+            let mut claims: Vec<_> = claims.0.iter().map(|(p, n)| (*p, n.clone())).collect();
+            claims.sort_by_key(|(p, _)| (p.x, p.y, p.z));
+            claims
+        },
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn save_now(
     config: &ServerConfig,
     world: &GameWorld,
@@ -338,8 +355,9 @@ fn save_now(
     deposits: &Deposits,
     chests: &Chests,
     survivors: &SavedSurvivors,
+    claims: &Claims,
 ) {
-    let save = snapshot(world, clock, lobby, saved, deposits, chests, survivors);
+    let save = snapshot(world, clock, lobby, saved, deposits, chests, survivors, claims);
     match write(&config.data_dir, &save) {
         Ok(()) => debug!(
             "Partie sauvegardée : {} blocs modifiés, {} joueurs",
@@ -364,6 +382,7 @@ fn autosave(
     deposits: Res<Deposits>,
     chests: Res<Chests>,
     survivors: Res<SavedSurvivors>,
+    claims: Res<Claims>,
     mut since: Local<f32>,
     mut last_version: Local<u64>,
 ) {
@@ -378,7 +397,9 @@ fn autosave(
         return;
     }
     *last_version = version.0;
-    save_now(&config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors);
+    save_now(
+        &config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors, &claims,
+    );
 }
 
 fn save_on_shutdown(
@@ -391,11 +412,14 @@ fn save_on_shutdown(
     deposits: Res<Deposits>,
     chests: Res<Chests>,
     survivors: Res<SavedSurvivors>,
+    claims: Res<Claims>,
     mut done: Local<bool>,
 ) {
     if flag.0.load(Ordering::Relaxed) && !*done {
         *done = true;
-        save_now(&config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors);
+        save_now(
+            &config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors, &claims,
+        );
         info!("Partie sauvegardée dans {}", save_path(&config.data_dir).display());
     }
 }
@@ -446,6 +470,7 @@ mod tests {
                 armor: [Some(Item::Helmet(shared::item::Tier::Iron)), None],
             }],
             infections: vec![("Alice".into(), 30.0)],
+            claims: vec![(IVec3::new(5, 40, 5), "Alice".into())],
         };
         write(&dir, &save).unwrap();
         assert_eq!(load(&dir).unwrap(), Some(save));

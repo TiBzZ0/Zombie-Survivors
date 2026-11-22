@@ -48,6 +48,23 @@ pub struct Session {
     pub my_id: PlayerId,
     pub my_name: String,
     pub spawn: Vec3,
+    /// Combat entre joueurs activé sur ce serveur.
+    pub pvp: bool,
+}
+
+/// Bases protégées par une bannière : position et propriétaire.
+#[derive(Resource, Default, Debug)]
+pub struct Claims(pub Vec<(IVec3, String)>);
+
+impl Claims {
+    /// Propriétaire de la base qui contient ce point, s'il y en a une.
+    pub fn owner_at(&self, pos: Vec3) -> Option<&str> {
+        let p = pos.floor().as_ivec3();
+        self.0
+            .iter()
+            .find(|(banner, _)| shared::block::in_claim(*banner, p))
+            .map(|(_, owner)| owner.as_str())
+    }
 }
 
 /// Serveur local, gardé en vie pendant la partie.
@@ -170,7 +187,10 @@ fn start_connection(
     mut next: ResMut<NextState<AppState>>,
 ) {
     let server_addr = if options.host_locally {
-        let config = ServerConfig::local();
+        let config = ServerConfig {
+            pvp: options.pvp,
+            ..ServerConfig::local()
+        };
         let port = config.port;
         info!("Sauvegarde de la partie locale : {}", config.data_dir.display());
         match server::spawn_local(config) {
@@ -291,6 +311,7 @@ fn receive_messages(
                 your_name,
                 world,
                 spawn,
+                pvp,
             } => {
                 info!("Connecté en tant que joueur {your_id} ({your_name})");
                 fresh_world = Some(WorldState::new(world));
@@ -298,7 +319,9 @@ fn receive_messages(
                     my_id: your_id,
                     my_name: your_name,
                     spawn,
+                    pvp,
                 });
+                commands.insert_resource(Claims::default());
                 commands.remove_resource::<ConnectStarted>();
                 if *state.get() == AppState::Connecting {
                     next.set(AppState::Playing);
@@ -419,6 +442,9 @@ fn receive_messages(
             }
             ServerMessage::Explosion { pos, radius } => {
                 events.write(NetEvent::Explosion { pos, radius });
+            }
+            ServerMessage::Claims(list) => {
+                commands.insert_resource(Claims(list));
             }
             ServerMessage::Collapse { pos, blocks } => {
                 events.write(NetEvent::Collapse { pos, blocks });

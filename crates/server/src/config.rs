@@ -12,6 +12,8 @@ pub struct ServerConfig {
     /// Dossier des sauvegardes (monté en volume dans Docker).
     pub data_dir: PathBuf,
     pub world: WorldConfig,
+    /// Combat entre joueurs ; les bannières protègent alors les bases.
+    pub pvp: bool,
 }
 
 impl Default for ServerConfig {
@@ -21,6 +23,7 @@ impl Default for ServerConfig {
             max_players: 8,
             data_dir: PathBuf::from("data"),
             world: WorldConfig::default(),
+            pvp: false,
         }
     }
 }
@@ -35,7 +38,7 @@ impl ServerConfig {
         }
     }
 
-    /// Lit `PORT`, `MAX_PLAYERS`, `DATA_DIR`, `WORLD_SEED` et `WORLD_SIZE_CHUNKS`.
+    /// Lit `PORT`, `MAX_PLAYERS`, `DATA_DIR`, `WORLD_SEED`, `WORLD_SIZE_CHUNKS` et `PVP`.
     /// Une variable absente garde sa valeur par défaut ; une valeur invalide est une erreur.
     pub fn from_env() -> Result<Self, String> {
         Self::from_lookup(|key| std::env::var(key).ok())
@@ -58,6 +61,12 @@ impl ServerConfig {
                 size_chunks: parse("WORLD_SIZE_CHUNKS", get("WORLD_SIZE_CHUNKS"), d.world.size_chunks)?,
                 height_chunks: d.world.height_chunks,
                 generation: d.world.generation,
+            },
+            pvp: match get("PVP").map(|v| v.trim().to_lowercase()) {
+                None => d.pvp,
+                Some(v) if ["1", "true", "oui", "on", "yes"].contains(&v.as_str()) => true,
+                Some(v) if ["0", "false", "non", "off", "no", ""].contains(&v.as_str()) => false,
+                Some(v) => return Err(format!("PVP invalide : « {v} »")),
             },
         };
         if !(1..=8).contains(&config.max_players) {
@@ -106,11 +115,18 @@ mod tests {
         .unwrap();
         assert_eq!(config.max_players, 4);
         assert_eq!(config.world.seed, -12);
+        assert!(!config.pvp);
+        assert!(
+            ServerConfig::from_lookup(|k| (k == "PVP").then(|| "oui".into()))
+                .unwrap()
+                .pvp
+        );
     }
 
     #[test]
     fn invalid_values_are_rejected() {
         assert!(ServerConfig::from_lookup(|k| (k == "PORT").then(|| "abc".into())).is_err());
         assert!(ServerConfig::from_lookup(|k| (k == "MAX_PLAYERS").then(|| "20".into())).is_err());
+        assert!(ServerConfig::from_lookup(|k| (k == "PVP").then(|| "peut-être".into())).is_err());
     }
 }

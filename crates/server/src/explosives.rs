@@ -10,6 +10,7 @@ use shared::physics::{PROJECTILE_GRAVITY, step_projectile};
 use shared::protocol::ServerMessage;
 
 use crate::animals::Animal;
+use crate::claims::Claims;
 use crate::net::{Lobby, WorldVersion, broadcast};
 use crate::survivors::Survivor;
 use crate::world::{Deposits, GameWorld};
@@ -116,7 +117,10 @@ fn update_projectiles(
     mut zombies: Query<(&mut Zombie, &ZombieBody)>,
     mut survivors: Query<&mut Survivor>,
     mut animals: Query<&mut Animal>,
+    claims: Option<Res<Claims>>,
+    config: Option<Res<crate::ServerConfig>>,
 ) {
+    let pvp = config.is_some_and(|c| c.pvp);
     let dt = time.delta_secs();
     let mut exploded = Vec::new();
     let targets: Vec<Vec3> = zombies
@@ -187,6 +191,12 @@ fn update_projectiles(
             }
         }
         let mut destroyed = Vec::new();
+        // En JcJ, les explosifs d'un joueur n'entament pas la base d'un autre.
+        let thrower = p.owner.and_then(|id| lobby.players.get(&id)).map(|pl| pl.name.clone());
+        let protected = |pos: IVec3| match (&claims, &thrower) {
+            (Some(claims), Some(name)) if pvp => claims.foreign_owner(pos, name).is_some(),
+            _ => false,
+        };
         if blast.blast_blocks > 0.0 {
             let r = blast.blast_blocks.ceil() as i32;
             let center = p.position.floor().as_ivec3();
@@ -196,7 +206,12 @@ fn update_projectiles(
                         let pos = center + IVec3::new(x, y, z);
                         let block = world.block(pos);
                         let close = (pos.as_vec3() + Vec3::splat(0.5)).distance(p.position) <= blast.blast_blocks;
-                        if close && pos.y > 0 && !resists_blast(block) && world.set_block(pos, Block::Air) {
+                        if close
+                            && pos.y > 0
+                            && !resists_blast(block)
+                            && !protected(pos)
+                            && world.set_block(pos, Block::Air)
+                        {
                             damage.0.remove(&pos);
                             deposits.0.remove(&pos);
                             destroyed.push(pos);

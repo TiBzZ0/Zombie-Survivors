@@ -17,6 +17,7 @@ use shared::survivor::TALK_RANGE;
 use crate::AppState;
 use crate::animals::{AnimalView, aimed_animal};
 use crate::net::{ClientWorld, NetEvent, Session, send_reliable, send_state};
+use crate::remote::RemotePlayer;
 use crate::settings::Settings;
 use crate::survivors::{SurvivorView, aimed_survivor};
 use crate::zombies::ZombieView;
@@ -431,7 +432,10 @@ fn interact(
     survivors: Query<(&SurvivorView, &Transform)>,
     animals: Query<(&AnimalView, &Transform)>,
     keys: Res<ButtonInput<KeyCode>>,
+    session: Option<Res<Session>>,
+    remotes: Query<(&RemotePlayer, &Transform)>,
 ) {
+    let pvp = session.is_some_and(|s| s.pvp);
     let dt = time.delta_secs();
     player.target = raycast(player.eye(), player.look_direction(), REACH, |p| {
         world.block(p).is_targetable()
@@ -542,6 +546,18 @@ fn interact(
             player.mining = None;
             if player.cooldown <= 0.0 {
                 send_reliable(&mut client, &ClientMessage::Attack { zombie: id });
+                player.cooldown = melee.cooldown;
+            }
+            return;
+        }
+        // En JcJ, les autres joueurs aussi.
+        if pvp
+            && let Some((id, dist)) = aimed_remote(player.eye(), player.look_direction(), melee.reach, &remotes)
+            && dist < block_dist
+        {
+            player.mining = None;
+            if player.cooldown <= 0.0 {
+                send_reliable(&mut client, &ClientMessage::AttackPlayer { id });
                 player.cooldown = melee.cooldown;
             }
             return;
@@ -717,6 +733,29 @@ pub fn emplacement_close(player: &LocalPlayer, pos: IVec3) -> bool {
 }
 
 /// Zombie visé (intersection rayon / boîte) à portée de mêlée, avec sa distance.
+/// Autre joueur visé à portée, et sa distance.
+fn aimed_remote(
+    eye: Vec3,
+    dir: Vec3,
+    reach: f32,
+    remotes: &Query<(&RemotePlayer, &Transform)>,
+) -> Option<(shared::protocol::PlayerId, f32)> {
+    let half = Vec3::new(PLAYER_SIZE.half_width + 0.1, 0.0, PLAYER_SIZE.half_width + 0.1);
+    remotes
+        .iter()
+        .filter_map(|(r, t)| {
+            ray_aabb(
+                eye,
+                dir,
+                t.translation - half,
+                t.translation + half + Vec3::Y * PLAYER_SIZE.height,
+            )
+            .filter(|d| *d <= reach)
+            .map(|d| (r.id, d))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
 fn aimed_zombie(eye: Vec3, dir: Vec3, reach: f32, zombies: &Query<(&ZombieView, &Transform)>) -> Option<(u32, f32)> {
     let mut best: Option<(u32, f32)> = None;
     for (view, transform) in zombies.iter() {

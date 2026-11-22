@@ -14,6 +14,7 @@ use bevy::prelude::*;
 use shared::TICK_RATE_HZ;
 
 pub mod animals;
+pub mod claims;
 pub mod config;
 pub mod daynight;
 pub mod electricity;
@@ -57,6 +58,7 @@ impl Plugin for ServerPlugin {
                 electricity::ElectricityPlugin,
                 events::EventsPlugin,
                 structure::StructurePlugin,
+                claims::ClaimsPlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)

@@ -353,6 +353,12 @@ pub const RECIPES: &[Recipe] = &[
         station: Some(Block::Workbench),
     },
     Recipe {
+        output: b(Block::Banner),
+        count: 1,
+        inputs: &[(b(Block::Planks), 2), (Item::Hide, 2), (Item::Stick, 2)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
         output: Item::StrawHat,
         count: 1,
         inputs: &[(Item::Wheat, 4)],
