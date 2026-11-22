@@ -15,11 +15,11 @@ use shared::item::Inventory;
 
 use crate::daynight::Clock;
 use crate::net::{ConnectedPlayer, Lobby, WorldVersion};
-use crate::world::GameWorld;
+use crate::world::{Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
 
 /// Change si le format du fichier change de façon incompatible.
-const SAVE_VERSION: u32 = 1;
+const SAVE_VERSION: u32 = 2;
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";
@@ -66,6 +66,18 @@ pub struct SaveFile {
     pub time: GameTime,
     pub edits: Vec<(IVec3, Block)>,
     pub players: Vec<(String, SavedPlayer)>,
+    /// Récoltes restantes des filons entamés (depuis la version 2).
+    pub deposits: Vec<(IVec3, u8)>,
+}
+
+/// Format de la version 1, avant les filons.
+#[derive(Deserialize)]
+struct SaveFileV1 {
+    _version: u32,
+    world: WorldConfig,
+    time: GameTime,
+    edits: Vec<(IVec3, Block)>,
+    players: Vec<(String, SavedPlayer)>,
 }
 
 pub fn save_path(data_dir: &Path) -> PathBuf {
@@ -79,8 +91,22 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    let save: SaveFile =
-        postcard::from_bytes(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    let invalid = |e: postcard::Error| io::Error::new(io::ErrorKind::InvalidData, e.to_string());
+    // Le numéro de version est le premier champ : on le lit seul pour choisir le format.
+    let (version, _) = postcard::take_from_bytes::<u32>(&bytes).map_err(invalid)?;
+    let save: SaveFile = if version == 1 {
+        let old: SaveFileV1 = postcard::from_bytes(&bytes).map_err(invalid)?;
+        SaveFile {
+            version: SAVE_VERSION,
+            world: old.world,
+            time: old.time,
+            edits: old.edits,
+            players: old.players,
+            deposits: Vec::new(),
+        }
+    } else {
+        postcard::from_bytes(&bytes).map_err(invalid)?
+    };
     if save.version != SAVE_VERSION {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -100,7 +126,7 @@ pub fn write(data_dir: &Path, save: &SaveFile) -> io::Result<()> {
     std::fs::rename(&tmp, save_path(data_dir))
 }
 
-fn snapshot(world: &GameWorld, clock: &Clock, lobby: &Lobby, saved: &SavedPlayers) -> SaveFile {
+fn snapshot(world: &GameWorld, clock: &Clock, lobby: &Lobby, saved: &SavedPlayers, deposits: &Deposits) -> SaveFile {
     let mut players = saved.0.clone();
     for player in lobby.players.values().filter(|p| p.is_ready()) {
         players.insert(player.name.clone(), SavedPlayer::from_player(player));
@@ -109,17 +135,27 @@ fn snapshot(world: &GameWorld, clock: &Clock, lobby: &Lobby, saved: &SavedPlayer
     edits.sort_by_key(|(p, _)| (p.x, p.y, p.z));
     let mut players: Vec<_> = players.into_iter().collect();
     players.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut deposits: Vec<_> = deposits.0.iter().map(|(p, n)| (*p, *n)).collect();
+    deposits.sort_by_key(|(p, _)| (p.x, p.y, p.z));
     SaveFile {
         version: SAVE_VERSION,
         world: world.config().clone(),
         time: clock.0,
         edits,
         players,
+        deposits,
     }
 }
 
-fn save_now(config: &ServerConfig, world: &GameWorld, clock: &Clock, lobby: &Lobby, saved: &SavedPlayers) {
-    let save = snapshot(world, clock, lobby, saved);
+fn save_now(
+    config: &ServerConfig,
+    world: &GameWorld,
+    clock: &Clock,
+    lobby: &Lobby,
+    saved: &SavedPlayers,
+    deposits: &Deposits,
+) {
+    let save = snapshot(world, clock, lobby, saved, deposits);
     match write(&config.data_dir, &save) {
         Ok(()) => debug!(
             "Partie sauvegardée : {} blocs modifiés, {} joueurs",
@@ -141,6 +177,7 @@ fn autosave(
     lobby: Res<Lobby>,
     saved: Res<SavedPlayers>,
     version: Res<WorldVersion>,
+    deposits: Res<Deposits>,
     mut since: Local<f32>,
     mut last_version: Local<u64>,
 ) {
@@ -155,7 +192,7 @@ fn autosave(
         return;
     }
     *last_version = version.0;
-    save_now(&config, &world, &clock, &lobby, &saved);
+    save_now(&config, &world, &clock, &lobby, &saved, &deposits);
 }
 
 fn save_on_shutdown(
@@ -165,11 +202,12 @@ fn save_on_shutdown(
     clock: Res<Clock>,
     lobby: Res<Lobby>,
     saved: Res<SavedPlayers>,
+    deposits: Res<Deposits>,
     mut done: Local<bool>,
 ) {
     if flag.0.load(Ordering::Relaxed) && !*done {
         *done = true;
-        save_now(&config, &world, &clock, &lobby, &saved);
+        save_now(&config, &world, &clock, &lobby, &saved, &deposits);
         info!("Partie sauvegardée dans {}", save_path(&config.data_dir).display());
     }
 }
@@ -178,6 +216,10 @@ fn save_on_shutdown(
 mod tests {
     use super::*;
     use shared::item::Item;
+
+    fn loaded_fields(dir: &Path) -> SaveFile {
+        load(dir).unwrap().unwrap()
+    }
 
     #[test]
     fn save_file_round_trip() {
@@ -200,9 +242,26 @@ mod tests {
                     inventory,
                 },
             )],
+            deposits: vec![(IVec3::new(4, 5, 6), 7)],
         };
         write(&dir, &save).unwrap();
         assert_eq!(load(&dir).unwrap(), Some(save));
+
+        // Une sauvegarde de la version 1 (sans filons) se lit toujours.
+        #[derive(Serialize)]
+        struct V1<'a>(
+            u32,
+            &'a WorldConfig,
+            GameTime,
+            &'a [(IVec3, Block)],
+            &'a [(String, SavedPlayer)],
+        );
+        let old = loaded_fields(&dir);
+        let bytes = postcard::to_allocvec(&V1(1, &old.world, old.time, &old.edits, &old.players)).unwrap();
+        std::fs::write(save_path(&dir), bytes).unwrap();
+        let upgraded = load(&dir).unwrap().unwrap();
+        assert_eq!(upgraded.edits, old.edits);
+        assert!(upgraded.deposits.is_empty());
         std::fs::write(save_path(&dir), b"abime").unwrap();
         assert!(load(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);

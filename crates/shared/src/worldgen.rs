@@ -14,6 +14,11 @@ const TREE_CELL: i32 = 9;
 /// Pourcentage de cellules qui ont un arbre.
 const TREE_CHANCE: u32 = 45;
 
+/// Taille d'une cellule de la grille des rochers de filon, en blocs.
+const BOULDER_CELL: i32 = 24;
+/// Pourcentage de cellules qui ont un rocher de filon.
+const BOULDER_CHANCE: u32 = 40;
+
 /// Petit hachage entier, stable d'une plateforme à l'autre.
 fn hash3(seed: i32, a: i32, b: i32) -> u32 {
     let mut h = (seed as u32).wrapping_mul(0x9E37_79B9)
@@ -33,6 +38,7 @@ pub struct WorldGenerator {
     height: FastNoiseLite,
     caves: FastNoiseLite,
     ore: FastNoiseLite,
+    coal: FastNoiseLite,
 }
 
 impl WorldGenerator {
@@ -49,13 +55,18 @@ impl WorldGenerator {
 
         let mut ore = FastNoiseLite::with_seed(config.seed.wrapping_add(2));
         ore.set_noise_type(Some(NoiseType::OpenSimplex2));
-        ore.set_frequency(Some(0.12));
+        ore.set_frequency(Some(0.07));
+
+        let mut coal = FastNoiseLite::with_seed(config.seed.wrapping_add(3));
+        coal.set_noise_type(Some(NoiseType::OpenSimplex2));
+        coal.set_frequency(Some(0.08));
 
         Self {
             config,
             height,
             caves,
             ore,
+            coal,
         }
     }
 
@@ -79,6 +90,10 @@ impl WorldGenerator {
         // Pas de grotte sous y = 2 (le fond de la carte), ni juste sous la surface (le sol reste propre).
         let surface = self.surface_height(x, z);
         if y >= surface {
+            let deposit = self.boulder_block_at(x, y, z);
+            if deposit != Block::Air {
+                return deposit;
+            }
             return self.tree_block_at(x, y, z);
         }
         if y > 2 && y < surface - 4 && self.caves.get_noise_3d(x as f32, y as f32, z as f32) > 0.6 {
@@ -91,7 +106,9 @@ impl WorldGenerator {
             0 => Block::Grass,
             1..=3 if beach => Block::Sand,
             1..=3 => Block::Dirt,
-            _ if self.ore.get_noise_3d(x as f32, y as f32, z as f32) > 0.75 => Block::IronOre,
+            // Filons souterrains : de grosses poches plutôt que des blocs isolés.
+            _ if self.ore.get_noise_3d(x as f32, y as f32, z as f32) > 0.8 => Block::IronOre,
+            4..=24 if self.coal.get_noise_3d(x as f32, y as f32, z as f32) > 0.78 => Block::CoalOre,
             _ => Block::Stone,
         }
     }
@@ -148,6 +165,45 @@ impl WorldGenerator {
             }
         }
         Block::Air
+    }
+
+    /// Rocher de filon éventuel d'une cellule : centre au sol et type de filon.
+    pub fn boulder_in_cell(&self, cx: i32, cz: i32) -> Option<(i32, i32, i32, Block)> {
+        let h = hash3(self.config.seed.wrapping_add(77), cx, cz);
+        if h % 100 >= BOULDER_CHANCE {
+            return None;
+        }
+        let x = cx * BOULDER_CELL + 3 + ((h >> 8) % (BOULDER_CELL as u32 - 6)) as i32;
+        let z = cz * BOULDER_CELL + 3 + ((h >> 16) % (BOULDER_CELL as u32 - 6)) as i32;
+        let size = self.config.size_blocks();
+        if x < 3 || z < 3 || x >= size - 3 || z >= size - 3 {
+            return None;
+        }
+        let ground = self.surface_height(x, z);
+        if ground + 4 >= self.config.height_blocks() {
+            return None;
+        }
+        let kind = if (h >> 24) % 5 < 2 {
+            Block::IronOre
+        } else {
+            Block::CoalOre
+        };
+        Some((x, ground, z, kind))
+    }
+
+    /// Bloc de rocher de filon posé sur le sol (une croix de 5 blocs surmontée d'un bloc), ou de l'air.
+    fn boulder_block_at(&self, x: i32, y: i32, z: i32) -> Block {
+        let (cx, cz) = (x.div_euclid(BOULDER_CELL), z.div_euclid(BOULDER_CELL));
+        let Some((bx, ground, bz, kind)) = self.boulder_in_cell(cx, cz) else {
+            return Block::Air;
+        };
+        let (dx, dy, dz) = (x - bx, y - ground, z - bz);
+        let inside = match dy {
+            0 => dx.abs() + dz.abs() <= 1,
+            1 => dx == 0 && dz == 0,
+            _ => false,
+        };
+        if inside { kind } else { Block::Air }
     }
 
     /// Génère tout un chunk.
@@ -217,6 +273,24 @@ mod tests {
         assert_eq!(generator.block_at(x + 1, ground + height - 1, z), Block::Leaves);
         assert_eq!(generator.block_at(x, ground + height, z), Block::Leaves);
         assert_eq!(generator.block_at(x, ground + height + 1, z), Block::Air);
+    }
+
+    #[test]
+    fn deposits_sit_on_the_surface() {
+        let generator = WorldGenerator::new(WorldConfig::default());
+        let boulders: Vec<_> = (0..20)
+            .flat_map(|cx| (0..20).map(move |cz| (cx, cz)))
+            .filter_map(|(cx, cz)| generator.boulder_in_cell(cx, cz))
+            .collect();
+        assert!(boulders.len() > 60, "seulement {} rochers", boulders.len());
+        assert!(boulders.iter().any(|b| b.3 == Block::IronOre));
+        assert!(boulders.iter().any(|b| b.3 == Block::CoalOre));
+        let (x, ground, z, kind) = boulders[0];
+        assert!(kind.is_deposit());
+        assert_eq!(generator.block_at(x, ground, z), kind);
+        assert_eq!(generator.block_at(x + 1, ground, z), kind);
+        assert_eq!(generator.block_at(x, ground + 1, z), kind);
+        assert_eq!(generator.block_at(x, ground + 2, z), Block::Air);
     }
 
     #[test]

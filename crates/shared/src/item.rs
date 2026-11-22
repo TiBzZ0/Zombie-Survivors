@@ -11,6 +11,9 @@ pub enum Item {
     Block(Block),
     Stick,
     IronIngot,
+    /// Minerai de fer brut, récolté sur un filon.
+    RawIron,
+    Coal,
     Apple,
     Ration,
     Bandage,
@@ -42,6 +45,8 @@ impl Item {
             Item::Block(b) => b.name().to_string(),
             Item::Stick => "Bâton".into(),
             Item::IronIngot => "Lingot de fer".into(),
+            Item::RawIron => "Minerai de fer".into(),
+            Item::Coal => "Charbon".into(),
             Item::Apple => "Pomme".into(),
             Item::Ration => "Ration".into(),
             Item::Bandage => "Bandage".into(),
@@ -126,6 +131,9 @@ pub fn drop_for(block: Block) -> Option<Item> {
     match block {
         Block::Air => None,
         Block::Grass => Some(Item::Block(Block::Dirt)),
+        // Les filons donnent leur ressource, jamais le bloc lui-même (qui serait un filon neuf).
+        Block::IronOre => Some(Item::RawIron),
+        Block::CoalOre => Some(Item::Coal),
         other => Some(Item::Block(other)),
     }
 }
@@ -140,7 +148,7 @@ pub fn mining_speed(block: Block, held: Option<Item>) -> f32 {
     };
     let hard = matches!(
         block,
-        Block::Stone | Block::IronOre | Block::ReinforcedWall | Block::Spikes
+        Block::Stone | Block::IronOre | Block::CoalOre | Block::ReinforcedWall | Block::Spikes
     );
     if hard { 40.0 * pick } else { 40.0 * pick.sqrt() }
 }

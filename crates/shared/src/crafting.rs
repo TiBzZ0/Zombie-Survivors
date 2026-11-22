@@ -48,7 +48,7 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         output: Item::IronIngot,
         count: 1,
-        inputs: &[(b(Block::IronOre), 1), (b(Block::Wood), 1)],
+        inputs: &[(Item::RawIron, 1), (Item::Coal, 1)],
     },
     Recipe {
         output: Item::Pickaxe(Tier::Iron),
