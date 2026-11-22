@@ -109,7 +109,7 @@ pub const SPIT_COOLDOWN: f32 = 2.5;
 pub const SPIT_DAMAGE: f32 = 9.0;
 
 /// À partir de cette nuit, les zombies arrêtés par un mur grimpent les uns sur les autres.
-pub const STACK_FROM_NIGHT: u32 = 2;
+pub const STACK_FROM_NIGHT: u32 = 3;
 
 /// Zombies qu'il faut serrer contre un mur pour qu'un d'eux grimpe sur les autres,
 /// et hauteur qu'ils peuvent franchir ainsi (en blocs), selon la nuit.
@@ -117,9 +117,11 @@ pub const fn stacking(night: u32) -> Option<(usize, f32)> {
     if night < STACK_FROM_NIGHT {
         return None;
     }
-    let needed = 6usize.saturating_sub(night as usize / 2);
+    // Nuit 3 : 5 zombies passent un mur de 2 ; nuit 5 : 4 pour 3 blocs ; nuit 9 : 2 pour 5 blocs.
+    let step = (night as usize).div_ceil(2);
+    let needed = 7usize.saturating_sub(step);
     let needed = if needed < 2 { 2 } else { needed };
-    let height = 1 + night / 2;
+    let height = night.div_ceil(2);
     let height = if height > 6 { 6 } else { height };
     Some((needed, height as f32))
 }
@@ -131,7 +133,10 @@ mod tests {
     #[test]
     fn stacking_gets_easier_and_higher_with_nights() {
         assert_eq!(stacking(1), None);
-        let (n2, h2) = stacking(2).unwrap();
+        assert_eq!(stacking(2), None);
+        // Un mur de 3 blocs tient jusqu'à la cinquième nuit.
+        assert!(stacking(4).unwrap().1 < 3.0);
+        let (n2, h2) = stacking(3).unwrap();
         let (n10, h10) = stacking(10).unwrap();
         assert!(n10 < n2 && h10 > h2);
         assert_eq!(stacking(40), Some((2, 6.0)));

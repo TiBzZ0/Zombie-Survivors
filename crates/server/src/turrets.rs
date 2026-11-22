@@ -156,6 +156,7 @@ mod tests {
                     knockback: Vec3::ZERO,
                     last_attacker: None,
                     climb_from: None,
+                    stuck: 0.0,
                 },
                 ZombieBody {
                     position: Vec3::new(x, y as f32, 0.5),

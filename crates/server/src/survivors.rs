@@ -650,7 +650,7 @@ fn survivor_ai(
 const SURVIVOR_RANGE: f32 = 24.0;
 
 /// Rien de solide entre deux points.
-pub(crate) fn clear_line(world: &GameWorld, from: Vec3, to: Vec3) -> bool {
+pub fn clear_line(world: &GameWorld, from: Vec3, to: Vec3) -> bool {
     let dir = (to - from).normalize_or_zero();
     let dist = from.distance(to);
     match raycast(from, dir, dist, |p| world.is_solid(p)) {
