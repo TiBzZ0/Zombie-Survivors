@@ -317,6 +317,24 @@ pub const RECIPES: &[Recipe] = &[
         station: Some(Block::Workbench),
     },
     Recipe {
+        output: Item::FurCoat,
+        count: 1,
+        inputs: &[(Item::Hide, 4)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: Item::StrawHat,
+        count: 1,
+        inputs: &[(Item::Wheat, 4)],
+        station: None,
+    },
+    Recipe {
+        output: Item::Antidote,
+        count: 1,
+        inputs: &[(Item::Coal, 1), (Item::Apple, 2), (Item::Bandage, 1)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
         output: Item::Ration,
         count: 2,
         inputs: &[(Item::Bread, 1), (Item::CookedMeat, 1)],

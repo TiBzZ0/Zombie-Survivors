@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_000E;
+pub const PROTOCOL_ID: u64 = 0x5A53_000F;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -269,11 +269,17 @@ pub enum ServerMessage {
         time: GameTime,
         zombies_alive: u32,
     },
-    /// Santé et faim du joueur.
+    /// Santé, faim, soif, température et infection du joueur.
     Vitals {
         health: f32,
         hunger: f32,
         thirst: f32,
+        /// Température du corps, en °C.
+        body_temp: f32,
+        /// Air ressenti (avec les vêtements), en °C.
+        felt: f32,
+        /// Avancée de l'infection, de 0 (sain) à 100.
+        infection: f32,
     },
     /// Contenu complet de l'inventaire après un changement.
     Inventory(Inventory),

@@ -553,6 +553,13 @@ fn zombie_ai(
                                 );
                             }
                         } else {
+                            // Une morsure qui traverse l'armure peut infecter.
+                            if amount > 0.0
+                                && player.infection <= 0.0
+                                && fastrand::f32() < shared::climate::INFECTION_CHANCE
+                            {
+                                player.infection = 1.0;
+                            }
                             hurt_player(
                                 player_id,
                                 player,
@@ -940,10 +947,12 @@ const REGEN_MIN_THIRST: f32 = 20.0;
 /// si le joueur a mangé et bu. Les anciens mondes, sans lacs, ne donnent pas soif.
 fn player_survival(
     time: Res<Time>,
+    clock: Res<Clock>,
     world: Res<GameWorld>,
     mut lobby: ResMut<Lobby>,
     mut server: Option<ResMut<RenetServer>>,
 ) {
+    use shared::climate::*;
     let dt = time.delta_secs();
     let thirsty = world.generator().water_level().is_some();
     for (id, player) in lobby.players.iter_mut() {
@@ -956,21 +965,68 @@ fn player_survival(
         }
         let hunger_before = player.hunger.ceil();
         let thirst_before = player.thirst.ceil();
+        let temp_before = (player.body_temp * 10.0).round();
+        let felt_before = player.felt.round();
+        let infection_before = player.infection.ceil();
+
+        // Température : l'air autour, les vêtements, puis le corps qui suit lentement.
+        let around = surroundings(&world, player.state.position, clock.0.is_night());
+        let air = ambient(
+            world.generator().biome(
+                player.state.position.x.floor() as i32,
+                player.state.position.z.floor() as i32,
+            ),
+            around,
+        );
+        let (warmth, cooling) = player.inventory.clothing();
+        player.felt = felt(air, warmth, cooling);
+        player.body_temp = shared::climate::step_body(player.body_temp, player.felt, dt);
+
+        if player.infection > 0.0 {
+            player.infection = (player.infection + INFECTION_PER_SEC * dt).min(100.0);
+        }
+
         player.hunger = (player.hunger - HUNGER_PER_SEC * dt).max(0.0);
         if thirsty {
-            player.thirst = (player.thirst - THIRST_PER_SEC * dt).max(0.0);
+            let heat = if player.body_temp > OVERHEATING { 2.0 } else { 1.0 };
+            player.thirst = (player.thirst - THIRST_PER_SEC * heat * dt).max(0.0);
         }
+        let infection_dps = if player.infection >= 100.0 {
+            INFECTION_DPS * 2.0
+        } else if player.infection >= INFECTION_HARMFUL {
+            INFECTION_DPS
+        } else {
+            0.0
+        };
         let deprived = if player.hunger <= 0.0 {
             Some((STARVATION_DPS, "Mort de faim"))
         } else if player.thirst <= 0.0 {
             Some((DEHYDRATION_DPS, "Mort de soif"))
+        } else if player.body_temp < HYPOTHERMIA {
+            Some((EXPOSURE_DPS, "Mort de froid"))
+        } else if player.body_temp > HEATSTROKE {
+            Some((EXPOSURE_DPS, "Terrassé par la chaleur"))
+        } else if infection_dps > 0.0 {
+            Some((infection_dps, "Emporté par l'infection"))
         } else {
             None
+        };
+        let vitals_changed = |p: &crate::net::ConnectedPlayer| {
+            p.hunger.ceil() != hunger_before
+                || p.thirst.ceil() != thirst_before
+                || (p.body_temp * 10.0).round() != temp_before
+                || p.felt.round() != felt_before
+                || p.infection.ceil() != infection_before
         };
         if let Some((dps, cause)) = deprived {
             let since_hit = player.since_hit;
             hurt_player(*id, player, dps * dt, cause, server.as_deref_mut());
             player.since_hit = since_hit + dt;
+            if vitals_changed(player)
+                && let Some(server) = server.as_deref_mut()
+            {
+                send_vitals(server, *id, player);
+            }
             continue;
         }
         player.since_hit += dt;
@@ -979,16 +1035,31 @@ fn player_survival(
             && player.health < MAX_HEALTH
             && player.hunger > REGEN_MIN_HUNGER
             && player.thirst > REGEN_MIN_THIRST
+            && player.infection <= 0.0
         {
             player.health = (player.health + 2.0 * dt).min(MAX_HEALTH);
         }
-        if (player.health.ceil() != health_before
-            || player.hunger.ceil() != hunger_before
-            || player.thirst.ceil() != thirst_before)
+        if (player.health.ceil() != health_before || vitals_changed(player))
             && let Some(server) = server.as_deref_mut()
         {
             send_vitals(server, *id, player);
         }
+    }
+}
+
+/// Ce qui réchauffe ou refroidit un joueur à cette position.
+fn surroundings(world: &GameWorld, position: Vec3, night: bool) -> shared::climate::Surroundings {
+    let feet = block_containing(position + Vec3::Y * 0.1);
+    let head = feet + IVec3::Y;
+    let near_fire = (-3..=3)
+        .any(|dx| (-2..=2).any(|dy| (-3..=3).any(|dz| world.block(feet + IVec3::new(dx, dy, dz)) == Block::Campfire)));
+    let sheltered = (1..=6).any(|dy| world.block(head + IVec3::Y * dy).is_opaque());
+    let in_water = world.block(feet) == Block::Water;
+    shared::climate::Surroundings {
+        night,
+        near_fire,
+        sheltered,
+        in_water,
     }
 }
 
@@ -1196,5 +1267,101 @@ mod tests {
         // Première nuit : ils restent bloqués à taper dedans.
         let (mut app, wall_z) = arena(1, 12);
         assert_eq!(crossed_after(&mut app, wall_z, 20.0), 0);
+    }
+}
+
+#[cfg(test)]
+mod climate_tests {
+    use shared::config::WorldConfig;
+    use shared::daytime::GameTime;
+    use shared::item::Item;
+    use shared::world::WorldState;
+    use shared::worldgen::Biome;
+
+    use super::*;
+    use crate::net::ConnectedPlayer;
+
+    /// Un joueur seul, la nuit, à l'air libre dans la neige.
+    fn snowy_night() -> (App, Vec3) {
+        let world = GameWorld(WorldState::new(WorldConfig::default()));
+        let g = world.generator();
+        let size = g.config().size_blocks();
+        let (x, z) = (8..size - 8)
+            .step_by(4)
+            .flat_map(|x| (8..size - 8).step_by(4).map(move |z| (x, z)))
+            .find(|(x, z)| g.biome(*x, *z) == Biome::Snow)
+            .expect("le monde par défaut a de la neige");
+        let position = Vec3::new(x as f32 + 0.5, g.surface_height(x, z) as f32 + 1.0, z as f32 + 0.5);
+        let mut player = ConnectedPlayer::new(position);
+        player.name = "Alice".into();
+        let mut lobby = Lobby::default();
+        lobby.players.insert(1, player);
+        let mut app = App::new();
+        app.insert_resource(world)
+            .insert_resource(lobby)
+            .insert_resource(Clock(GameTime { day: 1, phase: 0.8 }))
+            .init_resource::<Time>()
+            .add_systems(Update, player_survival);
+        (app, position)
+    }
+
+    fn run(app: &mut App, secs: f32) -> ConnectedPlayer {
+        for _ in 0..(secs * 10.0) as usize {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f32(0.1));
+            app.update();
+        }
+        app.world().resource::<Lobby>().players[&1].clone()
+    }
+
+    #[test]
+    fn a_snowy_night_freezes_an_unprotected_player() {
+        let (mut app, _) = snowy_night();
+        let player = run(&mut app, 90.0);
+        assert!(
+            player.body_temp < shared::climate::HYPOTHERMIA,
+            "{} °C",
+            player.body_temp
+        );
+        assert!(player.health < MAX_HEALTH);
+    }
+
+    #[test]
+    fn a_campfire_keeps_the_cold_away() {
+        let (mut app, position) = snowy_night();
+        let fire = block_containing(position) + IVec3::new(2, 0, 0);
+        app.world_mut()
+            .resource_mut::<GameWorld>()
+            .set_block(fire, Block::Campfire);
+        let player = run(&mut app, 90.0);
+        assert_eq!(player.body_temp, shared::climate::BODY_NORMAL);
+    }
+
+    #[test]
+    fn infection_spreads_blocks_healing_and_then_hurts() {
+        let (mut app, position) = snowy_night();
+        app.insert_resource(Clock(GameTime { day: 1, phase: 0.1 }));
+        {
+            let mut lobby = app.world_mut().resource_mut::<Lobby>();
+            let player = lobby.players.get_mut(&1).unwrap();
+            player.inventory.add(Item::FurCoat, 1);
+            player.health = 50.0;
+            player.infection = 55.0;
+            player.since_hit = 100.0;
+        }
+        // Un abri contre le froid de la journée enneigée.
+        app.world_mut()
+            .resource_mut::<GameWorld>()
+            .set_block(block_containing(position) + IVec3::new(0, 4, 0), Block::Stone);
+        let player = run(&mut app, 30.0);
+        assert!(player.health <= 50.0, "pas de guérison quand on est infecté");
+        assert!(player.infection > 58.0);
+        let player = run(&mut app, 60.0);
+        assert!(
+            player.health < 49.0,
+            "l'infection avancée ronge la vie : {}",
+            player.health
+        );
     }
 }

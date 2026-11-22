@@ -258,6 +258,7 @@ fn animal_deaths(
             && let Some(player) = lobby.players.get_mut(&id)
         {
             player.inventory.add(Item::RawMeat, fastrand::u32(min..=max));
+            player.inventory.add(Item::Hide, 1);
             if let Some(server) = server.as_deref_mut() {
                 send_inventory(server, id, player);
             }
