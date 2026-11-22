@@ -1,0 +1,11 @@
+[package]
+name = "shared"
+description = "Code commun au client et au serveur : blocs, chunks, génération du monde, protocole."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fastnoise-lite.workspace = true
+serde.workspace = true

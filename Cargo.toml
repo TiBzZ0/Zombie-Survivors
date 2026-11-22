@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = ["crates/shared", "crates/server", "crates/client"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+shared = { path = "crates/shared" }
+server = { path = "crates/server" }
+bevy = { version = "0.20", default-features = false }
+fastnoise-lite = "1.1"
+serde = { version = "1", features = ["derive"] }
+
+# Compile les dépendances optimisées même en debug : Bevy est inutilisable sans.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

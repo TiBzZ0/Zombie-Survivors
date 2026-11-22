@@ -1,0 +1,17 @@
+# Lancement sur ton serveur : docker compose up -d
+services:
+  server:
+    build: .
+    # Une fois la CI en place, préférer l'image publiée :
+    # image: ghcr.io/tibzz0/zombie-survivors-server:latest
+    restart: unless-stopped
+    ports:
+      - "7777:7777/udp"
+    environment:
+      MAX_PLAYERS: "8"
+      WORLD_SEED: "42"
+      WORLD_SIZE_CHUNKS: "32"
+    volumes:
+      - ./data:/data
+    # Laisse au serveur le temps de sauvegarder après un docker stop.
+    stop_grace_period: 30s
