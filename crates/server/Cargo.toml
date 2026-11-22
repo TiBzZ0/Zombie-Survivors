@@ -8,5 +8,6 @@ publish.workspace = true
 
 [dependencies]
 shared.workspace = true
+bevy_renet.workspace = true
 bevy = { workspace = true, features = ["std", "bevy_log", "multi_threaded"] }
 ctrlc = { version = "3", features = ["termination"] }

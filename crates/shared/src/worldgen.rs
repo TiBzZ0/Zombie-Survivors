@@ -58,12 +58,12 @@ impl WorldGenerator {
         if x < 0 || z < 0 || x >= size || z >= size || y < 0 || y >= self.config.height_blocks() {
             return Block::Air;
         }
-        // Le fond de la carte est indestructible en pratique : pas de grotte sous y = 2.
+        // Pas de grotte sous y = 2 (le fond de la carte), ni juste sous la surface (le sol reste propre).
         let surface = self.surface_height(x, z);
         if y >= surface {
             return Block::Air;
         }
-        if y > 2 && self.caves.get_noise_3d(x as f32, y as f32, z as f32) > 0.6 {
+        if y > 2 && y < surface - 4 && self.caves.get_noise_3d(x as f32, y as f32, z as f32) > 0.6 {
             return Block::Air;
         }
         let depth = surface - 1 - y;
