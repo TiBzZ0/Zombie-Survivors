@@ -14,6 +14,7 @@ use shared::raycast::raycast;
 
 use crate::AppState;
 use crate::net::{ClientWorld, NetEvent, Session, send_reliable, send_state};
+use crate::zombies::ZombieView;
 
 const WALK_SPEED: f32 = 4.5;
 const SPRINT_SPEED: f32 = 7.0;
@@ -21,6 +22,10 @@ const JUMP_SPEED: f32 = 8.5;
 const MOUSE_SENSITIVITY: f32 = 0.0025;
 /// Délai entre deux actions sur les blocs quand le bouton reste enfoncé.
 const ACTION_COOLDOWN: f32 = 0.22;
+/// Délai entre deux coups portés à un zombie (le serveur applique le même).
+const ATTACK_COOLDOWN: f32 = 0.4;
+/// Portée d'un coup de mêlée.
+const MELEE_REACH: f32 = 3.0;
 
 /// Blocs posables, dans l'ordre des touches 1 à 7.
 pub const HOTBAR: [Block; 7] = [
@@ -61,6 +66,11 @@ impl Plugin for PlayerPlugin {
 /// État du joueur local.
 #[derive(Resource, Debug, Default)]
 pub struct LocalPlayer {
+    pub health: f32,
+    /// Cause de la mort tant que le joueur n'a pas réapparu.
+    pub dead: Option<String>,
+    /// Intensité de l'effet « touché » à l'écran (0 à 1).
+    pub hurt_flash: f32,
     pub position: Vec3,
     pub velocity: Vec3,
     pub yaw: f32,
@@ -89,6 +99,7 @@ impl LocalPlayer {
 
 fn spawn_player(mut player: ResMut<LocalPlayer>, session: Res<Session>) {
     *player = LocalPlayer {
+        health: 100.0,
         position: session.spawn,
         yaw: -std::f32::consts::FRAC_PI_4,
         ..default()
@@ -114,17 +125,12 @@ fn grab_cursor(
     }
 }
 
-fn look(
-    motion: Res<AccumulatedMouseMotion>,
-    cursor: Single<&CursorOptions>,
-    mut player: ResMut<LocalPlayer>,
-) {
+fn look(motion: Res<AccumulatedMouseMotion>, cursor: Single<&CursorOptions>, mut player: ResMut<LocalPlayer>) {
     if !cursor_locked(&cursor) {
         return;
     }
     player.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
-    player.pitch = (player.pitch - motion.delta.y * MOUSE_SENSITIVITY)
-        .clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
+    player.pitch = (player.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
 }
 
 fn select_block(keys: Res<ButtonInput<KeyCode>>, mut player: ResMut<LocalPlayer>) {
@@ -144,12 +150,38 @@ fn select_block(keys: Res<ButtonInput<KeyCode>>, mut player: ResMut<LocalPlayer>
     }
 }
 
-fn apply_teleports(mut events: MessageReader<NetEvent>, mut player: ResMut<LocalPlayer>) {
+fn apply_teleports(
+    mut events: MessageReader<NetEvent>,
+    mut player: ResMut<LocalPlayer>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut client: ResMut<RenetClient>,
+    time: Res<Time>,
+) {
+    player.hurt_flash = (player.hurt_flash - time.delta_secs() * 2.0).max(0.0);
     for event in events.read() {
-        if let NetEvent::Teleport(position) = event {
-            player.position = *position;
-            player.velocity = Vec3::ZERO;
+        match event {
+            NetEvent::Teleport(position) => {
+                player.position = *position;
+                player.velocity = Vec3::ZERO;
+            }
+            NetEvent::Health(health) => {
+                if *health < player.health {
+                    player.hurt_flash = 1.0;
+                }
+                player.health = *health;
+                if *health > 0.0 {
+                    player.dead = None;
+                }
+            }
+            NetEvent::Died(cause) => {
+                player.dead = Some(cause.clone());
+                player.health = 0.0;
+            }
+            _ => {}
         }
+    }
+    if player.dead.is_some() && keys.just_pressed(KeyCode::Enter) {
+        send_reliable(&mut client, &ClientMessage::Respawn);
     }
 }
 
@@ -159,6 +191,9 @@ fn move_player(
     world: Res<ClientWorld>,
     mut player: ResMut<LocalPlayer>,
 ) {
+    if player.dead.is_some() {
+        return;
+    }
     // Les touches sont physiques : KeyW est la touche Z sur un clavier AZERTY.
     let mut wish = Vec3::ZERO;
     if keys.pressed(KeyCode::KeyW) {
@@ -214,16 +249,30 @@ fn interact(
     mut player: ResMut<LocalPlayer>,
     mut client: ResMut<RenetClient>,
     mut changes: MessageWriter<NetEvent>,
+    zombies: Query<(&ZombieView, &Transform)>,
 ) {
-    player.target = raycast(player.eye(), player.look_direction(), REACH, |p| {
-        world.is_solid(p)
-    });
+    player.target = raycast(player.eye(), player.look_direction(), REACH, |p| world.is_solid(p));
     player.cooldown -= time.delta_secs();
-    if !cursor_locked(&cursor) || player.cooldown > 0.0 {
+    if !cursor_locked(&cursor) || player.cooldown > 0.0 || player.dead.is_some() {
         return;
     }
-    let Some(hit) = player.target else { return };
 
+    // Un zombie visé passe avant les blocs.
+    if mouse.pressed(MouseButton::Left) {
+        let block_dist = player
+            .target
+            .map(|h| (h.block.as_vec3() + Vec3::splat(0.5)).distance(player.eye()))
+            .unwrap_or(f32::MAX);
+        if let Some((id, dist)) = aimed_zombie(player.eye(), player.look_direction(), &zombies)
+            && dist < block_dist
+        {
+            send_reliable(&mut client, &ClientMessage::Attack { zombie: id });
+            player.cooldown = ATTACK_COOLDOWN;
+            return;
+        }
+    }
+
+    let Some(hit) = player.target else { return };
     if mouse.pressed(MouseButton::Left) {
         if hit.block.y > 0 {
             // Appliqué tout de suite pour la réactivité ; le serveur corrige s'il refuse.
@@ -250,11 +299,7 @@ fn update_camera(player: Res<LocalPlayer>, mut camera: Single<&mut Transform, Wi
     camera.rotation = Quat::from_euler(EulerRot::YXZ, player.yaw, player.pitch, 0.0);
 }
 
-fn send_position(
-    mut player: ResMut<LocalPlayer>,
-    mut client: ResMut<RenetClient>,
-    time: Res<Time>,
-) {
+fn send_position(mut player: ResMut<LocalPlayer>, mut client: ResMut<RenetClient>, time: Res<Time>) {
     let state = PlayerState {
         position: player.position,
         yaw: player.yaw,
@@ -263,4 +308,45 @@ fn send_position(
     let mut last = player.last_sent;
     send_state(&mut client, state, &time, &mut last);
     player.last_sent = last;
+}
+
+/// Zombie visé (intersection rayon / boîte) à portée de mêlée, avec sa distance.
+fn aimed_zombie(eye: Vec3, dir: Vec3, zombies: &Query<(&ZombieView, &Transform)>) -> Option<(u32, f32)> {
+    let mut best: Option<(u32, f32)> = None;
+    for (view, transform) in zombies.iter() {
+        let size = view.kind.stats().size;
+        let min = transform.translation - Vec3::new(size.half_width + 0.1, 0.0, size.half_width + 0.1);
+        let max = transform.translation + Vec3::new(size.half_width + 0.1, size.height, size.half_width + 0.1);
+        if let Some(t) = ray_box(eye, dir, min, max)
+            && t <= MELEE_REACH
+            && best.is_none_or(|(_, d)| t < d)
+        {
+            best = Some((view.id, t));
+        }
+    }
+    best
+}
+
+/// Distance d'entrée d'un rayon dans une boîte alignée, s'il la touche.
+fn ray_box(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let inv = dir.recip();
+    let t1 = (min - origin) * inv;
+    let t2 = (max - origin) * inv;
+    let near = t1.min(t2).max_element();
+    let far = t1.max(t2).min_element();
+    (far >= near.max(0.0)).then_some(near.max(0.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ray_hits_box_in_front_only() {
+        let min = Vec3::new(2.0, 0.0, -0.5);
+        let max = Vec3::new(3.0, 2.0, 0.5);
+        assert_eq!(ray_box(Vec3::new(0.0, 1.0, 0.0), Vec3::X, min, max), Some(2.0));
+        assert_eq!(ray_box(Vec3::new(0.0, 1.0, 0.0), Vec3::NEG_X, min, max), None);
+        assert_eq!(ray_box(Vec3::new(0.0, 5.0, 0.0), Vec3::X, min, max), None);
+    }
 }

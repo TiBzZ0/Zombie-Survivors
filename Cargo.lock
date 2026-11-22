@@ -5171,6 +5171,7 @@ dependencies = [
  "bevy",
  "bevy_renet",
  "ctrlc",
+ "fastrand",
  "shared",
 ]
 

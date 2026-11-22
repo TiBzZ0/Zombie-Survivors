@@ -22,9 +22,7 @@ struct TestClient {
 impl TestClient {
     fn connect(port: u16, id: u64, name: &str) -> Self {
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap();
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
         let server_addr: SocketAddr = ([127, 0, 0, 1], port).into();
         let auth = ClientAuthentication::Unsecure {
             client_id: id,
@@ -53,8 +51,7 @@ impl TestClient {
         self.transport.0.update(dt, &mut self.client).unwrap();
         for channel in [2u8, 0u8] {
             while let Some(bytes) = self.client.receive_message(channel) {
-                self.received
-                    .push(decode(&bytes).expect("message serveur illisible"));
+                self.received.push(decode(&bytes).expect("message serveur illisible"));
             }
         }
         let _ = self.transport.0.send_packets(&mut self.client);
@@ -75,11 +72,7 @@ impl TestClient {
 }
 
 /// Fait tourner les clients jusqu'à ce que la condition soit vraie (ou échoue après 10 s).
-fn pump_until(
-    clients: &mut [&mut TestClient],
-    what: &str,
-    mut done: impl FnMut(&mut [&mut TestClient]) -> bool,
-) {
+fn pump_until(clients: &mut [&mut TestClient], what: &str, mut done: impl FnMut(&mut [&mut TestClient]) -> bool) {
     let start = Instant::now();
     while !done(clients) {
         assert!(
@@ -119,14 +112,10 @@ fn two_players_share_the_world() {
         .unwrap();
 
     let mut bob = TestClient::connect(port, 2, "Bob");
-    pump_until(
-        &mut [&mut alice, &mut bob],
-        "arrivée de Bob annoncée à Alice",
-        |c| {
-            c[0].find(|m| matches!(m, ServerMessage::PlayerJoined { id: 2, .. }).then_some(()))
-                .is_some()
-        },
-    );
+    pump_until(&mut [&mut alice, &mut bob], "arrivée de Bob annoncée à Alice", |c| {
+        c[0].find(|m| matches!(m, ServerMessage::PlayerJoined { id: 2, .. }).then_some(()))
+            .is_some()
+    });
 
     // Bob voit Alice dans la liste des joueurs connus.
     assert!(
@@ -137,20 +126,13 @@ fn two_players_share_the_world() {
     // Alice casse le bloc sous ses pieds : Bob doit recevoir le changement.
     let below = (spawn - Vec3::Y).floor().as_ivec3();
     alice.send(&ClientMessage::BreakBlock { pos: below }, true);
-    pump_until(
-        &mut [&mut alice, &mut bob],
-        "bloc cassé reçu par Bob",
-        |c| {
-            c[1].find(|m| match m {
-                ServerMessage::BlockChanged {
-                    pos,
-                    block: Block::Air,
-                } if *pos == below => Some(()),
-                _ => None,
-            })
-            .is_some()
-        },
-    );
+    pump_until(&mut [&mut alice, &mut bob], "bloc cassé reçu par Bob", |c| {
+        c[1].find(|m| match m {
+            ServerMessage::BlockChanged { pos, block: Block::Air } if *pos == below => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
 
     // Bob pose un bloc à portée : Alice le reçoit.
     // Au-dessus de la tête : toujours de l'air au point d'apparition.
@@ -162,65 +144,48 @@ fn two_players_share_the_world() {
         },
         true,
     );
-    pump_until(
-        &mut [&mut alice, &mut bob],
-        "bloc posé reçu par Alice",
-        |c| {
-            c[0].find(|m| match m {
-                ServerMessage::BlockChanged {
-                    pos,
-                    block: Block::Wood,
-                } if *pos == placed => Some(()),
-                _ => None,
-            })
-            .is_some()
-        },
-    );
+    pump_until(&mut [&mut alice, &mut bob], "bloc posé reçu par Alice", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::BlockChanged {
+                pos,
+                block: Block::Wood,
+            } if *pos == placed => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
 
     // Un bloc hors de portée est refusé et le client est corrigé.
     let far = below + IVec3::new(40, 0, 0);
     bob.received.clear();
     bob.send(&ClientMessage::BreakBlock { pos: far }, true);
-    pump_until(
-        &mut [&mut alice, &mut bob],
-        "correction du bloc refusé",
-        |c| {
-            c[1].find(|m| match m {
-                ServerMessage::BlockChanged { pos, block } if *pos == far => {
-                    Some(block.is_solid() || *block == Block::Air)
-                }
-                _ => None,
-            })
-            .is_some()
-        },
-    );
+    pump_until(&mut [&mut alice, &mut bob], "correction du bloc refusé", |c| {
+        c[1].find(|m| match m {
+            ServerMessage::BlockChanged { pos, block } if *pos == far => Some(block.is_solid() || *block == Block::Air),
+            _ => None,
+        })
+        .is_some()
+    });
 
     // La position d'Alice est diffusée à Bob.
     // Même position (forcément libre), mais Alice tourne la tête.
     let moved = spawn;
     bob.received.clear();
-    pump_until(
-        &mut [&mut alice, &mut bob],
-        "position d'Alice reçue par Bob",
-        |c| {
-            c[0].send(
-                &ClientMessage::State(PlayerState {
-                    position: moved,
-                    yaw: 1.0,
-                    pitch: 0.0,
-                }),
-                false,
-            );
-            c[1].find(|m| match m {
-                ServerMessage::Players(list) => list
-                    .iter()
-                    .find(|(id, s)| *id == 1 && s.position == moved)
-                    .map(|_| ()),
-                _ => None,
-            })
-            .is_some()
-        },
-    );
+    pump_until(&mut [&mut alice, &mut bob], "position d'Alice reçue par Bob", |c| {
+        c[0].send(
+            &ClientMessage::State(PlayerState {
+                position: moved,
+                yaw: 1.0,
+                pitch: 0.0,
+            }),
+            false,
+        );
+        c[1].find(|m| match m {
+            ServerMessage::Players(list) => list.iter().find(|(id, s)| *id == 1 && s.position == moved).map(|_| ()),
+            _ => None,
+        })
+        .is_some()
+    });
 
     // Un nouveau venu reçoit les blocs déjà modifiés.
     let mut carol = TestClient::connect(port, 3, "Carol");

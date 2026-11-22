@@ -118,8 +118,7 @@ mod tests {
             seed: 7,
             ..WorldConfig::default()
         });
-        let differs =
-            (0..64).any(|i| a.surface_height(i * 13, i * 7) != b.surface_height(i * 13, i * 7));
+        let differs = (0..64).any(|i| a.surface_height(i * 13, i * 7) != b.surface_height(i * 13, i * 7));
         assert!(differs);
     }
 

@@ -14,8 +14,10 @@ use bevy::prelude::*;
 use shared::TICK_RATE_HZ;
 
 pub mod config;
+pub mod daynight;
 pub mod net;
 pub mod world;
+pub mod zombies;
 
 pub use config::ServerConfig;
 
@@ -30,7 +32,12 @@ impl Plugin for ServerPlugin {
             .insert_resource(Time::<Fixed>::from_hz(TICK_RATE_HZ))
             .init_resource::<TickCount>()
             .init_resource::<ShutdownFlag>()
-            .add_plugins((world::WorldPlugin, net::NetPlugin))
+            .add_plugins((
+                world::WorldPlugin,
+                net::NetPlugin,
+                daynight::DayNightPlugin,
+                zombies::ZombiePlugin,
+            ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)
             .add_systems(Update, report_status)

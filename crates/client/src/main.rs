@@ -6,15 +6,15 @@
 //! - `--connect <adresse:port>` : rejoint directement un serveur ;
 //! - `--name <pseudo>` : choisit le pseudo.
 
-#![allow(clippy::type_complexity)] // courant avec les requêtes Bevy
-
 mod hud;
 mod menu;
 mod meshing;
 mod net;
 mod player;
 mod remote;
+mod sky;
 mod terrain;
+mod zombies;
 
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions};
@@ -99,10 +99,20 @@ fn main() {
             player::PlayerPlugin,
             remote::RemotePlayersPlugin,
             hud::HudPlugin,
+            sky::SkyPlugin,
+            zombies::ZombiesPlugin,
         ))
+        .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
         .add_systems(OnExit(AppState::Playing), release_cursor)
         .run();
+}
+
+/// Police Inter (licence OFL) intégrée au binaire : la police par défaut de Bevy n'a pas les accents.
+const UI_FONT: &[u8] = include_bytes!("../assets/fonts/Inter-SemiBold.otf");
+
+fn install_font(mut fonts: ResMut<Assets<Font>>) {
+    let _ = fonts.insert(AssetId::default(), Font::from_bytes(UI_FONT.to_vec()));
 }
 
 fn setup_scene(mut commands: Commands) {

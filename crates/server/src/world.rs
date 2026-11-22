@@ -46,11 +46,7 @@ pub fn find_spawn(world: &WorldState) -> Vec3 {
         }
     }
     let ground = world.generator().surface_height(center, center);
-    Vec3::new(
-        center as f32 + 0.5,
-        ground as f32 + 1.0,
-        center as f32 + 0.5,
-    )
+    Vec3::new(center as f32 + 0.5, ground as f32 + 1.0, center as f32 + 0.5)
 }
 
 #[cfg(test)]
@@ -68,10 +64,7 @@ mod tests {
             });
             let spawn = find_spawn(&world);
             let below = (spawn - Vec3::Y * 0.5).floor().as_ivec3();
-            assert!(
-                world.is_solid(below),
-                "graine {seed} : pas de sol sous {spawn}"
-            );
+            assert!(world.is_solid(below), "graine {seed} : pas de sol sous {spawn}");
             assert!(!overlaps_solid(spawn, PLAYER_SIZE, &|p| world.is_solid(p)));
         }
     }

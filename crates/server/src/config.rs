@@ -33,17 +33,10 @@ impl ServerConfig {
     }
 
     fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
-        fn parse<T: std::str::FromStr>(
-            key: &str,
-            value: Option<String>,
-            default: T,
-        ) -> Result<T, String> {
+        fn parse<T: std::str::FromStr>(key: &str, value: Option<String>, default: T) -> Result<T, String> {
             match value {
                 None => Ok(default),
-                Some(v) => v
-                    .trim()
-                    .parse()
-                    .map_err(|_| format!("{key} invalide : « {v} »")),
+                Some(v) => v.trim().parse().map_err(|_| format!("{key} invalide : « {v} »")),
             }
         }
         let d = Self::default();
@@ -53,11 +46,7 @@ impl ServerConfig {
             data_dir: get("DATA_DIR").map(PathBuf::from).unwrap_or(d.data_dir),
             world: WorldConfig {
                 seed: parse("WORLD_SEED", get("WORLD_SEED"), d.world.seed)?,
-                size_chunks: parse(
-                    "WORLD_SIZE_CHUNKS",
-                    get("WORLD_SIZE_CHUNKS"),
-                    d.world.size_chunks,
-                )?,
+                size_chunks: parse("WORLD_SIZE_CHUNKS", get("WORLD_SIZE_CHUNKS"), d.world.size_chunks)?,
                 height_chunks: d.world.height_chunks,
             },
         };

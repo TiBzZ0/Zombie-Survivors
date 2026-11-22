@@ -11,22 +11,13 @@ pub struct RayHit {
 }
 
 /// Premier bloc solide le long du rayon, jusqu'à `max_distance`.
-pub fn raycast(
-    origin: Vec3,
-    direction: Vec3,
-    max_distance: f32,
-    solid: impl Fn(IVec3) -> bool,
-) -> Option<RayHit> {
+pub fn raycast(origin: Vec3, direction: Vec3, max_distance: f32, solid: impl Fn(IVec3) -> bool) -> Option<RayHit> {
     let dir = direction.normalize_or_zero();
     if dir == Vec3::ZERO {
         return None;
     }
     let mut block = origin.floor().as_ivec3();
-    let step = IVec3::new(
-        dir.x.signum() as i32,
-        dir.y.signum() as i32,
-        dir.z.signum() as i32,
-    );
+    let step = IVec3::new(dir.x.signum() as i32, dir.y.signum() as i32, dir.z.signum() as i32);
     let t_delta = Vec3::new(
         if dir.x != 0.0 {
             (1.0 / dir.x).abs()
@@ -90,23 +81,14 @@ mod tests {
 
     #[test]
     fn hits_block_straight_ahead() {
-        let hit = raycast(Vec3::new(0.5, 0.5, 0.5), Vec3::X, 10.0, |p| {
-            p == IVec3::new(4, 0, 0)
-        })
-        .unwrap();
+        let hit = raycast(Vec3::new(0.5, 0.5, 0.5), Vec3::X, 10.0, |p| p == IVec3::new(4, 0, 0)).unwrap();
         assert_eq!(hit.block, IVec3::new(4, 0, 0));
         assert_eq!(hit.normal, IVec3::NEG_X);
     }
 
     #[test]
     fn hits_ground_looking_down() {
-        let hit = raycast(
-            Vec3::new(0.5, 11.6, 0.5),
-            Vec3::new(0.3, -1.0, 0.2),
-            6.0,
-            |p| p.y < 10,
-        )
-        .unwrap();
+        let hit = raycast(Vec3::new(0.5, 11.6, 0.5), Vec3::new(0.3, -1.0, 0.2), 6.0, |p| p.y < 10).unwrap();
         assert_eq!(hit.block.y, 9);
         assert_eq!(hit.normal, IVec3::Y);
     }

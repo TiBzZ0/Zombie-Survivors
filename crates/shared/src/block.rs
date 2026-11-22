@@ -37,6 +37,20 @@ impl Block {
         }
     }
 
+    /// Nom affiché au joueur.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Block::Air => "Air",
+            Block::Grass => "Herbe",
+            Block::Dirt => "Terre",
+            Block::Stone => "Pierre",
+            Block::Sand => "Sable",
+            Block::Wood => "Bois",
+            Block::Leaves => "Feuilles",
+            Block::IronOre => "Minerai de fer",
+        }
+    }
+
     /// Points de vie du bloc, utilisés par la collecte et par les zombies qui cassent les murs.
     pub const fn max_health(self) -> u16 {
         match self {

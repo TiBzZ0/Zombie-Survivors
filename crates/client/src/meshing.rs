@@ -23,30 +23,12 @@ impl MeshData {
 
 /// Les six directions : normale, puis les quatre coins de la face dans l'ordre anti-horaire vu de l'extérieur.
 const FACES: [([i32; 3], [[f32; 3]; 4]); 6] = [
-    (
-        [1, 0, 0],
-        [[1., 0., 1.], [1., 0., 0.], [1., 1., 0.], [1., 1., 1.]],
-    ),
-    (
-        [-1, 0, 0],
-        [[0., 0., 0.], [0., 0., 1.], [0., 1., 1.], [0., 1., 0.]],
-    ),
-    (
-        [0, 1, 0],
-        [[0., 1., 1.], [1., 1., 1.], [1., 1., 0.], [0., 1., 0.]],
-    ),
-    (
-        [0, -1, 0],
-        [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],
-    ),
-    (
-        [0, 0, 1],
-        [[0., 0., 1.], [1., 0., 1.], [1., 1., 1.], [0., 1., 1.]],
-    ),
-    (
-        [0, 0, -1],
-        [[1., 0., 0.], [0., 0., 0.], [0., 1., 0.], [1., 1., 0.]],
-    ),
+    ([1, 0, 0], [[1., 0., 1.], [1., 0., 0.], [1., 1., 0.], [1., 1., 1.]]),
+    ([-1, 0, 0], [[0., 0., 0.], [0., 0., 1.], [0., 1., 1.], [0., 1., 0.]]),
+    ([0, 1, 0], [[0., 1., 1.], [1., 1., 1.], [1., 1., 0.], [0., 1., 0.]]),
+    ([0, -1, 0], [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]]),
+    ([0, 0, 1], [[0., 0., 1.], [1., 0., 1.], [1., 1., 1.], [0., 1., 1.]]),
+    ([0, 0, -1], [[1., 0., 0.], [0., 0., 0.], [0., 1., 0.], [1., 1., 0.]]),
 ];
 
 /// Construit le maillage d'un chunk.
@@ -85,11 +67,9 @@ pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> 
                     };
                     let base = mesh.positions.len() as u32;
                     for c in corners {
-                        mesh.positions
-                            .push([x as f32 + c[0], y as f32 + c[1], z as f32 + c[2]]);
+                        mesh.positions.push([x as f32 + c[0], y as f32 + c[1], z as f32 + c[2]]);
                         mesh.normals.push(normal.map(|n| n as f32));
-                        mesh.colors
-                            .push(srgb_to_linear([r * shade, g * shade, b * shade]));
+                        mesh.colors.push(srgb_to_linear([r * shade, g * shade, b * shade]));
                     }
                     mesh.indices
                         .extend([base, base + 1, base + 2, base, base + 2, base + 3]);

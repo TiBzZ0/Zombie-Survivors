@@ -4,12 +4,12 @@
 //! aux joueurs qui arrivent, et ce qu'il sauvegarde sur le disque.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bevy_math::{IVec3, Vec3};
 
 use crate::block::Block;
-use crate::chunk::{CHUNK_SIZE, ChunkPos};
+use crate::chunk::{CHUNK_SIZE, Chunk, ChunkPos};
 use crate::config::WorldConfig;
 use crate::worldgen::WorldGenerator;
 
@@ -30,6 +30,8 @@ pub fn block_containing(point: Vec3) -> BlockPos {
 pub struct WorldState {
     generator: Arc<WorldGenerator>,
     edits: HashMap<BlockPos, Block>,
+    /// Chunks déjà générés (modifications comprises), pour des lectures rapides.
+    cache: Mutex<HashMap<ChunkPos, Arc<Chunk>>>,
 }
 
 impl WorldState {
@@ -37,6 +39,7 @@ impl WorldState {
         Self {
             generator: Arc::new(WorldGenerator::new(config)),
             edits: HashMap::new(),
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -61,10 +64,31 @@ impl WorldState {
     }
 
     pub fn block(&self, pos: BlockPos) -> Block {
-        match self.edits.get(&pos) {
-            Some(block) => *block,
-            None => self.generator.block_at(pos.x, pos.y, pos.z),
+        if !self.in_bounds(pos) {
+            return Block::Air;
         }
+        let chunk = self.chunk(chunk_of(pos));
+        let local = pos - IVec3::from(chunk_of(pos).origin());
+        chunk.get(local.x as usize, local.y as usize, local.z as usize)
+    }
+
+    /// Le chunk avec ses modifications, généré et mis en cache au premier accès.
+    pub fn chunk(&self, pos: ChunkPos) -> Arc<Chunk> {
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache
+            .entry(pos)
+            .or_insert_with(|| {
+                let mut chunk = self.generator.generate_chunk(pos);
+                let origin = IVec3::from(pos.origin());
+                for (p, b) in &self.edits {
+                    if chunk_of(*p) == pos {
+                        let l = *p - origin;
+                        chunk.set(l.x as usize, l.y as usize, l.z as usize, *b);
+                    }
+                }
+                Arc::new(chunk)
+            })
+            .clone()
     }
 
     pub fn is_solid(&self, pos: BlockPos) -> bool {
@@ -80,6 +104,12 @@ impl WorldState {
             self.edits.remove(&pos);
         } else {
             self.edits.insert(pos, block);
+        }
+        let cp = chunk_of(pos);
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(chunk) = cache.get_mut(&cp) {
+            let l = pos - IVec3::from(cp.origin());
+            Arc::make_mut(chunk).set(l.x as usize, l.y as usize, l.z as usize, block);
         }
         true
     }
@@ -98,14 +128,7 @@ impl WorldState {
     /// Chunks dont le maillage change quand ce bloc change (le sien, plus ses voisins s'il est au bord).
     pub fn chunks_touched_by(pos: BlockPos) -> Vec<ChunkPos> {
         let mut out = vec![chunk_of(pos)];
-        for offset in [
-            IVec3::X,
-            IVec3::NEG_X,
-            IVec3::Y,
-            IVec3::NEG_Y,
-            IVec3::Z,
-            IVec3::NEG_Z,
-        ] {
+        for offset in [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z] {
             let c = chunk_of(pos + offset);
             if !out.contains(&c) {
                 out.push(c);
@@ -145,9 +168,6 @@ mod tests {
         let touched = WorldState::chunks_touched_by(IVec3::new(32, 40, 5));
         assert!(touched.contains(&ChunkPos::new(1, 1, 0)));
         assert!(touched.contains(&ChunkPos::new(0, 1, 0)));
-        assert_eq!(
-            WorldState::chunks_touched_by(IVec3::new(40, 40, 40)).len(),
-            1
-        );
+        assert_eq!(WorldState::chunks_touched_by(IVec3::new(40, 40, 40)).len(), 1);
     }
 }

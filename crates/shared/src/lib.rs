@@ -7,11 +7,14 @@
 pub mod block;
 pub mod chunk;
 pub mod config;
+pub mod daytime;
+pub mod pathfinding;
 pub mod physics;
 pub mod protocol;
 pub mod raycast;
 pub mod world;
 pub mod worldgen;
+pub mod zombie;
 
 /// Fréquence de simulation du serveur, en ticks par seconde.
 pub const TICK_RATE_HZ: f64 = 30.0;

@@ -8,9 +8,8 @@ use bevy_renet::netcode::{ClientAuthentication, NetcodeClientPlugin, NetcodeClie
 use bevy_renet::renet::{ConnectionConfig, DefaultChannel};
 use bevy_renet::{RenetClient, RenetClientPlugin, client_connected};
 use server::{LocalServer, ServerConfig};
-use shared::protocol::{
-    ClientMessage, PROTOCOL_ID, PlayerId, PlayerState, ServerMessage, decode, encode,
-};
+use shared::daytime::GameTime;
+use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerId, PlayerState, ServerMessage, ZombieState, decode, encode};
 use shared::world::WorldState;
 
 use crate::{AppState, LaunchOptions, MenuNotice};
@@ -66,6 +65,11 @@ pub enum NetEvent {
     Players(Vec<(PlayerId, PlayerState)>),
     Teleport(Vec3),
     Chat(String),
+    Zombies(Vec<ZombieState>),
+    Time { time: GameTime, zombies_alive: u32 },
+    Health(f32),
+    Died(String),
+    ZombieKilled(u32),
 }
 
 fn fail(commands: &mut Commands, next: &mut NextState<AppState>, message: String) {
@@ -95,11 +99,7 @@ fn start_connection(
         match server::spawn_local(config) {
             Ok(local) => commands.insert_resource(HostedServer(local)),
             Err(error) => {
-                return fail(
-                    &mut commands,
-                    &mut next,
-                    format!("Serveur local impossible : {error}"),
-                );
+                return fail(&mut commands, &mut next, format!("Serveur local impossible : {error}"));
             }
         }
         info!("Partie locale : les joueurs du réseau local peuvent rejoindre sur le port {port}");
@@ -125,11 +125,7 @@ fn start_connection(
     let socket = match UdpSocket::bind(bind) {
         Ok(socket) => socket,
         Err(error) => {
-            return fail(
-                &mut commands,
-                &mut next,
-                format!("Réseau indisponible : {error}"),
-            );
+            return fail(&mut commands, &mut next, format!("Réseau indisponible : {error}"));
         }
     };
     let now = SystemTime::now()
@@ -155,11 +151,7 @@ fn start_connection(
             commands.insert_resource(ConnectStarted(time.elapsed_secs()));
             info!("Connexion à {server_addr}…");
         }
-        Err(error) => fail(
-            &mut commands,
-            &mut next,
-            format!("Connexion impossible : {error}"),
-        ),
+        Err(error) => fail(&mut commands, &mut next, format!("Connexion impossible : {error}")),
     }
 }
 
@@ -197,7 +189,6 @@ fn detect_disconnect(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn receive_messages(
     mut commands: Commands,
     mut client: ResMut<RenetClient>,
@@ -218,17 +209,10 @@ fn receive_messages(
             None => world.as_deref_mut().map(|w| &mut w.0),
         };
         match message {
-            ServerMessage::Welcome {
-                your_id,
-                world,
-                spawn,
-            } => {
+            ServerMessage::Welcome { your_id, world, spawn } => {
                 info!("Connecté en tant que joueur {your_id}");
                 fresh_world = Some(WorldState::new(world));
-                commands.insert_resource(Session {
-                    my_id: your_id,
-                    spawn,
-                });
+                commands.insert_resource(Session { my_id: your_id, spawn });
                 commands.remove_resource::<ConnectStarted>();
                 if *state.get() == AppState::Connecting {
                     next.set(AppState::Playing);
@@ -263,15 +247,33 @@ fn receive_messages(
             ServerMessage::Chat { from, text } => {
                 events.write(NetEvent::Chat(format!("{from} : {text}")));
             }
-            ServerMessage::Players(_) => {}
+            ServerMessage::Time { time, zombies_alive } => {
+                events.write(NetEvent::Time { time, zombies_alive });
+            }
+            ServerMessage::Health { health } => {
+                events.write(NetEvent::Health(health));
+            }
+            ServerMessage::Died { cause } => {
+                events.write(NetEvent::Died(cause));
+            }
+            ServerMessage::ZombieKilled { id, .. } => {
+                events.write(NetEvent::ZombieKilled(id));
+            }
+            ServerMessage::Players(_) | ServerMessage::Zombies(_) => {}
         }
     }
     if let Some(world) = fresh_world {
         commands.insert_resource(ClientWorld(world));
     }
     while let Some(bytes) = client.receive_message(DefaultChannel::Unreliable) {
-        if let Some(ServerMessage::Players(players)) = decode::<ServerMessage>(&bytes) {
-            events.write(NetEvent::Players(players));
+        match decode::<ServerMessage>(&bytes) {
+            Some(ServerMessage::Players(players)) => {
+                events.write(NetEvent::Players(players));
+            }
+            Some(ServerMessage::Zombies(zombies)) => {
+                events.write(NetEvent::Zombies(zombies));
+            }
+            _ => {}
         }
     }
 }
@@ -286,10 +288,7 @@ pub fn send_state(client: &mut RenetClient, state: PlayerState, time: &Time, las
     let now = time.elapsed_secs_f64();
     if now - *last_sent >= 1.0 / STATE_SEND_HZ {
         *last_sent = now;
-        client.send_message(
-            DefaultChannel::Unreliable,
-            encode(&ClientMessage::State(state)),
-        );
+        client.send_message(DefaultChannel::Unreliable, encode(&ClientMessage::State(state)));
     }
 }
 
