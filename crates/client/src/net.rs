@@ -131,6 +131,11 @@ pub enum NetEvent {
         pos: Vec3,
         radius: f32,
     },
+    /// Une construction s'est effondrée.
+    Collapse {
+        pos: Vec3,
+        blocks: u16,
+    },
     Acid {
         origin: Vec3,
         end: Vec3,
@@ -414,6 +419,9 @@ fn receive_messages(
             }
             ServerMessage::Explosion { pos, radius } => {
                 events.write(NetEvent::Explosion { pos, radius });
+            }
+            ServerMessage::Collapse { pos, blocks } => {
+                events.write(NetEvent::Collapse { pos, blocks });
             }
             ServerMessage::Power(running) => {
                 events.write(NetEvent::Power(running));

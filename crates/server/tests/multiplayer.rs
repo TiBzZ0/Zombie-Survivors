@@ -76,6 +76,21 @@ impl TestClient {
     }
 }
 
+/// Cases d'air posées sur le sol naturel autour des pieds, à deux blocs de distance.
+fn ground_spots(world: &WorldState, feet: IVec3) -> Vec<IVec3> {
+    let mut spots = Vec::new();
+    for (dx, dz) in [(2, 0), (-2, 0), (0, 2), (0, -2), (2, 1), (-2, 1), (1, 2), (1, -2)] {
+        for dy in -1..=2 {
+            let p = feet + IVec3::new(dx, dy, dz);
+            if !world.is_solid(p) && !world.block(p).is_water() && world.is_solid(p - IVec3::Y) {
+                spots.push(p);
+                break;
+            }
+        }
+    }
+    spots
+}
+
 /// Fait tourner les clients jusqu'à ce que la condition soit vraie (ou échoue après 10 s).
 fn pump_until(clients: &mut [&mut TestClient], what: &str, mut done: impl FnMut(&mut [&mut TestClient]) -> bool) {
     let start = Instant::now();
@@ -180,7 +195,8 @@ fn two_players_share_the_world() {
     };
 
     // Bob n'a pas ce bloc : il ne peut pas le poser.
-    let placed = below + IVec3::new(1, 4, 0);
+    // Une case d'air posée sur le sol naturel (un bloc en l'air ne tiendrait pas), à l'écart des joueurs.
+    let placed = ground_spots(&WorldState::new(WorldConfig::default()), below + IVec3::Y)[0];
     bob.received.clear();
     bob.send(
         &ClientMessage::PlaceBlock {
@@ -602,12 +618,7 @@ fn doors_chests_and_chat() {
 
     // Deux cases d'air au-dessus de la tête de Fay, à portée.
     let feet = spawn.floor().as_ivec3();
-    let spots: Vec<IVec3> = [(1, 3, 0), (-1, 3, 0), (0, 3, 1), (0, 3, -1), (1, 3, 1)]
-        .into_iter()
-        .map(|(x, y, z)| feet + IVec3::new(x, y, z))
-        .filter(|p| !world.is_solid(*p))
-        .take(2)
-        .collect();
+    let spots = ground_spots(&world, feet);
     let (door, chest) = (spots[0], spots[1]);
     for (pos, block) in [(door, Block::Door), (chest, Block::Chest)] {
         fay.send(&ClientMessage::PlaceBlock { pos, block }, true);

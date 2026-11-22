@@ -34,6 +34,8 @@ pub struct WorldState {
     cache: Mutex<HashMap<ChunkPos, Arc<Chunk>>>,
     /// Blocs changés depuis le dernier `take_changes`, si le suivi est activé (serveur).
     changes: Option<Vec<BlockPos>>,
+    /// Blocs porteurs disparus depuis le dernier `take_removals`, si le suivi est activé.
+    removals: Option<Vec<BlockPos>>,
 }
 
 impl WorldState {
@@ -43,6 +45,7 @@ impl WorldState {
             edits: HashMap::new(),
             cache: Mutex::new(HashMap::new()),
             changes: None,
+            removals: None,
         }
     }
 
@@ -54,6 +57,16 @@ impl WorldState {
     /// Blocs changés depuis le dernier appel (vide si le suivi n'est pas activé).
     pub fn take_changes(&mut self) -> Vec<BlockPos> {
         self.changes.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// Active le suivi des blocs porteurs disparus (lus avec `take_removals`).
+    pub fn track_removals(&mut self) {
+        self.removals.get_or_insert_with(Vec::new);
+    }
+
+    /// Blocs porteurs disparus depuis le dernier appel (cassés, explosés, portes ouvertes...).
+    pub fn take_removals(&mut self) -> Vec<BlockPos> {
+        self.removals.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     pub fn config(&self) -> &WorldConfig {
@@ -115,6 +128,13 @@ impl WorldState {
         }
         if let Some(changes) = self.changes.as_mut() {
             changes.push(pos);
+        }
+        if self.removals.is_some()
+            && crate::structure::bears_load(self.block(pos))
+            && !crate::structure::bears_load(block)
+            && let Some(removals) = self.removals.as_mut()
+        {
+            removals.push(pos);
         }
         if self.generator.block_at(pos.x, pos.y, pos.z) == block {
             self.edits.remove(&pos);

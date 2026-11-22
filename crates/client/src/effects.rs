@@ -68,6 +68,12 @@ enum Blast {
         radius: f32,
         age: f32,
     },
+    /// Nuage de poussière d'un effondrement.
+    Dust {
+        pos: Vec3,
+        radius: f32,
+        age: f32,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -104,7 +110,7 @@ fn collect_shots(
                     .enumerate()
                     .filter_map(|(i, b)| match b {
                         Blast::Flying { pos: p, .. } => Some((i, p.distance(*pos))),
-                        Blast::Boom { .. } => None,
+                        Blast::Boom { .. } | Blast::Dust { .. } => None,
                     })
                     .min_by(|a, b| a.1.total_cmp(&b.1));
                 if let Some((i, _)) = nearest {
@@ -116,6 +122,11 @@ fn collect_shots(
                     age: 0.0,
                 });
             }
+            NetEvent::Collapse { pos, blocks } => thrown.0.push(Blast::Dust {
+                pos: *pos,
+                radius: 1.5 + (*blocks as f32).sqrt() * 0.8,
+                age: 0.0,
+            }),
             NetEvent::Shot { origin, end, rifle } => tracers.0.push(Tracer {
                 // Part un peu sous l'œil, comme depuis l'arme.
                 origin: *origin - Vec3::Y * 0.25,
@@ -331,6 +342,25 @@ fn draw_thrown(time: Res<Time>, world: Res<ClientWorld>, mut thrown: ResMut<Thro
                 Color::srgba(1.0, 0.9, 0.5, alpha),
             );
             *age < 0.45
+        }
+        Blast::Dust { pos, radius, age } => {
+            // Poussière grise qui gonfle lentement et retombe.
+            *age += dt;
+            let k = (*age / 1.5).min(1.0);
+            let alpha = 0.6 * (1.0 - k);
+            for (i, offset) in [Vec3::ZERO, Vec3::X, Vec3::NEG_X, Vec3::Z, Vec3::NEG_Z]
+                .into_iter()
+                .enumerate()
+            {
+                let r = *radius * (0.4 + 0.6 * k) * if i == 0 { 1.0 } else { 0.6 };
+                let center = *pos + offset * *radius * 0.6 * k - Vec3::Y * k * 1.5;
+                gizmos.sphere(
+                    Isometry3d::from_translation(center),
+                    r,
+                    Color::srgba(0.6, 0.55, 0.5, alpha),
+                );
+            }
+            *age < 1.5
         }
     });
 }

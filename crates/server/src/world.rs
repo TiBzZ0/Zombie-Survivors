@@ -100,6 +100,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
         info!("Nouvelle partie (aucune sauvegarde dans {})", config.data_dir.display());
         let mut world = WorldState::new(config.world.clone());
         world.track_changes();
+        world.track_removals();
         commands.insert_resource(SpawnPoint(find_spawn(&world)));
         commands.insert_resource(GameWorld(world));
         commands.insert_resource(Deposits::default());
@@ -131,6 +132,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
     commands.insert_resource(save::SavedSurvivors(save.survivors));
     commands.insert_resource(SpawnPoint(find_spawn(&world)));
     world.track_changes();
+    world.track_removals();
     commands.insert_resource(GameWorld(world));
 }
 

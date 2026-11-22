@@ -68,6 +68,7 @@ enum Sfx {
     Crackle,
     Hammer,
     Zap,
+    Rumble,
 }
 
 #[derive(Resource)]
@@ -277,6 +278,20 @@ fn synth(sfx: Sfx) -> Vec<f32> {
                 (buzz + noise.next() * 0.4) * (1.0 - k).powi(2) * 0.7
             })
         }
+        // Effondrement : grondement grave et fracas de débris.
+        Sfx::Rumble => {
+            let mut noise = Noise(131);
+            let mut low = 0.0;
+            samples(1.6, |_, k| {
+                low += (noise.next() - low) * 0.02;
+                let debris = if noise.next() > 0.99 {
+                    noise.next() * (1.0 - k)
+                } else {
+                    0.0
+                };
+                (low * 2.5 + debris * 0.5).clamp(-1.0, 1.0) * (k * 20.0).min(1.0) * (1.0 - k).powf(0.7) * 0.8
+            })
+        }
         Sfx::Horn => samples(2.5, |t, k| {
             let env = (k * 6.0).min(1.0) * (1.0 - k).powf(0.5);
             ((t * 82.0 * TAU).sin() + 0.5 * (t * 123.0 * TAU).sin() + 0.25 * (t * 164.0 * TAU).sin()) * env * 0.4
@@ -308,6 +323,7 @@ fn build_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>
         Sfx::Crackle,
         Sfx::Hammer,
         Sfx::Zap,
+        Sfx::Rumble,
     ];
     all.extend((0..3).map(Sfx::Groan));
     let map = all
@@ -383,6 +399,7 @@ fn world_sounds(
             NetEvent::Parried => play(&mut commands, &sounds, Sfx::Parry, None, 0.8),
             NetEvent::Zap { origin, .. } => play(&mut commands, &sounds, Sfx::Zap, Some(*origin), 0.8),
             NetEvent::Explosion { pos, .. } => play(&mut commands, &sounds, Sfx::Explosion, Some(*pos), 1.0),
+            NetEvent::Collapse { pos, .. } => play(&mut commands, &sounds, Sfx::Rumble, Some(*pos), 1.0),
             _ => {}
         }
     }
@@ -607,6 +624,7 @@ mod tests {
             Sfx::Crackle,
             Sfx::Hammer,
             Sfx::Zap,
+            Sfx::Rumble,
         ] {
             let s = synth(sfx);
             assert!(
