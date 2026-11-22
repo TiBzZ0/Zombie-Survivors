@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Un bloc du monde. Tient sur un octet pour garder les chunks compacts.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Block {
     #[default]
@@ -15,6 +15,12 @@ pub enum Block {
     Wood,
     Leaves,
     IronOre,
+    /// Planches : se construit vite, plus solide que la terre.
+    Planks,
+    /// Mur renforcé au fer : très résistant.
+    ReinforcedWall,
+    /// Piques : blesse les zombies qui les frappent ou marchent dessus.
+    Spikes,
 }
 
 impl Block {
@@ -34,6 +40,9 @@ impl Block {
             Block::Wood => [0.42, 0.30, 0.17],
             Block::Leaves => [0.22, 0.45, 0.18],
             Block::IronOre => [0.64, 0.52, 0.45],
+            Block::Planks => [0.72, 0.56, 0.34],
+            Block::ReinforcedWall => [0.36, 0.38, 0.42],
+            Block::Spikes => [0.55, 0.20, 0.18],
         }
     }
 
@@ -48,6 +57,9 @@ impl Block {
             Block::Wood => "Bois",
             Block::Leaves => "Feuilles",
             Block::IronOre => "Minerai de fer",
+            Block::Planks => "Planches",
+            Block::ReinforcedWall => "Mur renforcé",
+            Block::Spikes => "Piques",
         }
     }
 
@@ -60,6 +72,9 @@ impl Block {
             Block::Wood => 80,
             Block::Stone => 150,
             Block::IronOre => 200,
+            Block::Planks => 120,
+            Block::ReinforcedWall => 600,
+            Block::Spikes => 100,
         }
     }
 }

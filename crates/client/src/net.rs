@@ -67,7 +67,8 @@ pub enum NetEvent {
     Chat(String),
     Zombies(Vec<ZombieState>),
     Time { time: GameTime, zombies_alive: u32 },
-    Health(f32),
+    Vitals { health: f32, hunger: f32 },
+    Inventory(shared::item::Inventory),
     Died(String),
     ZombieKilled(u32),
 }
@@ -250,8 +251,11 @@ fn receive_messages(
             ServerMessage::Time { time, zombies_alive } => {
                 events.write(NetEvent::Time { time, zombies_alive });
             }
-            ServerMessage::Health { health } => {
-                events.write(NetEvent::Health(health));
+            ServerMessage::Inventory(inventory) => {
+                events.write(NetEvent::Inventory(inventory));
+            }
+            ServerMessage::Vitals { health, hunger } => {
+                events.write(NetEvent::Vitals { health, hunger });
             }
             ServerMessage::Died { cause } => {
                 events.write(NetEvent::Died(cause));

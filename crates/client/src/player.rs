@@ -1,13 +1,14 @@
 //! Le joueur local : vue à la première personne, déplacements avec collisions,
-//! casser et poser des blocs.
+//! minage, pose de blocs, inventaire et barre d'objets.
 
 use std::f32::consts::FRAC_PI_2;
 
-use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions};
 use bevy_renet::RenetClient;
 use shared::block::Block;
+use shared::item::{Inventory, Item, break_time};
 use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid, step_body};
 use shared::protocol::{ClientMessage, PlayerState, REACH};
 use shared::raycast::raycast;
@@ -20,23 +21,17 @@ const WALK_SPEED: f32 = 4.5;
 const SPRINT_SPEED: f32 = 7.0;
 const JUMP_SPEED: f32 = 8.5;
 const MOUSE_SENSITIVITY: f32 = 0.0025;
-/// Délai entre deux actions sur les blocs quand le bouton reste enfoncé.
+/// Délai entre deux poses de blocs quand le bouton reste enfoncé.
 const ACTION_COOLDOWN: f32 = 0.22;
+/// Délai après avoir mangé.
+const EAT_COOLDOWN: f32 = 0.6;
 /// Délai entre deux coups portés à un zombie (le serveur applique le même).
 const ATTACK_COOLDOWN: f32 = 0.4;
 /// Portée d'un coup de mêlée.
 const MELEE_REACH: f32 = 3.0;
 
-/// Blocs posables, dans l'ordre des touches 1 à 7.
-pub const HOTBAR: [Block; 7] = [
-    Block::Dirt,
-    Block::Stone,
-    Block::Wood,
-    Block::Sand,
-    Block::Grass,
-    Block::Leaves,
-    Block::IronOre,
-];
+/// Nombre de cases de la barre d'objets (touches 1 à 9).
+pub const HOTBAR_SLOTS: usize = 9;
 
 pub struct PlayerPlugin;
 
@@ -49,8 +44,8 @@ impl Plugin for PlayerPlugin {
                 (
                     grab_cursor,
                     look,
-                    select_block,
                     apply_teleports,
+                    select_slot,
                     move_player,
                     interact,
                     update_camera,
@@ -67,6 +62,17 @@ impl Plugin for PlayerPlugin {
 #[derive(Resource, Debug, Default)]
 pub struct LocalPlayer {
     pub health: f32,
+    pub hunger: f32,
+    pub inventory: Inventory,
+    /// Objets rangés dans la barre, dans l'ordre des touches.
+    pub hotbar: [Option<Item>; HOTBAR_SLOTS],
+    /// Bloc en cours de minage et progression (0 à 1).
+    pub mining: Option<(IVec3, f32)>,
+    /// Vrai si le bloc visé demande une pioche.
+    pub needs_pickaxe: bool,
+    /// Le panneau de fabrication est ouvert (le curseur est libre).
+    pub crafting_open: bool,
+    held_sent: Option<Option<Item>>,
     /// Cause de la mort tant que le joueur n'a pas réapparu.
     pub dead: Option<String>,
     /// Intensité de l'effet « touché » à l'écran (0 à 1).
@@ -92,14 +98,36 @@ impl LocalPlayer {
         Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0) * Vec3::NEG_Z
     }
 
-    pub fn selected_block(&self) -> Block {
-        HOTBAR[self.selected]
+    /// Objet de la case sélectionnée, s'il en reste.
+    pub fn held(&self) -> Option<Item> {
+        self.hotbar[self.selected].filter(|item| self.inventory.has(*item, 1))
+    }
+
+    /// Range les nouveaux objets dans les cases libres et vide celles des objets épuisés.
+    fn sync_hotbar(&mut self) {
+        for slot in self.hotbar.iter_mut() {
+            if slot.is_some_and(|item| !self.inventory.has(item, 1)) {
+                *slot = None;
+            }
+        }
+        let missing: Vec<Item> = self
+            .inventory
+            .iter()
+            .map(|(item, _)| item)
+            .filter(|item| !self.hotbar.contains(&Some(*item)))
+            .collect();
+        for item in missing {
+            if let Some(slot) = self.hotbar.iter_mut().find(|s| s.is_none()) {
+                *slot = Some(item);
+            }
+        }
     }
 }
 
 fn spawn_player(mut player: ResMut<LocalPlayer>, session: Res<Session>) {
     *player = LocalPlayer {
         health: 100.0,
+        hunger: 100.0,
         position: session.spawn,
         yaw: -std::f32::consts::FRAC_PI_4,
         ..default()
@@ -114,12 +142,24 @@ fn grab_cursor(
     mut cursor: Single<&mut CursorOptions>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    mut player: ResMut<LocalPlayer>,
 ) {
-    if mouse.just_pressed(MouseButton::Left) && !cursor_locked(&cursor) {
+    if keys.just_pressed(KeyCode::KeyC) || keys.just_pressed(KeyCode::Tab) {
+        player.crafting_open = !player.crafting_open;
+        if player.crafting_open {
+            cursor.visible = true;
+            cursor.grab_mode = CursorGrabMode::None;
+        } else {
+            cursor.visible = false;
+            cursor.grab_mode = CursorGrabMode::Locked;
+        }
+    }
+    if mouse.just_pressed(MouseButton::Left) && !cursor_locked(&cursor) && !player.crafting_open {
         cursor.visible = false;
         cursor.grab_mode = CursorGrabMode::Locked;
     }
     if keys.just_pressed(KeyCode::Escape) {
+        player.crafting_open = false;
         cursor.visible = true;
         cursor.grab_mode = CursorGrabMode::None;
     }
@@ -133,8 +173,13 @@ fn look(motion: Res<AccumulatedMouseMotion>, cursor: Single<&CursorOptions>, mut
     player.pitch = (player.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
 }
 
-fn select_block(keys: Res<ButtonInput<KeyCode>>, mut player: ResMut<LocalPlayer>) {
-    const KEYS: [KeyCode; 7] = [
+fn select_slot(
+    keys: Res<ButtonInput<KeyCode>>,
+    scroll: Res<AccumulatedMouseScroll>,
+    mut player: ResMut<LocalPlayer>,
+    mut client: ResMut<RenetClient>,
+) {
+    const KEYS: [KeyCode; HOTBAR_SLOTS] = [
         KeyCode::Digit1,
         KeyCode::Digit2,
         KeyCode::Digit3,
@@ -142,11 +187,24 @@ fn select_block(keys: Res<ButtonInput<KeyCode>>, mut player: ResMut<LocalPlayer>
         KeyCode::Digit5,
         KeyCode::Digit6,
         KeyCode::Digit7,
+        KeyCode::Digit8,
+        KeyCode::Digit9,
     ];
     for (i, key) in KEYS.iter().enumerate() {
         if keys.just_pressed(*key) {
             player.selected = i;
         }
+    }
+    if !player.crafting_open && scroll.delta.y != 0.0 {
+        let step = if scroll.delta.y > 0.0 { HOTBAR_SLOTS - 1 } else { 1 };
+        player.selected = (player.selected + step) % HOTBAR_SLOTS;
+    }
+    // Le serveur connaît l'objet en main (dégâts, vitesse de minage).
+    let held = player.held();
+    if player.held_sent != Some(held) {
+        player.held_sent = Some(held);
+        player.mining = None;
+        send_reliable(&mut client, &ClientMessage::Hold { item: held });
     }
 }
 
@@ -164,14 +222,19 @@ fn apply_teleports(
                 player.position = *position;
                 player.velocity = Vec3::ZERO;
             }
-            NetEvent::Health(health) => {
-                if *health < player.health {
+            NetEvent::Vitals { health, hunger } => {
+                if *health < player.health - 0.5 {
                     player.hurt_flash = 1.0;
                 }
                 player.health = *health;
+                player.hunger = *hunger;
                 if *health > 0.0 {
                     player.dead = None;
                 }
+            }
+            NetEvent::Inventory(inventory) => {
+                player.inventory = inventory.clone();
+                player.sync_hotbar();
             }
             NetEvent::Died(cause) => {
                 player.dead = Some(cause.clone());
@@ -251,14 +314,19 @@ fn interact(
     mut changes: MessageWriter<NetEvent>,
     zombies: Query<(&ZombieView, &Transform)>,
 ) {
+    let dt = time.delta_secs();
     player.target = raycast(player.eye(), player.look_direction(), REACH, |p| world.is_solid(p));
-    player.cooldown -= time.delta_secs();
-    if !cursor_locked(&cursor) || player.cooldown > 0.0 || player.dead.is_some() {
+    player.cooldown -= dt;
+    player.needs_pickaxe = false;
+    if !cursor_locked(&cursor) || player.dead.is_some() || !mouse.pressed(MouseButton::Left) {
+        player.mining = None;
+    }
+    if !cursor_locked(&cursor) || player.dead.is_some() {
         return;
     }
 
-    // Un zombie visé passe avant les blocs.
     if mouse.pressed(MouseButton::Left) {
+        // Un zombie visé passe avant les blocs.
         let block_dist = player
             .target
             .map(|h| (h.block.as_vec3() + Vec3::splat(0.5)).distance(player.eye()))
@@ -266,32 +334,77 @@ fn interact(
         if let Some((id, dist)) = aimed_zombie(player.eye(), player.look_direction(), &zombies)
             && dist < block_dist
         {
-            send_reliable(&mut client, &ClientMessage::Attack { zombie: id });
-            player.cooldown = ATTACK_COOLDOWN;
+            player.mining = None;
+            if player.cooldown <= 0.0 {
+                send_reliable(&mut client, &ClientMessage::Attack { zombie: id });
+                player.cooldown = ATTACK_COOLDOWN;
+            }
             return;
         }
+        mine(&mut player, &mut world, &mut client, &mut changes, dt);
+        return;
     }
 
-    let Some(hit) = player.target else { return };
-    if mouse.pressed(MouseButton::Left) {
-        if hit.block.y > 0 {
-            // Appliqué tout de suite pour la réactivité ; le serveur corrige s'il refuse.
-            world.set_block(hit.block, Block::Air);
-            changes.write(NetEvent::BlockChanged(hit.block));
-            send_reliable(&mut client, &ClientMessage::BreakBlock { pos: hit.block });
-            player.cooldown = ACTION_COOLDOWN;
-        }
-    } else if mouse.pressed(MouseButton::Right) {
-        let pos = hit.block + hit.normal;
-        let blocks_me = overlaps_solid(player.position, PLAYER_SIZE, &|b| b == pos);
-        if !blocks_me && world.in_bounds(pos) && !world.is_solid(pos) {
-            let block = player.selected_block();
-            world.set_block(pos, block);
-            changes.write(NetEvent::BlockChanged(pos));
-            send_reliable(&mut client, &ClientMessage::PlaceBlock { pos, block });
-            player.cooldown = ACTION_COOLDOWN;
-        }
+    if !mouse.pressed(MouseButton::Right) || player.cooldown > 0.0 {
+        return;
     }
+    match player.held() {
+        Some(item) if item.food().is_some() => {
+            send_reliable(&mut client, &ClientMessage::Eat { item });
+            player.cooldown = EAT_COOLDOWN;
+        }
+        Some(Item::Block(block)) => {
+            let Some(hit) = player.target else { return };
+            let pos = hit.block + hit.normal;
+            let blocks_me = overlaps_solid(player.position, PLAYER_SIZE, &|b| b == pos);
+            if !blocks_me && world.in_bounds(pos) && !world.is_solid(pos) {
+                // Appliqué tout de suite pour la réactivité ; le serveur corrige s'il refuse.
+                world.set_block(pos, block);
+                player.inventory.remove(Item::Block(block), 1);
+                changes.write(NetEvent::BlockChanged(pos));
+                send_reliable(&mut client, &ClientMessage::PlaceBlock { pos, block });
+                player.cooldown = ACTION_COOLDOWN;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Mine le bloc visé : la progression dépend du bloc et de l'outil en main.
+fn mine(
+    player: &mut LocalPlayer,
+    world: &mut ClientWorld,
+    client: &mut RenetClient,
+    changes: &mut MessageWriter<NetEvent>,
+    dt: f32,
+) {
+    let Some(hit) = player.target.filter(|h| h.block.y > 0) else {
+        player.mining = None;
+        return;
+    };
+    let block = world.block(hit.block);
+    let Some(duration) = break_time(block, player.held()) else {
+        player.needs_pickaxe = true;
+        player.mining = None;
+        return;
+    };
+    let progress = match player.mining {
+        Some((pos, progress)) if pos == hit.block => progress,
+        _ => {
+            send_reliable(client, &ClientMessage::StartMining { pos: hit.block });
+            0.0
+        }
+    };
+    let progress = progress + dt / duration.max(0.05);
+    if progress < 1.0 {
+        player.mining = Some((hit.block, progress));
+        return;
+    }
+    // Appliqué tout de suite pour la réactivité ; le serveur corrige s'il refuse.
+    world.set_block(hit.block, Block::Air);
+    changes.write(NetEvent::BlockChanged(hit.block));
+    send_reliable(client, &ClientMessage::BreakBlock { pos: hit.block });
+    player.mining = None;
 }
 
 fn update_camera(player: Res<LocalPlayer>, mut camera: Single<&mut Transform, With<Camera3d>>) {

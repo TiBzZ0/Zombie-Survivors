@@ -6,6 +6,7 @@
 //! - `--connect <adresse:port>` : rejoint directement un serveur ;
 //! - `--name <pseudo>` : choisit le pseudo.
 
+mod crafting;
 mod hud;
 mod menu;
 mod meshing;
@@ -101,6 +102,7 @@ fn main() {
             hud::HudPlugin,
             sky::SkyPlugin,
             zombies::ZombiesPlugin,
+            crafting::CraftingPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
