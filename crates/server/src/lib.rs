@@ -15,6 +15,7 @@ use shared::TICK_RATE_HZ;
 
 pub mod config;
 pub mod daynight;
+pub mod explosives;
 pub mod net;
 pub mod save;
 pub mod survivors;
@@ -43,6 +44,7 @@ impl Plugin for ServerPlugin {
                 save::SavePlugin,
                 survivors::SurvivorPlugin,
                 turrets::TurretPlugin,
+                explosives::ExplosivesPlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)

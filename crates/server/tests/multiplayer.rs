@@ -429,6 +429,7 @@ fn bow_shoots_and_uses_arrows() {
     let mut inventory = Inventory::default();
     inventory.add(Item::Bow, 1);
     inventory.add(Item::Arrow, 5);
+    inventory.add(Item::Grenade, 2);
     let save = server::save::SaveFile {
         version: server::save::SAVE_VERSION,
         world: WorldConfig::default(),
@@ -489,6 +490,42 @@ fn bow_shoots_and_uses_arrows() {
         .filter(|m| matches!(m, ServerMessage::Shot { .. }))
         .count();
     assert_eq!(shots, 1, "le premier tir, sans arc en main, devait être ignoré");
+
+    // Une grenade lancée part, puis explose après sa mèche.
+    std::thread::sleep(Duration::from_millis(900));
+    eve.received.clear();
+    eve.send(
+        &ClientMessage::Hold {
+            item: Some(Item::Grenade),
+        },
+        true,
+    );
+    eve.send(&ClientMessage::Throw { direction: Vec3::X }, true);
+    pump_until(&mut [&mut eve], "grenade lancée", |c| {
+        let thrown = c[0]
+            .find(|m| {
+                matches!(
+                    m,
+                    ServerMessage::Thrown {
+                        item: Item::Grenade,
+                        ..
+                    }
+                )
+                .then_some(())
+            })
+            .is_some();
+        let used = c[0]
+            .find(|m| match m {
+                ServerMessage::Inventory(inv) if inv.count(Item::Grenade) == 1 => Some(()),
+                _ => None,
+            })
+            .is_some();
+        thrown && used
+    });
+    pump_until(&mut [&mut eve], "explosion", |c| {
+        c[0].find(|m| matches!(m, ServerMessage::Explosion { .. }).then_some(()))
+            .is_some()
+    });
     let _ = std::fs::remove_dir_all(&data_dir);
 }
 

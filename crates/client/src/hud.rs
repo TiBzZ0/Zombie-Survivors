@@ -445,6 +445,13 @@ fn update_status(
         }
     } else if player.held().is_some_and(|i| i.food().is_some()) {
         "Clic droit : manger".into()
+    } else if let Some(t) = player.held().and_then(|i| i.throwable()) {
+        let blocks = if t.blast_blocks > 0.0 {
+            ", détruit les blocs"
+        } else {
+            ""
+        };
+        format!("Clic gauche : lancer (explose après {:.0} s{blocks})", t.fuse)
     } else if player.guarding {
         "Garde levée".into()
     } else if player.held().is_some_and(|i| i.is_melee_weapon()) {

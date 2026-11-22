@@ -31,6 +31,26 @@ pub enum Item {
     Mace,
     Helmet(Tier),
     BodyArmor(Tier),
+    /// Grenade : se lance et explose après quelques secondes, sans abîmer les murs.
+    Grenade,
+    /// Dynamite : explosion plus lente qui détruit aussi les blocs alentour.
+    Dynamite,
+    /// Arbalète : ses carreaux transpercent plusieurs zombies alignés.
+    Crossbow,
+    Bolt,
+}
+
+/// Caractéristiques d'un explosif qu'on lance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Throwable {
+    /// Secondes avant l'explosion.
+    pub fuse: f32,
+    /// Rayon de l'explosion, en mètres.
+    pub radius: f32,
+    /// Dégâts au centre (moitié au bord).
+    pub damage: f32,
+    /// Rayon dans lequel les blocs sont détruits (0 : aucun).
+    pub blast_blocks: f32,
 }
 
 /// Caractéristiques d'un coup au corps-à-corps.
@@ -64,6 +84,8 @@ pub struct Ranged {
     pub range: f32,
     /// Délai minimal entre deux tirs, en secondes.
     pub cooldown: f32,
+    /// Nombre de zombies qu'un projectile peut traverser.
+    pub pierce: u8,
 }
 
 /// Qualité d'un outil.
@@ -106,6 +128,10 @@ impl Item {
             Item::Mace => "Masse d'armes".into(),
             Item::Helmet(t) => format!("Casque {}", t.label()),
             Item::BodyArmor(t) => format!("Armure {}", t.label()),
+            Item::Grenade => "Grenade".into(),
+            Item::Dynamite => "Dynamite".into(),
+            Item::Crossbow => "Arbalète".into(),
+            Item::Bolt => "Carreau".into(),
         }
     }
 
@@ -148,6 +174,25 @@ impl Item {
         Self::melee(held).damage
     }
 
+    /// Explosif qu'on lance au clic gauche.
+    pub const fn throwable(self) -> Option<Throwable> {
+        match self {
+            Item::Grenade => Some(Throwable {
+                fuse: 2.0,
+                radius: 4.5,
+                damage: 90.0,
+                blast_blocks: 0.0,
+            }),
+            Item::Dynamite => Some(Throwable {
+                fuse: 3.0,
+                radius: 5.0,
+                damage: 120.0,
+                blast_blocks: 2.6,
+            }),
+            _ => None,
+        }
+    }
+
     /// Arme de corps-à-corps (qui permet aussi de parer).
     pub const fn is_melee_weapon(self) -> bool {
         matches!(self, Item::Sword(_) | Item::Spear(_) | Item::Axe(_) | Item::Mace)
@@ -178,7 +223,7 @@ impl Item {
 
     /// Arme qu'on peut confier à un survivant.
     pub const fn is_weapon(self) -> bool {
-        self.is_melee_weapon() || matches!(self, Item::Bow | Item::Rifle)
+        self.is_melee_weapon() || matches!(self, Item::Bow | Item::Rifle | Item::Crossbow)
     }
 
     /// Objet qu'on peut confier à un survivant : arme ou armure.
@@ -198,12 +243,21 @@ impl Item {
                 damage: 30.0,
                 range: 40.0,
                 cooldown: 0.8,
+                pierce: 1,
             }),
             Item::Rifle => Some(Ranged {
                 ammo: Item::Ammo,
                 damage: 55.0,
                 range: 80.0,
                 cooldown: 0.45,
+                pierce: 1,
+            }),
+            Item::Crossbow => Some(Ranged {
+                ammo: Item::Bolt,
+                damage: 45.0,
+                range: 60.0,
+                cooldown: 1.2,
+                pierce: 4,
             }),
             _ => None,
         }

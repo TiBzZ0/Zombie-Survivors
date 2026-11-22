@@ -162,3 +162,50 @@ mod tests {
         assert!(r.position.y >= 10.0 - 1e-3);
     }
 }
+
+/// Gravité appliquée aux objets lancés, en m/s².
+pub const PROJECTILE_GRAVITY: f32 = 20.0;
+
+/// Avance un objet lancé (grenade, dynamite) d'un pas : il tombe, rebondit mollement
+/// sur les blocs et finit par s'immobiliser. Renvoie la nouvelle position et la vitesse.
+pub fn step_projectile(pos: Vec3, vel: Vec3, dt: f32, solid: &impl Fn(IVec3) -> bool) -> (Vec3, Vec3) {
+    let mut vel = vel - Vec3::Y * PROJECTILE_GRAVITY * dt;
+    let mut pos = pos;
+    // Axe par axe, pour savoir quelle composante renvoyer en cas de choc.
+    for axis in 0..3 {
+        let mut next = pos;
+        next[axis] += vel[axis] * dt;
+        if solid(next.floor().as_ivec3()) {
+            vel[axis] *= -0.3;
+            if axis == 1 {
+                // Au sol : frottement.
+                vel.x *= 0.6;
+                vel.z *= 0.6;
+            }
+        } else {
+            pos = next;
+        }
+    }
+    if vel.length_squared() < 0.05 {
+        vel = Vec3::ZERO;
+    }
+    (pos, vel)
+}
+
+#[cfg(test)]
+mod projectile_tests {
+    use super::*;
+
+    #[test]
+    fn thrown_object_lands_and_stops() {
+        // Sol plein sous y = 0.
+        let solid = |p: IVec3| p.y < 0;
+        let (mut pos, mut vel) = (Vec3::new(0.5, 1.5, 0.5), Vec3::new(6.0, 4.0, 0.0));
+        for _ in 0..300 {
+            (pos, vel) = step_projectile(pos, vel, 1.0 / 30.0, &solid);
+        }
+        assert!(pos.y >= 0.0 && pos.y < 0.5, "posé au sol : {pos}");
+        assert!(pos.x > 2.0, "il a avancé : {pos}");
+        assert_eq!(vel, Vec3::ZERO);
+    }
+}

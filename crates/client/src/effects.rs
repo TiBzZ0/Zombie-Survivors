@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use crate::AppState;
-use crate::net::NetEvent;
+use crate::net::{ClientWorld, NetEvent};
 use crate::survivors::SurvivorView;
 use crate::zombies::ZombieView;
+use shared::physics::step_projectile;
 
 pub struct EffectsPlugin;
 
@@ -15,10 +16,23 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Tracers>()
             .init_resource::<Cracks>()
-            .add_systems(OnExit(AppState::Playing), |mut cracks: ResMut<Cracks>| cracks.0.clear())
+            .init_resource::<Thrown>()
+            .add_systems(
+                OnExit(AppState::Playing),
+                |mut cracks: ResMut<Cracks>, mut thrown: ResMut<Thrown>| {
+                    cracks.0.clear();
+                    thrown.0.clear();
+                },
+            )
             .add_systems(
                 Update,
-                (collect_shots, draw_tracers, draw_cracks, draw_zombie_health)
+                (
+                    collect_shots,
+                    draw_tracers,
+                    draw_thrown,
+                    draw_cracks,
+                    draw_zombie_health,
+                )
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             );
@@ -35,13 +49,67 @@ struct Tracer {
 #[derive(Resource, Default)]
 struct Tracers(Vec<Tracer>);
 
+/// Explosif en vol (trajectoire simulée comme sur le serveur) ou explosion qui s'étend.
+enum Blast {
+    Flying {
+        pos: Vec3,
+        vel: Vec3,
+        fuse: f32,
+        dynamite: bool,
+    },
+    Boom {
+        pos: Vec3,
+        radius: f32,
+        age: f32,
+    },
+}
+
+#[derive(Resource, Default)]
+struct Thrown(Vec<Blast>);
+
 /// Dégâts subis par les blocs attaqués par les zombies (0 à 255).
 #[derive(Resource, Default)]
 struct Cracks(HashMap<IVec3, u8>);
 
-fn collect_shots(mut events: MessageReader<NetEvent>, mut tracers: ResMut<Tracers>, mut cracks: ResMut<Cracks>) {
+fn collect_shots(
+    mut events: MessageReader<NetEvent>,
+    mut tracers: ResMut<Tracers>,
+    mut cracks: ResMut<Cracks>,
+    mut thrown: ResMut<Thrown>,
+) {
     for event in events.read() {
         match event {
+            NetEvent::Thrown {
+                origin,
+                velocity,
+                fuse,
+                item,
+            } => thrown.0.push(Blast::Flying {
+                pos: *origin,
+                vel: *velocity,
+                fuse: *fuse,
+                dynamite: *item == shared::item::Item::Dynamite,
+            }),
+            NetEvent::Explosion { pos, radius } => {
+                // L'explosion remplace l'explosif le plus proche encore affiché.
+                let nearest = thrown
+                    .0
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, b)| match b {
+                        Blast::Flying { pos: p, .. } => Some((i, p.distance(*pos))),
+                        Blast::Boom { .. } => None,
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((i, _)) = nearest {
+                    thrown.0.swap_remove(i);
+                }
+                thrown.0.push(Blast::Boom {
+                    pos: *pos,
+                    radius: *radius,
+                    age: 0.0,
+                });
+            }
             NetEvent::Shot { origin, end, rifle } => tracers.0.push(Tracer {
                 // Part un peu sous l'œil, comme depuis l'arme.
                 origin: *origin - Vec3::Y * 0.25,
@@ -148,6 +216,53 @@ fn draw_tracers(time: Res<Time>, mut tracers: ResMut<Tracers>, mut gizmos: Gizmo
             let head = t.origin.lerp(t.end, k);
             gizmos.line(head - dir * 0.8, head, Color::srgb(0.45, 0.3, 0.15));
             t.age < duration + 0.05
+        }
+    });
+}
+
+fn draw_thrown(time: Res<Time>, world: Res<ClientWorld>, mut thrown: ResMut<Thrown>, mut gizmos: Gizmos) {
+    let dt = time.delta_secs().min(0.05);
+    let solid = |p: IVec3| world.is_solid(p);
+    thrown.0.retain_mut(|blast| match blast {
+        Blast::Flying {
+            pos,
+            vel,
+            fuse,
+            dynamite,
+        } => {
+            (*pos, *vel) = step_projectile(*pos, *vel, dt, &solid);
+            *fuse -= dt;
+            // La mèche clignote de plus en plus vite.
+            let blink = ((*fuse * 8.0).sin() > 0.0) as u8 as f32;
+            let (body, size) = if *dynamite {
+                (Color::srgb(0.75, 0.15, 0.1), 0.18)
+            } else {
+                (Color::srgb(0.25, 0.35, 0.2), 0.14)
+            };
+            gizmos.sphere(Isometry3d::from_translation(*pos), size, body);
+            gizmos.sphere(
+                Isometry3d::from_translation(*pos + Vec3::Y * size),
+                0.04,
+                Color::srgba(1.0, 0.8, 0.2, blink),
+            );
+            // Filet de sécurité si le message d'explosion se perd.
+            *fuse > -1.0
+        }
+        Blast::Boom { pos, radius, age } => {
+            *age += dt;
+            let k = (*age / 0.45).min(1.0);
+            let alpha = 1.0 - k;
+            gizmos.sphere(
+                Isometry3d::from_translation(*pos),
+                *radius * (0.3 + 0.7 * k),
+                Color::srgba(1.0, 0.55, 0.1, alpha),
+            );
+            gizmos.sphere(
+                Isometry3d::from_translation(*pos),
+                *radius * 0.5 * (0.3 + 0.7 * k),
+                Color::srgba(1.0, 0.9, 0.5, alpha),
+            );
+            *age < 0.45
         }
     });
 }

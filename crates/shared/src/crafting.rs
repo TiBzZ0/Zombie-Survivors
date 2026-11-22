@@ -244,6 +244,30 @@ pub const RECIPES: &[Recipe] = &[
         inputs: &[(Item::IronIngot, 8)],
         station: Some(Block::Forge),
     },
+    Recipe {
+        output: Item::Crossbow,
+        count: 1,
+        inputs: &[(Item::IronIngot, 2), (b(Block::Planks), 3), (Item::Stick, 2)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: Item::Bolt,
+        count: 6,
+        inputs: &[(Item::IronIngot, 1), (Item::Stick, 3)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: Item::Grenade,
+        count: 2,
+        inputs: &[(Item::IronIngot, 1), (Item::Coal, 3)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: Item::Dynamite,
+        count: 2,
+        inputs: &[(Item::Coal, 3), (b(Block::Sand), 2), (Item::Stick, 1)],
+        station: Some(Block::Workbench),
+    },
 ];
 
 impl Recipe {
