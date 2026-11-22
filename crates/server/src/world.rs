@@ -1,5 +1,7 @@
 //! État du monde côté serveur : le terrain généré et les modifications des joueurs.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use shared::world::WorldState;
 
@@ -18,6 +20,10 @@ impl Plugin for WorldPlugin {
 /// Le monde de la partie. Seul le serveur a le droit de le modifier.
 #[derive(Resource, Deref, DerefMut)]
 pub struct GameWorld(pub WorldState);
+
+/// Récoltes restantes des blocs de filon déjà entamés (absents = intacts).
+#[derive(Resource, Default, Debug)]
+pub struct Deposits(pub HashMap<IVec3, u8>);
 
 /// Point d'apparition des joueurs, au centre de la carte, posé sur le sol.
 #[derive(Resource, Clone, Copy, Debug)]
@@ -43,6 +49,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
         let world = WorldState::new(config.world.clone());
         commands.insert_resource(SpawnPoint(find_spawn(&world)));
         commands.insert_resource(GameWorld(world));
+        commands.insert_resource(Deposits::default());
         return;
     };
     if save.world != config.world {
@@ -64,6 +71,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
     );
     commands.insert_resource(Clock(save.time));
     commands.insert_resource(SavedPlayers(save.players.into_iter().collect()));
+    commands.insert_resource(Deposits(save.deposits.into_iter().collect()));
     commands.insert_resource(SpawnPoint(find_spawn(&world)));
     commands.insert_resource(GameWorld(world));
 }

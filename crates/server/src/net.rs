@@ -10,7 +10,7 @@ use bevy_renet::netcode::{
 };
 use bevy_renet::renet::{ClientId, ConnectionConfig, DefaultChannel, ServerEvent};
 use bevy_renet::{RenetServer, RenetServerEvent, RenetServerPlugin};
-use shared::block::Block;
+use shared::block::{Block, DEPOSIT_HARVESTS};
 use shared::crafting::RECIPES;
 use shared::item::{Inventory, Item, break_time, drop_for};
 use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid};
@@ -18,7 +18,7 @@ use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMes
 
 use crate::ServerConfig;
 use crate::save::{SavedPlayer, SavedPlayers};
-use crate::world::{GameWorld, SpawnPoint};
+use crate::world::{Deposits, GameWorld, SpawnPoint};
 use crate::zombies::{Zombie, ZombieBody};
 
 /// Portée d'un coup de mêlée, en mètres.
@@ -206,6 +206,7 @@ fn receive_messages(
     spawn: Res<SpawnPoint>,
     time: Res<Time>,
     mut saved: ResMut<SavedPlayers>,
+    mut deposits: ResMut<Deposits>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -222,6 +223,7 @@ fn receive_messages(
                 spawn: spawn.0,
                 now: time.elapsed_secs_f64(),
                 saved: &mut saved,
+                deposits: &mut deposits,
             };
             handle_reliable(client, message, &mut ctx, &mut zombies);
         }
@@ -241,6 +243,7 @@ struct Context<'a> {
     spawn: Vec3,
     now: f64,
     saved: &'a mut SavedPlayers,
+    deposits: &'a mut Deposits,
 }
 
 fn handle_reliable(
@@ -257,6 +260,7 @@ fn handle_reliable(
         spawn,
         now,
         saved,
+        deposits,
     } = ctx;
     let (spawn, now) = (*spawn, *now);
     let ready = lobby.players.get(&client).is_some_and(ConnectedPlayer::is_ready);
@@ -403,7 +407,27 @@ fn handle_reliable(
                 _ => false,
             };
             let allowed = pos.y > 0 && within_reach(player, pos) && block.is_solid() && mined_long_enough;
-            if allowed && world.set_block(pos, Block::Air) {
+            if allowed && block.is_deposit() {
+                // Un filon donne une ressource par récolte et ne disparaît qu'à la dernière.
+                let remaining = deposits.0.entry(pos).or_insert(DEPOSIT_HARVESTS);
+                *remaining = remaining.saturating_sub(1);
+                let left = *remaining;
+                if let Some(item) = drop_for(block) {
+                    player.inventory.add(item, 1);
+                }
+                send_inventory(server, client, player);
+                if left == 0 {
+                    deposits.0.remove(&pos);
+                    world.set_block(pos, Block::Air);
+                    player.mining = None;
+                    version.0 += 1;
+                    broadcast(server, &ServerMessage::BlockChanged { pos, block: Block::Air });
+                } else {
+                    // La récolte suivante commence tout de suite.
+                    player.mining = Some((pos, now));
+                    send(server, client, &ServerMessage::Deposit { pos, remaining: left });
+                }
+            } else if allowed && world.set_block(pos, Block::Air) {
                 player.mining = None;
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block: Block::Air });

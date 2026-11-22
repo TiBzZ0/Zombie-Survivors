@@ -310,3 +310,107 @@ fn two_players_share_the_world() {
     drop(server);
     let _ = std::fs::remove_dir_all(&data_dir);
 }
+
+#[test]
+fn deposits_are_harvested_many_times() {
+    let port = 18_000 + (std::process::id() % 1000) as u16;
+    let data_dir = std::env::temp_dir().join(format!("zs-test-filon-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data_dir);
+    let config = ServerConfig {
+        port,
+        data_dir: data_dir.clone(),
+        ..ServerConfig::default()
+    };
+    let _server = spawn_local(config).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut dana = TestClient::connect(port, 1, "Dana");
+    pump_until(&mut [&mut dana], "bienvenue de Dana", |c| {
+        c[0].find(|m| matches!(m, ServerMessage::Welcome { .. }).then_some(()))
+            .is_some()
+    });
+    let spawn = dana
+        .find(|m| match m {
+            ServerMessage::Welcome { spawn, .. } => Some(*spawn),
+            _ => None,
+        })
+        .unwrap();
+
+    // Le rocher de charbon le plus proche (le charbon se récolte à la main).
+    let generator = WorldGenerator::new(WorldConfig::default());
+    let (bx, ground, bz, _) = (0..43)
+        .flat_map(|cx| (0..43).map(move |cz| (cx, cz)))
+        .filter_map(|(cx, cz)| generator.boulder_in_cell(cx, cz))
+        .filter(|b| b.3 == Block::CoalOre)
+        .filter(|b| generator.block_at(b.0, b.1 + 2, b.2) == Block::Air)
+        .min_by_key(|b| (b.0 - spawn.x as i32).pow(2) + (b.2 - spawn.z as i32).pow(2))
+        .expect("aucun rocher de charbon");
+
+    // Dana y va par les airs, par petits pas que le serveur accepte.
+    let top = Vec3::new(bx as f32 + 0.5, ground as f32 + 2.0, bz as f32 + 0.5);
+    let sky = 120.0;
+    let mut path = vec![Vec3::new(spawn.x, sky, spawn.z), Vec3::new(top.x, sky, top.z), top];
+    let mut position = spawn;
+    path.reverse();
+    while let Some(target) = path.pop() {
+        while position.distance(target) > 0.01 {
+            let step = (target - position).clamp_length_max(3.0);
+            position += step;
+            dana.send(
+                &ClientMessage::State(PlayerState {
+                    position,
+                    yaw: 0.0,
+                    pitch: 0.0,
+                }),
+                false,
+            );
+            for _ in 0..6 {
+                dana.pump();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+    assert!(
+        dana.find(|m| matches!(m, ServerMessage::Teleport { .. }).then_some(()))
+            .is_none(),
+        "déplacement refusé"
+    );
+
+    let target = IVec3::new(bx, ground, bz);
+    assert_eq!(generator.block_at(target.x, target.y, target.z), Block::CoalOre);
+    let needed = break_time(Block::CoalOre, None).unwrap();
+    let wait = |client: &mut TestClient| {
+        let start = Instant::now();
+        while start.elapsed().as_secs_f32() < needed + 0.1 {
+            client.pump();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+
+    dana.send(&ClientMessage::StartMining { pos: target }, true);
+    for expected in [19u8, 18] {
+        wait(&mut dana);
+        dana.received.clear();
+        dana.send(&ClientMessage::BreakBlock { pos: target }, true);
+        pump_until(&mut [&mut dana], "récolte du filon", |c| {
+            c[0].find(|m| match m {
+                ServerMessage::Deposit { pos, remaining } if *pos == target && *remaining == expected => Some(()),
+                _ => None,
+            })
+            .is_some()
+        });
+        assert!(
+            dana.find(|m| matches!(m, ServerMessage::BlockChanged { .. }).then_some(()))
+                .is_none(),
+            "le filon ne doit pas disparaître"
+        );
+    }
+    pump_until(&mut [&mut dana], "charbon dans l'inventaire", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Inventory(inv) if inv.count(Item::Coal) == 2 => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+    let _ = std::fs::remove_dir_all(&data_dir);
+}

@@ -69,6 +69,7 @@ pub enum NetEvent {
     Time { time: GameTime, zombies_alive: u32 },
     Vitals { health: f32, hunger: f32 },
     Inventory(shared::item::Inventory),
+    Deposit { pos: IVec3, remaining: u8 },
     Died(String),
     ZombieKilled(u32),
 }
@@ -251,6 +252,9 @@ fn receive_messages(
             }
             ServerMessage::Time { time, zombies_alive } => {
                 events.write(NetEvent::Time { time, zombies_alive });
+            }
+            ServerMessage::Deposit { pos, remaining } => {
+                events.write(NetEvent::Deposit { pos, remaining });
             }
             ServerMessage::Inventory(inventory) => {
                 events.write(NetEvent::Inventory(inventory));

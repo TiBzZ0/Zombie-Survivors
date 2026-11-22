@@ -11,7 +11,7 @@ use crate::item::{Inventory, Item};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0002;
+pub const PROTOCOL_ID: u64 = 0x5A53_0003;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -160,6 +160,11 @@ pub enum ServerMessage {
     },
     /// Contenu complet de l'inventaire après un changement.
     Inventory(Inventory),
+    /// Récoltes restantes d'un bloc de filon, après une récolte.
+    Deposit {
+        pos: IVec3,
+        remaining: u8,
+    },
     /// Le joueur est mort ; il peut demander à réapparaître.
     Died {
         cause: String,

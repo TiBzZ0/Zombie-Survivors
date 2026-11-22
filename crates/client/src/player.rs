@@ -70,6 +70,8 @@ pub struct LocalPlayer {
     pub mining: Option<(IVec3, f32)>,
     /// Vrai si le bloc visé demande une pioche.
     pub needs_pickaxe: bool,
+    /// Récoltes restantes des filons entamés, d'après le serveur.
+    pub deposits: std::collections::HashMap<IVec3, u8>,
     /// Le panneau de fabrication est ouvert (le curseur est libre).
     pub crafting_open: bool,
     held_sent: Option<Option<Item>>,
@@ -231,6 +233,9 @@ fn apply_teleports(
                 if *health > 0.0 {
                     player.dead = None;
                 }
+            }
+            NetEvent::Deposit { pos, remaining } => {
+                player.deposits.insert(*pos, *remaining);
             }
             NetEvent::Inventory(inventory) => {
                 player.inventory = inventory.clone();
@@ -400,10 +405,15 @@ fn mine(
         player.mining = Some((hit.block, progress));
         return;
     }
+    send_reliable(client, &ClientMessage::BreakBlock { pos: hit.block });
+    if block.is_deposit() {
+        // Un filon reste en place : la récolte suivante commence aussitôt.
+        player.mining = Some((hit.block, 0.0));
+        return;
+    }
     // Appliqué tout de suite pour la réactivité ; le serveur corrige s'il refuse.
     world.set_block(hit.block, Block::Air);
     changes.write(NetEvent::BlockChanged(hit.block));
-    send_reliable(client, &ClientMessage::BreakBlock { pos: hit.block });
     player.mining = None;
 }
 

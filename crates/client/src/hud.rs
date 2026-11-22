@@ -318,6 +318,7 @@ fn format_secs(secs: f32) -> String {
 
 fn update_status(
     clock: Res<GameClock>,
+    world: Option<Res<crate::net::ClientWorld>>,
     player: Res<LocalPlayer>,
     mut clock_text: Single<
         &mut Text,
@@ -408,8 +409,24 @@ fn update_status(
         }
         None => **mining_bar = Visibility::Hidden,
     }
+    let aimed_deposit = player.target.zip(world.as_deref()).and_then(|(hit, world)| {
+        let block = world.block(hit.block);
+        block.is_deposit().then(|| {
+            let left = player
+                .deposits
+                .get(&hit.block)
+                .copied()
+                .unwrap_or(shared::block::DEPOSIT_HARVESTS);
+            (block, left)
+        })
+    });
     hint_text.0 = if player.needs_pickaxe {
-        "Il faut une pioche".into()
+        match aimed_deposit {
+            Some((block, _)) => format!("{} : il faut une pioche", block.name()),
+            None => "Il faut une pioche".into(),
+        }
+    } else if let Some((block, left)) = aimed_deposit {
+        format!("{} : {left} récoltes restantes", block.name())
     } else if player.inventory.is_empty() {
         String::new()
     } else if player.held().is_some_and(|i| i.food().is_some()) {

@@ -21,9 +21,20 @@ pub enum Block {
     ReinforcedWall,
     /// Piques : blesse les zombies qui les frappent ou marchent dessus.
     Spikes,
+    /// Filon de charbon : se récolte plusieurs fois avant de disparaître.
+    CoalOre,
 }
 
+/// Nombre de récoltes d'un bloc de filon avant qu'il ne disparaisse.
+pub const DEPOSIT_HARVESTS: u8 = 20;
+
 impl Block {
+    /// Un filon se récolte `DEPOSIT_HARVESTS` fois : chaque récolte donne un objet,
+    /// le bloc ne disparaît qu'à la dernière.
+    pub const fn is_deposit(self) -> bool {
+        matches!(self, Block::IronOre | Block::CoalOre)
+    }
+
     /// Un bloc solide bloque le déplacement et cache les faces voisines.
     pub const fn is_solid(self) -> bool {
         !matches!(self, Block::Air)
@@ -43,6 +54,7 @@ impl Block {
             Block::Planks => [0.72, 0.56, 0.34],
             Block::ReinforcedWall => [0.36, 0.38, 0.42],
             Block::Spikes => [0.55, 0.20, 0.18],
+            Block::CoalOre => [0.20, 0.20, 0.22],
         }
     }
 
@@ -56,10 +68,11 @@ impl Block {
             Block::Sand => "Sable",
             Block::Wood => "Bois",
             Block::Leaves => "Feuilles",
-            Block::IronOre => "Minerai de fer",
+            Block::IronOre => "Filon de fer",
             Block::Planks => "Planches",
             Block::ReinforcedWall => "Mur renforcé",
             Block::Spikes => "Piques",
+            Block::CoalOre => "Filon de charbon",
         }
     }
 
@@ -71,7 +84,8 @@ impl Block {
             Block::Grass | Block::Dirt | Block::Sand => 30,
             Block::Wood => 80,
             Block::Stone => 150,
-            Block::IronOre => 200,
+            Block::IronOre => 100,
+            Block::CoalOre => 70,
             Block::Planks => 120,
             Block::ReinforcedWall => 600,
             Block::Spikes => 100,
