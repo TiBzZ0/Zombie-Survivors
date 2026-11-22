@@ -18,6 +18,7 @@ mod net;
 mod player;
 mod remote;
 mod sky;
+mod sound;
 mod terrain;
 mod zombies;
 
@@ -108,6 +109,7 @@ fn main() {
             zombies::ZombiesPlugin,
             crafting::CraftingPlugin,
             effects::EffectsPlugin,
+            sound::SoundPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
