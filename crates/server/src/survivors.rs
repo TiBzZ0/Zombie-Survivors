@@ -1,5 +1,7 @@
 //! Survivants : PNJ humains à recruter. Ils suivent leur chef, gardent un poste,
-//! récoltent des ressources ou réparent les murs, et se battent contre les zombies.
+//! récoltent des ressources, réparent les murs, cultivent, cuisinent ou chassent, et se
+//! battent contre les zombies. Leur moral (faim, feu de camp, équipement, deuils) règle
+//! leur ardeur au travail ; au plus bas, ils abandonnent leur chef.
 
 use std::collections::HashSet;
 
@@ -11,11 +13,15 @@ use shared::item::{ArmorSlot, Item, armor_reduction};
 use shared::physics::step_body;
 use shared::protocol::{ServerMessage, SurvivorState, encode};
 use shared::raycast::raycast;
-use shared::survivor::{Order, RECRUIT_COST, SURVIVOR_SIZE, SURVIVOR_SPEED, SurvivorStats, TALK_RANGE, name_from_seed};
+use shared::survivor::{
+    MORALE_BREAKING, MORALE_START, MoraleFactors, Order, RECRUIT_COST, SURVIVOR_SIZE, SURVIVOR_SPEED, SurvivorStats,
+    TALK_RANGE, morale_multiplier, name_from_seed,
+};
 use shared::worldgen::RUIN_CELL;
 
+use crate::animals::Animal;
 use crate::daynight::Clock;
-use crate::net::{Lobby, broadcast, send, send_chest_to_viewers, send_inventory};
+use crate::net::{Lobby, WorldVersion, broadcast, send, send_chest_to_viewers, send_inventory};
 use crate::save::{SavedSurvivor, SavedSurvivors};
 use crate::world::{Chests, GameWorld};
 use crate::zombies::{BlockDamage, Zombie, ZombieBody, ZombieSet, find_spawn_spot};
@@ -85,7 +91,7 @@ pub struct SurvivorTalk(pub Vec<TalkRequest>);
 struct NextSurvivorId(u32);
 
 /// Un survivant et son corps.
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Clone)]
 pub struct Survivor {
     pub id: u32,
     pub name: String,
@@ -115,6 +121,17 @@ pub struct Survivor {
     working: bool,
     wander: Option<Vec3>,
     wander_timer: f32,
+    /// Moral, de 0 à 100 (seuls les survivants recrutés en ont l'usage).
+    pub morale: f32,
+    /// Chagrin après la mort d'un compagnon : pèse sur le moral, s'estompe avec le temps.
+    pub grief: f32,
+    /// Secondes passées au bord de l'abandon.
+    despair: f32,
+    /// Case visée par le travail en cours (blé à récolter, terre à semer).
+    job_target: Option<IVec3>,
+    /// Feu de camp près du poste, cherché de temps en temps.
+    campfire: Option<IVec3>,
+    scan_timer: f32,
 }
 
 impl Survivor {
@@ -143,6 +160,12 @@ impl Survivor {
             working: false,
             wander: None,
             wander_timer: 0.0,
+            morale: MORALE_START,
+            grief: 0.0,
+            despair: 0.0,
+            job_target: None,
+            campfire: None,
+            scan_timer: 0.0,
         }
     }
 
@@ -155,7 +178,7 @@ impl Survivor {
 
     /// Posté dans une base : la horde vient jusqu'à lui.
     pub fn is_posted(&self) -> bool {
-        self.leader.is_some() && matches!(self.order, Order::Guard | Order::Gather | Order::Repair)
+        self.leader.is_some() && (self.order == Order::Guard || self.order.is_job())
     }
 
     fn info(&self) -> ServerMessage {
@@ -408,15 +431,18 @@ fn gathered_item() -> (Item, u32) {
 fn survivor_ai(
     time: Res<Time>,
     clock: Res<Clock>,
-    world: Res<GameWorld>,
+    mut world: ResMut<GameWorld>,
+    mut version: ResMut<WorldVersion>,
     mut lobby: ResMut<Lobby>,
     mut server: Option<ResMut<RenetServer>>,
     mut chests: ResMut<Chests>,
     mut damage: ResMut<BlockDamage>,
     mut zombies: Query<(&mut Zombie, &ZombieBody)>,
     mut survivors: Query<&mut Survivor>,
+    mut animals: Query<&mut Animal>,
 ) {
     let dt = time.delta_secs();
+    let horde = clock.is_night() && clock.is_horde_night();
     for mut s in &mut survivors {
         let s = &mut *s;
         s.attack_cooldown -= dt;
@@ -455,10 +481,41 @@ fn survivor_ai(
             }
         }
         let starving = s.leader.is_some() && s.hunger <= 0.0;
+        if s.leader.is_some() {
+            s.scan_timer -= dt;
+            if s.scan_timer <= 0.0 {
+                s.scan_timer = 3.0;
+                s.campfire = find_near(&world, s.post, Block::Campfire, WORK_RADIUS as i32);
+            }
+            let factors = MoraleFactors {
+                fed: s.hunger > EAT_BELOW,
+                starving,
+                campfire: s.campfire.is_some(),
+                armed: s.weapon.is_some(),
+                armored: s.armor.iter().any(Option::is_some),
+                hurt: s.since_hit < 10.0,
+                horde,
+                grief: s.grief,
+            };
+            s.grief = (s.grief - GRIEF_FADE * dt).max(0.0);
+            let target = factors.target();
+            s.morale += (target - s.morale).clamp(-dt / MORALE_SECS_PER_POINT, dt / MORALE_SECS_PER_POINT);
+            if s.morale < MORALE_BREAKING {
+                s.despair += dt;
+            } else {
+                s.despair = 0.0;
+            }
+            if s.despair > DESERT_AFTER {
+                desert(s, &mut lobby, server.as_deref_mut());
+                continue;
+            }
+        }
+        let morale = morale_multiplier(s.morale);
+        let work_speed = s.stats.work_speed() * morale;
         // Un survivant dont le chef est absent garde l'endroit où il se trouve ; affamé, il ne travaille plus.
         let order = match s.order {
             Order::Follow if leader.is_none() => Order::Guard,
-            Order::Gather | Order::Repair if starving => Order::Guard,
+            order if starving && order.is_job() => Order::Guard,
             order => order,
         };
         if order == Order::Follow {
@@ -524,7 +581,8 @@ fn survivor_ai(
                     // L'arme de mêlée ajoute ses dégâts à la force du survivant et règle sa cadence.
                     s.attack_cooldown = ATTACK_COOLDOWN * (melee.cooldown / Item::melee(None).cooldown).sqrt();
                     s.attacking = 0.4;
-                    let damage = s.stats.damage() + melee.damage - Item::melee_damage(None);
+                    let damage =
+                        (s.stats.damage() + melee.damage - Item::melee_damage(None)) * (1.0 + (morale - 1.0) * 0.4);
                     let dir = flat.normalize_or_zero();
                     for (mut z, body) in zombies.iter_mut() {
                         let to = Vec2::new(body.position.x - s.position.x, body.position.z - s.position.z);
@@ -579,7 +637,7 @@ fn survivor_ai(
                         goal = Some(s.post);
                     }
                 }
-                Order::Gather if clock.is_night() => {
+                Order::Gather | Order::Farm | Order::Hunt if clock.is_night() => {
                     // La nuit, on rentre au poste et on le défend.
                     if s.post.distance(s.position) > 1.5 {
                         goal = Some(s.post);
@@ -588,7 +646,7 @@ fn survivor_ai(
                 Order::Gather => {
                     goal = wander(s, 6.0, dt);
                     s.working = true;
-                    s.work += dt * s.stats.work_speed();
+                    s.work += dt * work_speed;
                     if s.work >= GATHER_SECS {
                         s.work = 0.0;
                         let (item, n) = gathered_item();
@@ -626,18 +684,78 @@ fn survivor_ai(
                             if flat.length() < 2.5 {
                                 face = Some(center);
                                 s.working = true;
-                                repair(
-                                    pos,
-                                    REPAIR_RATE * s.stats.work_speed() * dt,
-                                    &mut damage,
-                                    server.as_deref_mut(),
-                                );
+                                repair(pos, REPAIR_RATE * work_speed * dt, &mut damage, server.as_deref_mut());
                             } else {
                                 goal = Some(center);
                             }
                         }
                         None if s.post.distance(s.position) > 1.5 => goal = Some(s.post),
                         None => {}
+                    }
+                }
+                Order::Farm => {
+                    let jobs = Jobs {
+                        world: &mut world,
+                        version: &mut version,
+                        chests: &mut chests,
+                        lobby: &mut lobby,
+                        server: server.as_deref_mut(),
+                    };
+                    goal = farm(s, leader.map(|(id, _)| id), work_speed, dt, jobs, &mut face);
+                }
+                Order::Cook => {
+                    let jobs = Jobs {
+                        world: &mut world,
+                        version: &mut version,
+                        chests: &mut chests,
+                        lobby: &mut lobby,
+                        server: server.as_deref_mut(),
+                    };
+                    goal = cook(s, leader.map(|(id, _)| id), work_speed, dt, jobs, &mut face);
+                }
+                Order::Hunt => {
+                    let prey = animals
+                        .iter()
+                        .filter(|a| a.health > 0.0 && a.position.distance(s.post) < HUNT_RADIUS)
+                        .map(|a| (a.id, a.position, a.position.distance(s.position)))
+                        .min_by(|a, b| a.2.total_cmp(&b.2));
+                    match prey {
+                        Some((prey_id, target, dist)) => {
+                            goal = Some(target);
+                            speed = SURVIVOR_SPEED * 1.3;
+                            if dist < melee_range + 0.6 && (target.y - s.position.y).abs() < 1.6 {
+                                face = Some(target);
+                                goal = None;
+                                if s.attack_cooldown <= 0.0 {
+                                    s.attack_cooldown = ATTACK_COOLDOWN;
+                                    s.attacking = 0.4;
+                                    let damage = s.stats.damage() + melee.damage - Item::melee_damage(None);
+                                    if let Some(mut animal) = animals.iter_mut().find(|a| a.id == prey_id) {
+                                        let push = (target - s.position).with_y(0.0).normalize_or_zero() * 4.0;
+                                        animal.hurt(damage, None, push);
+                                        if animal.health <= 0.0 {
+                                            // Le chasseur rapporte sa prise au coffre du poste (ou à son chef).
+                                            let (min, max) = animal.kind.stats().meat;
+                                            let leader_id = leader.map(|(id, _)| id);
+                                            let meat = fastrand::u32(min..=max);
+                                            for (item, n) in [(Item::RawMeat, meat), (Item::Hide, 1)] {
+                                                deliver(
+                                                    s,
+                                                    item,
+                                                    n,
+                                                    leader_id,
+                                                    &world,
+                                                    &mut chests,
+                                                    &mut lobby,
+                                                    server.as_deref_mut(),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        None => goal = wander(s, 10.0, dt),
                     }
                 }
             }
@@ -868,9 +986,25 @@ fn step(s: &mut Survivor, goal: Option<Vec3>, face: Option<Vec3>, speed: f32, dt
 
 fn survivor_deaths(
     mut commands: Commands,
-    survivors: Query<(Entity, &Survivor)>,
+    mut survivors: Query<(Entity, &mut Survivor)>,
     mut server: Option<ResMut<RenetServer>>,
 ) {
+    // Les compagnons proches d'un survivant tombé en sont affectés.
+    let fallen: Vec<(String, Vec3)> = survivors
+        .iter()
+        .filter(|(_, s)| s.health <= 0.0)
+        .filter_map(|(_, s)| s.leader.clone().map(|l| (l, s.position)))
+        .collect();
+    for (_, mut s) in &mut survivors {
+        if s.health <= 0.0 {
+            continue;
+        }
+        for (leader, at) in &fallen {
+            if s.leader.as_ref() == Some(leader) && s.position.distance(*at) < GRIEF_RADIUS {
+                s.grief += GRIEF_PER_DEATH;
+            }
+        }
+    }
     for (entity, s) in &survivors {
         if s.health > 0.0 {
             continue;
@@ -953,7 +1087,14 @@ fn broadcast_survivors(
                 if s.leader.is_some() && s.hunger <= 0.0 {
                     flags |= SurvivorState::HUNGRY;
                 }
-                SurvivorState::new(s.id, s.position, s.yaw, s.health / s.stats.max_health(), flags)
+                SurvivorState::new(
+                    s.id,
+                    s.position,
+                    s.yaw,
+                    s.health / s.stats.max_health(),
+                    flags,
+                    s.morale,
+                )
             })
             .collect();
         if !states.is_empty() {
@@ -963,5 +1104,384 @@ fn broadcast_survivors(
                 encode(&ServerMessage::Survivors(states)),
             );
         }
+    }
+}
+
+/// Ce qu'un travail a le droit de modifier.
+struct Jobs<'a> {
+    world: &'a mut GameWorld,
+    version: &'a mut WorldVersion,
+    chests: &'a mut Chests,
+    lobby: &'a mut Lobby,
+    server: Option<&'a mut RenetServer>,
+}
+
+impl Jobs<'_> {
+    fn set_block(&mut self, pos: IVec3, block: Block) {
+        if self.world.set_block(pos, block) {
+            self.version.0 += 1;
+            if let Some(server) = self.server.as_deref_mut() {
+                broadcast(server, &ServerMessage::BlockChanged { pos, block });
+            }
+        }
+    }
+
+    /// Coffre près du poste qui contient au moins `n` exemplaires de l'objet.
+    fn chest_with(&self, s: &Survivor, item: Item, n: u32) -> Option<IVec3> {
+        self.chests
+            .0
+            .iter()
+            .filter(|(pos, inv)| {
+                inv.has(item, n)
+                    && self.world.block(**pos) == Block::Chest
+                    && (pos.as_vec3() + Vec3::splat(0.5)).distance(s.post) < WORK_RADIUS
+            })
+            .map(|(pos, _)| *pos)
+            .next()
+    }
+
+    fn take(&mut self, chest: IVec3, item: Item, n: u32) {
+        for _ in 0..n {
+            take_one(
+                Supply::Chest(chest),
+                item,
+                self.lobby,
+                self.chests,
+                self.server.as_deref_mut(),
+            );
+        }
+    }
+
+    fn deliver(&mut self, s: &Survivor, leader: Option<ClientId>, item: Item, n: u32) {
+        deliver(
+            s,
+            item,
+            n,
+            leader,
+            self.world,
+            self.chests,
+            self.lobby,
+            self.server.as_deref_mut(),
+        );
+    }
+}
+
+/// Rayon du champ d'un fermier autour de son poste.
+const FARM_RADIUS: i32 = 6;
+/// Durée d'une récolte ou d'un semis.
+const FARM_SECS: f32 = 5.0;
+/// Durée d'une cuisson.
+const COOK_SECS: f32 = 10.0;
+/// Distance de chasse autour du poste.
+const HUNT_RADIUS: f32 = 40.0;
+/// Le moral bouge d'un point toutes les `MORALE_SECS_PER_POINT` secondes.
+const MORALE_SECS_PER_POINT: f32 = 3.0;
+/// Chagrin causé par la mort d'un compagnon proche, et rayon où il se fait sentir.
+const GRIEF_PER_DEATH: f32 = 25.0;
+const GRIEF_RADIUS: f32 = 24.0;
+/// Le chagrin s'estompe de 25 points en 5 minutes.
+const GRIEF_FADE: f32 = 25.0 / 300.0;
+/// Secondes au plus bas du moral avant d'abandonner son chef.
+const DESERT_AFTER: f32 = 60.0;
+
+/// Bloc de ce type le plus proche de `center`, dans un rayon donné (sur 4 blocs de haut et de bas).
+fn find_near(world: &GameWorld, center: Vec3, block: Block, radius: i32) -> Option<IVec3> {
+    let c = center.floor().as_ivec3();
+    let mut best: Option<(IVec3, i32)> = None;
+    for dx in -radius..=radius {
+        for dz in -radius..=radius {
+            for dy in -4..=4 {
+                let p = c + IVec3::new(dx, dy, dz);
+                let d = dx * dx + dy * dy + dz * dz;
+                if world.block(p) == block && best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((p, d));
+                }
+            }
+        }
+    }
+    best.map(|(p, _)| p)
+}
+
+/// Fermier : récolte le blé mûr (et le ressème), puis sème sur la terre nue avec les graines du coffre.
+/// Renvoie où il veut aller.
+fn farm(
+    s: &mut Survivor,
+    leader: Option<ClientId>,
+    work_speed: f32,
+    dt: f32,
+    mut jobs: Jobs,
+    face: &mut Option<Vec3>,
+) -> Option<Vec3> {
+    let still_valid = |p: IVec3, world: &GameWorld| {
+        let b = world.block(p);
+        b == Block::RipeWheat || (b == Block::Air && world.block(p - IVec3::Y) == Block::Dirt)
+    };
+    if s.job_target.is_some_and(|p| !still_valid(p, jobs.world)) {
+        s.job_target = None;
+    }
+    if s.job_target.is_none() {
+        let post = s.post.floor().as_ivec3();
+        let mut ripe = None;
+        let mut bare = None;
+        for dx in -FARM_RADIUS..=FARM_RADIUS {
+            for dz in -FARM_RADIUS..=FARM_RADIUS {
+                for dy in -3..=3 {
+                    let p = post + IVec3::new(dx, dy, dz);
+                    match jobs.world.block(p) {
+                        Block::RipeWheat if ripe.is_none() => ripe = Some(p),
+                        Block::Air if bare.is_none() && jobs.world.block(p - IVec3::Y) == Block::Dirt => bare = Some(p),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let has_seeds = jobs.chest_with(s, Item::Seeds, 1).is_some();
+        s.job_target = ripe.or(bare.filter(|_| has_seeds));
+    }
+    let Some(target) = s.job_target else {
+        return wander(s, FARM_RADIUS as f32, dt);
+    };
+    let center = target.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+    if Vec2::new(center.x - s.position.x, center.z - s.position.z).length() > 1.8 {
+        return Some(center);
+    }
+    *face = Some(center);
+    s.working = true;
+    s.work += dt * work_speed;
+    if s.work < FARM_SECS {
+        return None;
+    }
+    s.work = 0.0;
+    s.job_target = None;
+    if jobs.world.block(target) == Block::RipeWheat {
+        // Récolte, et une graine remise en terre aussitôt.
+        jobs.set_block(target, Block::Sprout);
+        jobs.deliver(s, leader, Item::Wheat, 2);
+        if fastrand::bool() {
+            jobs.deliver(s, leader, Item::Seeds, 1);
+        }
+    } else if let Some(chest) = jobs.chest_with(s, Item::Seeds, 1) {
+        jobs.take(chest, Item::Seeds, 1);
+        jobs.set_block(target, Block::Sprout);
+    }
+    None
+}
+
+/// Cuisinier : au feu de camp près du poste, cuit la viande crue et fait le pain avec le blé du coffre.
+fn cook(
+    s: &mut Survivor,
+    leader: Option<ClientId>,
+    work_speed: f32,
+    dt: f32,
+    mut jobs: Jobs,
+    face: &mut Option<Vec3>,
+) -> Option<Vec3> {
+    let Some(fire) = s.campfire else {
+        return (s.post.distance(s.position) > 1.5).then_some(s.post);
+    };
+    let center = fire.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+    if Vec2::new(center.x - s.position.x, center.z - s.position.z).length() > 2.2 {
+        return Some(center);
+    }
+    *face = Some(center);
+    let recipe = if let Some(chest) = jobs.chest_with(s, Item::RawMeat, 1) {
+        Some((chest, Item::RawMeat, 1, Item::CookedMeat))
+    } else {
+        jobs.chest_with(s, Item::Wheat, 3)
+            .map(|chest| (chest, Item::Wheat, 3, Item::Bread))
+    };
+    let (chest, input, n, output) = recipe?;
+    s.working = true;
+    s.work += dt * work_speed;
+    if s.work >= COOK_SECS {
+        s.work = 0.0;
+        jobs.take(chest, input, n);
+        jobs.deliver(s, leader, output, 1);
+    }
+    None
+}
+
+/// Le survivant perd courage et quitte son chef ; il lui rend ce qu'il lui avait confié s'il est là.
+fn desert(s: &mut Survivor, lobby: &mut Lobby, mut server: Option<&mut RenetServer>) {
+    let Some(leader) = s.leader.take() else { return };
+    if let Some((id, player)) = lobby.players.iter_mut().find(|(_, p)| p.name == leader)
+        && s.return_gear(&mut player.inventory)
+        && let Some(server) = server.as_deref_mut()
+    {
+        send_inventory(server, *id, player);
+    }
+    info!("Le survivant {} abandonne {leader} (moral au plus bas)", s.name);
+    s.order = Order::Idle;
+    s.post = s.position;
+    s.despair = 0.0;
+    s.morale = MORALE_START;
+    s.grief = 0.0;
+    if let Some(server) = server {
+        broadcast(
+            server,
+            &ServerMessage::Chat {
+                from: "Serveur".into(),
+                text: format!("{} a perdu courage et quitte {leader}", s.name),
+            },
+        );
+        broadcast(server, &s.info());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use shared::config::WorldConfig;
+    use shared::daytime::GameTime;
+    use shared::world::WorldState;
+
+    use super::*;
+
+    /// Une dalle dans le ciel, un coffre près du poste, un survivant de Alice au travail.
+    fn camp(order: Order) -> (App, IVec3, IVec3) {
+        let mut world = GameWorld(WorldState::new(WorldConfig::default()));
+        let y = world.generator().surface_height(100, 100) + 25;
+        for x in 85..=115 {
+            for z in 85..=115 {
+                world.set_block(IVec3::new(x, y - 1, z), Block::Stone);
+            }
+        }
+        let post = IVec3::new(100, y, 100);
+        let chest = post + IVec3::new(3, 0, 0);
+        world.set_block(chest, Block::Chest);
+        let mut chests = Chests::default();
+        chests.0.insert(chest, shared::item::Inventory::default());
+        let mut app = App::new();
+        app.insert_resource(world)
+            .insert_resource(chests)
+            .insert_resource(Clock(GameTime { day: 2, phase: 0.2 }))
+            .init_resource::<Time>()
+            .init_resource::<WorldVersion>()
+            .init_resource::<Lobby>()
+            .init_resource::<BlockDamage>()
+            .add_systems(Update, (survivor_ai, survivor_deaths).chain());
+        let mut s = Survivor::new(
+            1,
+            "Marie".into(),
+            SurvivorStats::from_seed(3),
+            post.as_vec3() + Vec3::new(0.5, 0.0, 0.5),
+        );
+        s.leader = Some("Alice".into());
+        s.order = order;
+        app.world_mut().spawn(s);
+        (app, post, chest)
+    }
+
+    fn run(app: &mut App, secs: f32) {
+        for _ in 0..(secs * 10.0) as usize {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f32(0.1));
+            app.update();
+        }
+    }
+
+    fn chest(app: &App, pos: IVec3) -> shared::item::Inventory {
+        app.world().resource::<Chests>().0[&pos].clone()
+    }
+
+    fn survivor(app: &mut App) -> Survivor {
+        app.world_mut()
+            .query::<&Survivor>()
+            .single(app.world())
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn the_farmer_harvests_ripe_wheat_and_replants_it() {
+        let (mut app, post, chest_pos) = camp(Order::Farm);
+        let field = post + IVec3::new(-2, 0, 2);
+        {
+            let mut world = app.world_mut().resource_mut::<GameWorld>();
+            world.set_block(field - IVec3::Y, Block::Dirt);
+            world.set_block(field, Block::RipeWheat);
+        }
+        run(&mut app, 30.0);
+        assert!(chest(&app, chest_pos).has(Item::Wheat, 2));
+        assert_eq!(app.world().resource::<GameWorld>().block(field), Block::Sprout);
+    }
+
+    #[test]
+    fn the_farmer_sows_bare_soil_with_seeds_from_the_chest() {
+        let (mut app, post, chest_pos) = camp(Order::Farm);
+        let field = post + IVec3::new(2, 0, -2);
+        app.world_mut()
+            .resource_mut::<GameWorld>()
+            .set_block(field - IVec3::Y, Block::Dirt);
+        app.world_mut()
+            .resource_mut::<Chests>()
+            .0
+            .get_mut(&chest_pos)
+            .unwrap()
+            .add(Item::Seeds, 1);
+        run(&mut app, 30.0);
+        assert_eq!(app.world().resource::<GameWorld>().block(field), Block::Sprout);
+        assert!(!chest(&app, chest_pos).has(Item::Seeds, 1));
+    }
+
+    #[test]
+    fn the_cook_turns_raw_meat_into_meals_by_the_fire() {
+        let (mut app, post, chest_pos) = camp(Order::Cook);
+        app.world_mut()
+            .resource_mut::<GameWorld>()
+            .set_block(post + IVec3::new(0, 0, -3), Block::Campfire);
+        app.world_mut()
+            .resource_mut::<Chests>()
+            .0
+            .get_mut(&chest_pos)
+            .unwrap()
+            .add(Item::RawMeat, 2);
+        run(&mut app, 40.0);
+        let inv = chest(&app, chest_pos);
+        assert!(inv.has(Item::CookedMeat, 1), "{inv:?}");
+        assert!(!inv.has(Item::RawMeat, 2));
+    }
+
+    #[test]
+    fn the_hunter_brings_back_meat_and_hide() {
+        let (mut app, post, chest_pos) = camp(Order::Hunt);
+        let at = post.as_vec3() + Vec3::new(8.5, 0.0, 6.5);
+        app.world_mut()
+            .spawn(Animal::new(7, shared::animal::AnimalKind::Deer, at));
+        run(&mut app, 40.0);
+        let inv = chest(&app, chest_pos);
+        assert!(inv.has(Item::RawMeat, 1) && inv.has(Item::Hide, 1), "{inv:?}");
+    }
+
+    #[test]
+    fn a_survivor_at_the_end_of_their_rope_leaves() {
+        let (mut app, _, _) = camp(Order::Guard);
+        {
+            let mut q = app.world_mut().query::<&mut Survivor>();
+            let mut s = q.single_mut(app.world_mut()).unwrap();
+            s.morale = 5.0;
+            s.hunger = 0.0;
+            s.grief = 40.0;
+        }
+        run(&mut app, 70.0);
+        let s = survivor(&mut app);
+        assert_eq!(s.leader, None);
+        assert_eq!(s.order, Order::Idle);
+    }
+
+    #[test]
+    fn a_well_kept_survivor_cheers_up() {
+        let (mut app, post, _) = camp(Order::Guard);
+        app.world_mut()
+            .resource_mut::<GameWorld>()
+            .set_block(post + IVec3::new(0, 0, -3), Block::Campfire);
+        {
+            let mut q = app.world_mut().query::<&mut Survivor>();
+            let mut s = q.single_mut(app.world_mut()).unwrap();
+            s.weapon = Some(Item::Sword(shared::item::Tier::Stone));
+            s.since_hit = 100.0;
+        }
+        run(&mut app, 60.0);
+        assert!(survivor(&mut app).morale >= shared::survivor::MORALE_HIGH);
     }
 }

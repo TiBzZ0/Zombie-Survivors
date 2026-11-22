@@ -60,6 +60,8 @@ pub struct SurvivorView {
     target: Vec3,
     target_yaw: f32,
     flags: u8,
+    /// Moral, de 0 à 100.
+    morale: f32,
     /// Part de vie restante (0 à 1).
     pub health: f32,
     last_seen: f32,
@@ -125,6 +127,7 @@ fn spawn_survivor(commands: &mut Commands, assets: &SurvivorAssets, state: &Surv
                 target: state.position(),
                 target_yaw: state.yaw(),
                 flags: state.flags,
+                morale: state.morale as f32,
                 health: state.health_fraction(),
                 last_seen: now,
                 walk_phase: 0.0,
@@ -187,6 +190,7 @@ fn receive_survivors(
                             view.target = state.position();
                             view.target_yaw = state.yaw();
                             view.flags = state.flags;
+                            view.morale = state.morale as f32;
                             view.health = state.health_fraction();
                             view.last_seen = now;
                         }
@@ -329,6 +333,13 @@ fn update_hint(
     mut player: ResMut<LocalPlayer>,
 ) {
     let hungry = |id: u32| views.iter().any(|v| v.id == id && v.flags & SurvivorState::HUNGRY != 0);
+    let morale = |id: u32| {
+        views
+            .iter()
+            .find(|v| v.id == id)
+            .map(|v| format!(" · {}", shared::survivor::morale_label(v.morale)))
+            .unwrap_or_default()
+    };
     let hint = player
         .aimed_survivor
         .and_then(|id| registry.infos.get(&id).map(|info| (id, info)))
@@ -352,10 +363,11 @@ fn update_hint(
                     info.stats.describe()
                 ),
                 Some(leader) if Some(leader.as_str()) == me => format!(
-                    "{} {} ({}{armed}){hunger}\nClic droit : ordre suivant ({}) · Ctrl : confier l'arme ou l'armure tenue · Maj : renvoyer",
+                    "{} {} ({}{armed}){}{hunger}\nClic droit : ordre suivant ({}) · Ctrl : confier l'arme ou l'armure tenue · Maj : renvoyer",
                     info.name,
                     info.order.label(),
                     info.stats.describe(),
+                    morale(id),
                     info.order.next().label()
                 ),
                 Some(leader) => format!("{}, survivant de {leader} ({}{armed})", info.name, info.order.label()),
