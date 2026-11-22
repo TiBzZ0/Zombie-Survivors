@@ -17,6 +17,7 @@ pub mod animals;
 pub mod config;
 pub mod daynight;
 pub mod electricity;
+pub mod events;
 pub mod explosives;
 pub mod farming;
 pub mod net;
@@ -53,6 +54,7 @@ impl Plugin for ServerPlugin {
                 animals::AnimalPlugin,
                 water::WaterPlugin,
                 electricity::ElectricityPlugin,
+                events::EventsPlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)

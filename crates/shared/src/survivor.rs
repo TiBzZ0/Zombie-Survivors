@@ -147,6 +147,79 @@ const NAMES: &[&str] = &[
     "Bastien", "Amina", "Romain", "Zoé", "Karim", "Elsa", "Victor", "Lina", "Tom", "Manon", "Idriss",
 ];
 
+/// Marché proposé par un marchand : `give` exemplaires de `want` contre `get` exemplaires de `offer`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Offer {
+    pub want: Item,
+    pub give: u32,
+    pub offer: Item,
+    pub get: u32,
+}
+
+impl Offer {
+    pub fn describe(self) -> String {
+        format!(
+            "{} {} contre {} {}",
+            self.give,
+            self.want.name().to_lowercase(),
+            self.get,
+            self.offer.name().to_lowercase()
+        )
+    }
+}
+
+/// Marchés possibles ; un marchand en propose trois au hasard.
+pub const TRADES: [Offer; 8] = [
+    Offer {
+        want: Item::Hide,
+        give: 4,
+        offer: Item::Ammo,
+        get: 12,
+    },
+    Offer {
+        want: Item::Wheat,
+        give: 6,
+        offer: Item::Antidote,
+        get: 1,
+    },
+    Offer {
+        want: Item::IronIngot,
+        give: 3,
+        offer: Item::Grenade,
+        get: 2,
+    },
+    Offer {
+        want: Item::CookedMeat,
+        give: 4,
+        offer: Item::Bolt,
+        get: 10,
+    },
+    Offer {
+        want: Item::Coal,
+        give: 6,
+        offer: Item::IronIngot,
+        get: 3,
+    },
+    Offer {
+        want: Item::RawMeat,
+        give: 6,
+        offer: Item::Bandage,
+        get: 3,
+    },
+    Offer {
+        want: Item::Apple,
+        give: 10,
+        offer: Item::Seeds,
+        get: 6,
+    },
+    Offer {
+        want: Item::Bread,
+        give: 3,
+        offer: Item::Ammo,
+        get: 8,
+    },
+];
+
 /// Moral de départ d'un survivant.
 pub const MORALE_START: f32 = 60.0;
 /// Sous ce moral, le survivant traîne des pieds ; au-dessus de `MORALE_HIGH`, il se donne à fond.

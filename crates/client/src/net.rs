@@ -113,6 +113,11 @@ pub enum NetEvent {
         order: shared::survivor::Order,
         weapon: Option<shared::item::Item>,
         armor: [Option<shared::item::Item>; 2],
+        offers: Vec<shared::survivor::Offer>,
+    },
+    /// Brouillard ou non.
+    Weather {
+        fog: bool,
     },
     /// Un coup de zombie a été paré.
     Parried,
@@ -375,6 +380,7 @@ fn receive_messages(
                 order,
                 weapon,
                 armor,
+                offers,
             } => {
                 events.write(NetEvent::SurvivorInfo {
                     id,
@@ -384,7 +390,11 @@ fn receive_messages(
                     order,
                     weapon,
                     armor,
+                    offers,
                 });
+            }
+            ServerMessage::Weather { fog } => {
+                events.write(NetEvent::Weather { fog });
             }
             ServerMessage::Parried => {
                 events.write(NetEvent::Parried);

@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0012;
+pub const PROTOCOL_ID: u64 = 0x5A53_0013;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -331,6 +331,8 @@ pub enum ServerMessage {
         weapon: Option<Item>,
         /// Casque et armure confiés.
         armor: [Option<Item>; 2],
+        /// Marchés proposés (vide sauf pour un marchand).
+        offers: Vec<crate::survivor::Offer>,
     },
     /// Un zombie est mort (pour l'effet visuel et le compteur).
     ZombieKilled {
@@ -357,6 +359,10 @@ pub enum ServerMessage {
     Acid {
         origin: Vec3,
         end: Vec3,
+    },
+    /// Temps qu'il fait : brouillard ou non (envoyé régulièrement).
+    Weather {
+        fog: bool,
     },
     /// Générateurs en marche (tous ceux du monde), envoyés régulièrement.
     Power(Vec<IVec3>),

@@ -44,6 +44,8 @@ pub struct SurvivorInfo {
     pub order: Order,
     pub weapon: Option<Item>,
     pub armor: [Option<Item>; 2],
+    /// Marchés d'un marchand (vide sinon).
+    pub offers: Vec<shared::survivor::Offer>,
 }
 
 /// Survivants affichés et identités connues, par identifiant serveur.
@@ -216,6 +218,7 @@ fn receive_survivors(
                 order,
                 weapon,
                 armor,
+                offers,
             } => {
                 registry.infos.insert(
                     *id,
@@ -226,6 +229,7 @@ fn receive_survivors(
                         order: *order,
                         weapon: *weapon,
                         armor: *armor,
+                        offers: offers.clone(),
                     },
                 );
             }
@@ -364,6 +368,10 @@ fn update_hint(
                 .map(|i| format!(", {}", i.name().to_lowercase()))
                 .collect();
             match &info.leader {
+                None if !info.offers.is_empty() => {
+                    let list: Vec<String> = info.offers.iter().map(|o| format!("· {}", o.describe())).collect();
+                    format!("{}\n{}\nClic droit : échanger (le premier marché que tu peux payer)", info.name, list.join("\n"))
+                }
                 None => format!(
                     "{} ({})\nClic droit : recruter contre 1 ration ou 3 pommes",
                     info.name,
