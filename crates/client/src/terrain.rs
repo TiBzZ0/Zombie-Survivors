@@ -7,11 +7,12 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
+use shared::block::Block;
 use shared::chunk::{CHUNK_SIZE, ChunkPos};
 use shared::world::WorldState;
 
 use crate::AppState;
-use crate::meshing::{MeshData, build_chunk_mesh};
+use crate::meshing::{ChunkMeshes, build_chunk_mesh};
 use crate::net::{ClientWorld, NetEvent};
 use crate::settings::Settings;
 
@@ -38,21 +39,22 @@ impl Plugin for TerrainPlugin {
 
 #[derive(Resource, Default)]
 struct Terrain {
-    /// Chunks affichés (ou vides), avec leur entité s'ils ont un maillage.
-    loaded: HashMap<ChunkPos, Option<Entity>>,
+    /// Chunks affichés, avec leurs entités (une par type de bloc ; aucune si le chunk est vide).
+    loaded: HashMap<ChunkPos, Vec<Entity>>,
     /// Chunks en cours de calcul.
     pending: HashSet<ChunkPos>,
     /// Chunks à recalculer dès que possible (un bloc a changé).
     dirty: HashSet<ChunkPos>,
 }
 
+/// Un matériau par type de bloc, chacun avec sa texture répétée.
 #[derive(Resource)]
-struct TerrainMaterial(Handle<StandardMaterial>);
+struct TerrainMaterials(HashMap<Block, Handle<StandardMaterial>>);
 
 #[derive(Component)]
 struct ChunkTask {
     pos: ChunkPos,
-    task: Task<MeshData>,
+    task: Task<ChunkMeshes>,
 }
 
 #[derive(Component)]
@@ -63,14 +65,19 @@ fn setup_material(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    let atlas = images.add(crate::textures::build_atlas());
-    let handle = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        base_color_texture: Some(atlas),
-        perceptual_roughness: 1.0,
-        ..default()
-    });
-    commands.insert_resource(TerrainMaterial(handle));
+    let handles = crate::textures::all_blocks()
+        .map(|block| {
+            let texture = images.add(crate::textures::build_block_texture(block));
+            let material = materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                base_color_texture: Some(texture),
+                perceptual_roughness: 1.0,
+                ..default()
+            });
+            (block, material)
+        })
+        .collect();
+    commands.insert_resource(TerrainMaterials(handles));
 }
 
 fn mark_dirty(mut events: MessageReader<NetEvent>, mut terrain: ResMut<Terrain>) {
@@ -166,7 +173,7 @@ fn request_chunks(
         .copied()
         .collect();
     for pos in to_unload {
-        if let Some(Some(entity)) = terrain.loaded.remove(&pos) {
+        for entity in terrain.loaded.remove(&pos).unwrap_or_default() {
             commands.entity(entity).despawn();
         }
     }
@@ -178,7 +185,7 @@ fn finish_chunks(
     mut tasks: Query<(Entity, &mut ChunkTask)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut terrain: ResMut<Terrain>,
-    material: Res<TerrainMaterial>,
+    materials: Res<TerrainMaterials>,
 ) {
     for (task_entity, mut task) in &mut tasks {
         let Some(data) = check_ready(&mut task.task) else {
@@ -187,29 +194,33 @@ fn finish_chunks(
         let pos = task.pos;
         commands.entity(task_entity).despawn();
         terrain.pending.remove(&pos);
-        if let Some(Some(old)) = terrain.loaded.remove(&pos) {
+        for old in terrain.loaded.remove(&pos).unwrap_or_default() {
             commands.entity(old).despawn();
         }
-        if data.is_empty() {
-            terrain.loaded.insert(pos, None);
-            continue;
-        }
-        let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, data.positions)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, data.colors)
-            .with_inserted_indices(Indices::U32(data.indices));
         let [ox, oy, oz] = pos.origin();
-        let entity = commands
-            .spawn((
-                ChunkMesh,
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(material.0.clone()),
-                Transform::from_xyz(ox as f32, oy as f32, oz as f32),
-            ))
-            .id();
-        terrain.loaded.insert(pos, Some(entity));
+        let mut entities = Vec::new();
+        for (block, data) in data.parts {
+            let Some(material) = materials.0.get(&block) else {
+                continue;
+            };
+            let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, data.positions)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, data.colors)
+                .with_inserted_indices(Indices::U32(data.indices));
+            entities.push(
+                commands
+                    .spawn((
+                        ChunkMesh,
+                        Mesh3d(meshes.add(mesh)),
+                        MeshMaterial3d(material.clone()),
+                        Transform::from_xyz(ox as f32, oy as f32, oz as f32),
+                    ))
+                    .id(),
+            );
+        }
+        terrain.loaded.insert(pos, entities);
     }
 }
 

@@ -2,21 +2,15 @@
 //! (grain, planches, écorce, pierres, éclats de minerai), multiplié par la couleur du bloc.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::{Image, ImageSampler};
+use bevy::image::{Image, ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use shared::block::Block;
 
 /// Côté d'une tuile, en pixels.
 pub const TILE: u32 = 16;
-/// Nombre de tuiles dans l'atlas (une par valeur possible de `Block`, avec de la marge).
+/// Nombre maximal de types de blocs (une texture par valeur possible de `Block`, avec de la marge).
+#[cfg(test)]
 pub const TILES: u32 = 32;
-
-/// Coordonnées de texture d'un coin de face : `u` et `v` entre 0 et 1 dans la tuile du bloc.
-pub fn atlas_uv(block: Block, u: f32, v: f32) -> [f32; 2] {
-    // Un demi-pixel de marge pour ne pas déborder sur la tuile voisine.
-    let inset = |t: f32| (0.5 + t * (TILE as f32 - 1.0)) / TILE as f32;
-    [(block as u32 as f32 + inset(u)) / TILES as f32, 1.0 - inset(v)]
-}
 
 fn hash(x: u32, y: u32, salt: u32) -> f32 {
     let mut h = x.wrapping_mul(0x85EB_CA6B) ^ y.wrapping_mul(0xC2B2_AE35) ^ salt.wrapping_mul(0x9E37_79B9);
@@ -178,26 +172,22 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
     }
 }
 
-/// Image de l'atlas, échantillonnée sans lissage (pixels nets).
-pub fn build_atlas() -> Image {
-    let (w, h) = (TILE * TILES, TILE);
-    let mut data = vec![255u8; (w * h * 4) as usize];
-    for tile in 0..TILES {
-        let Some(block) = block_from_index(tile) else { continue };
-        for y in 0..TILE {
-            for x in 0..TILE {
-                let c = pixel(block, x, y);
-                let i = (((y * w) + tile * TILE + x) * 4) as usize;
-                for k in 0..3 {
-                    data[i + k] = (c[k].clamp(0.0, 1.0) * 255.0) as u8;
-                }
+/// Texture d'un bloc, répétée sur les grandes faces fusionnées et échantillonnée sans lissage.
+pub fn build_block_texture(block: Block) -> Image {
+    let mut data = vec![255u8; (TILE * TILE * 4) as usize];
+    for y in 0..TILE {
+        for x in 0..TILE {
+            let c = pixel(block, x, y);
+            let i = ((y * TILE + x) * 4) as usize;
+            for k in 0..3 {
+                data[i + k] = (c[k].clamp(0.0, 1.0) * 255.0) as u8;
             }
         }
     }
     let mut image = Image::new(
         Extent3d {
-            width: w,
-            height: h,
+            width: TILE,
+            height: TILE,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -205,10 +195,20 @@ pub fn build_atlas() -> Image {
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     );
-    image.sampler = ImageSampler::nearest();
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::nearest()
+    });
     image
 }
 
+/// Tous les blocs visibles.
+pub fn all_blocks() -> impl Iterator<Item = Block> {
+    ALL_BLOCKS.into_iter().filter(|b| *b != Block::Air)
+}
+
+#[cfg(test)]
 fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
@@ -250,13 +250,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_block_fits_in_the_atlas() {
-        for block in ALL_BLOCKS {
+    fn every_block_has_a_texture() {
+        for block in all_blocks() {
             assert!((block as u32) < TILES);
-            let [u, _] = atlas_uv(block, 1.0, 0.0);
-            assert!(u < (block as u32 + 1) as f32 / TILES as f32);
+            assert_eq!(block_from_index(block as u32), Some(block));
+            assert_eq!(build_block_texture(block).width(), TILE);
         }
-        let atlas = build_atlas();
-        assert_eq!(atlas.width(), TILE * TILES);
     }
 }
