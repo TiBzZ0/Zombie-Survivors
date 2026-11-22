@@ -95,8 +95,9 @@ fn start_connection(
     mut next: ResMut<NextState<AppState>>,
 ) {
     let server_addr = if options.host_locally {
-        let config = ServerConfig::default();
+        let config = ServerConfig::local();
         let port = config.port;
+        info!("Sauvegarde de la partie locale : {}", config.data_dir.display());
         match server::spawn_local(config) {
             Ok(local) => commands.insert_resource(HostedServer(local)),
             Err(error) => {

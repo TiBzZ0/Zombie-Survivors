@@ -4,6 +4,8 @@ use bevy::prelude::*;
 use shared::world::WorldState;
 
 use crate::ServerConfig;
+use crate::daynight::Clock;
+use crate::save::{self, SavedPlayers};
 
 pub struct WorldPlugin;
 
@@ -21,8 +23,47 @@ pub struct GameWorld(pub WorldState);
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct SpawnPoint(pub Vec3);
 
-fn setup_world(mut commands: Commands, config: Res<ServerConfig>) {
-    let world = WorldState::new(config.world.clone());
+fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
+    let save = match save::load(&config.data_dir) {
+        Ok(save) => save,
+        Err(error) => {
+            // On met le fichier illisible de côté plutôt que de l'écraser.
+            let path = save::save_path(&config.data_dir);
+            let aside = path.with_extension("sav.illisible");
+            error!(
+                "Sauvegarde illisible ({error}) : déplacée vers {}, nouvelle partie",
+                aside.display()
+            );
+            let _ = std::fs::rename(&path, &aside);
+            None
+        }
+    };
+    let Some(save) = save else {
+        info!("Nouvelle partie (aucune sauvegarde dans {})", config.data_dir.display());
+        let world = WorldState::new(config.world.clone());
+        commands.insert_resource(SpawnPoint(find_spawn(&world)));
+        commands.insert_resource(GameWorld(world));
+        return;
+    };
+    if save.world != config.world {
+        warn!(
+            "La sauvegarde utilise la graine {} et une carte de {} chunks : ces réglages remplacent ceux de la configuration",
+            save.world.seed, save.world.size_chunks
+        );
+        config.world = save.world.clone();
+    }
+    let mut world = WorldState::new(save.world);
+    for (pos, block) in &save.edits {
+        world.set_block(*pos, *block);
+    }
+    info!(
+        "Sauvegarde chargée : jour {}, {} blocs modifiés, {} joueurs connus",
+        save.time.day,
+        save.edits.len(),
+        save.players.len()
+    );
+    commands.insert_resource(Clock(save.time));
+    commands.insert_resource(SavedPlayers(save.players.into_iter().collect()));
     commands.insert_resource(SpawnPoint(find_spawn(&world)));
     commands.insert_resource(GameWorld(world));
 }

@@ -26,6 +26,15 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
+    /// Configuration d'une partie locale lancée par le client : sauvegarde dans le dossier
+    /// de données de l'utilisateur, pour la retrouver d'une session à l'autre.
+    pub fn local() -> Self {
+        Self {
+            data_dir: user_data_dir(),
+            ..Self::default()
+        }
+    }
+
     /// Lit `PORT`, `MAX_PLAYERS`, `DATA_DIR`, `WORLD_SEED` et `WORLD_SIZE_CHUNKS`.
     /// Une variable absente garde sa valeur par défaut ; une valeur invalide est une erreur.
     pub fn from_env() -> Result<Self, String> {
@@ -58,6 +67,21 @@ impl ServerConfig {
         }
         Ok(config)
     }
+}
+
+/// Dossier de données de l'utilisateur, selon le système.
+fn user_data_dir() -> PathBuf {
+    let env = |key: &str| std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let dir = if cfg!(windows) {
+        env("APPDATA").map(|d| d.join("ZombieSurvivors"))
+    } else if cfg!(target_os = "macos") {
+        env("HOME").map(|h| h.join("Library/Application Support/ZombieSurvivors"))
+    } else {
+        env("XDG_DATA_HOME")
+            .or_else(|| env("HOME").map(|h| h.join(".local/share")))
+            .map(|d| d.join("zombie-survivors"))
+    };
+    dir.unwrap_or_else(|| PathBuf::from("data")).join("local")
 }
 
 #[cfg(test)]

@@ -92,11 +92,14 @@ fn pump_until(clients: &mut [&mut TestClient], what: &str, mut done: impl FnMut(
 #[test]
 fn two_players_share_the_world() {
     let port = 17_000 + (std::process::id() % 1000) as u16;
+    let data_dir = std::env::temp_dir().join(format!("zs-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data_dir);
     let config = ServerConfig {
         port,
+        data_dir: data_dir.clone(),
         ..ServerConfig::default()
     };
-    let _server = spawn_local(config).unwrap();
+    let server = spawn_local(config.clone()).unwrap();
     std::thread::sleep(Duration::from_millis(300));
 
     let mut alice = TestClient::connect(port, 1, "Alice");
@@ -273,4 +276,37 @@ fn two_players_share_the_world() {
             .is_some()
         },
     );
+
+    // Arrêt du serveur : la partie est sauvegardée.
+    let alice_apples = 3;
+    drop(carol);
+    drop(bob);
+    drop(alice);
+    drop(server);
+    assert!(data_dir.join("world.sav").exists(), "pas de sauvegarde à l'arrêt");
+
+    // Au redémarrage, le bloc posé est toujours là et Alice retrouve son inventaire.
+    let server = spawn_local(config).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let mut alice = TestClient::connect(port, 4, "Alice");
+    pump_until(&mut [&mut alice], "retour d'Alice après redémarrage", |c| {
+        let edits = c[0]
+            .find(|m| match m {
+                ServerMessage::WorldEdits(edits) => edits
+                    .iter()
+                    .any(|(p, b)| *p == placed && *b == dropped_block)
+                    .then_some(()),
+                _ => None,
+            })
+            .is_some();
+        let inventory = c[0]
+            .find(|m| match m {
+                ServerMessage::Inventory(inv) => (inv.count(Item::Apple) == alice_apples).then_some(()),
+                _ => None,
+            })
+            .is_some();
+        edits && inventory
+    });
+    drop(server);
+    let _ = std::fs::remove_dir_all(&data_dir);
 }

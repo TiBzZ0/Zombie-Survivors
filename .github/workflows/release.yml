@@ -1,0 +1,55 @@
+name: Version
+
+# Pousser une étiquette (git tag v0.1.0 && git push origin v0.1.0) publie une version :
+# le client Windows en .zip et l'image du serveur étiquetée avec le numéro.
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-client:
+    name: Client Windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p client
+      - name: Archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ZombieSurvivors | Out-Null
+          Copy-Item target/release/client.exe ZombieSurvivors/ZombieSurvivors.exe
+          Copy-Item README.md ZombieSurvivors/
+          Copy-Item crates/client/assets/fonts/OFL.txt ZombieSurvivors/LICENCE-police.txt
+          Compress-Archive -Path ZombieSurvivors -DestinationPath ZombieSurvivors-windows.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ZombieSurvivors-windows.zip
+          generate_release_notes: true
+
+  docker:
+    name: Image du serveur
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/tibzz0/zombie-survivors-server:${{ github.ref_name }}
+          cache-from: type=gha

@@ -2,6 +2,12 @@
 
 Jeu de survie coopératif en voxel, à la première personne, écrit en Rust avec Bevy : récolter des ressources, construire sa base et tenir face à des hordes de zombies. De 2 à 8 joueurs sur un serveur dédié (Docker) ou en mode local. Nom provisoire.
 
+## Jouer
+
+Télécharger `ZombieSurvivors-windows.zip` dans les [versions](https://github.com/TiBzZ0/Zombie-Survivors/releases), décompresser, lancer `ZombieSurvivors.exe`. Dans le menu : « Jouer en solo / héberger » ou « Rejoindre » avec l'adresse du serveur.
+
+Publier une version : `git tag v0.1.0 && git push origin v0.1.0` (la CI construit le .zip et l'image du serveur).
+
 ## Organisation
 
 | Crate | Rôle |
@@ -46,9 +52,20 @@ Sous Linux, Bevy demande `libasound2-dev`, `libudev-dev`, `libwayland-dev` et `l
 
 ## Serveur dédié
 
+Sur ton serveur (Docker et Docker Compose installés) :
+
 ```sh
-docker compose up -d
+git clone https://github.com/TiBzZ0/Zombie-Survivors.git
+cd Zombie-Survivors
+docker compose up -d          # construit l'image et lance le serveur
+docker compose logs -f        # suivre le journal
 ```
+
+Ouvre le port **UDP 7777** dans le pare-feu (et sur la box si le serveur est chez toi). Les joueurs rejoignent avec `adresse-du-serveur:7777` depuis le menu.
+
+Mettre à jour : `git pull && docker compose up -d --build`. La partie est conservée.
+
+L'image est aussi publiée par la CI à chaque fusion sur `main` : `ghcr.io/tibzz0/zombie-survivors-server:latest` (voir le commentaire dans `compose.yaml`).
 
 Variables d'environnement :
 
@@ -60,7 +77,15 @@ Variables d'environnement :
 | `WORLD_SIZE_CHUNKS` | `32` | Côté de la carte en chunks de 32 blocs (4 à 256) |
 | `DATA_DIR` | `/data` | Dossier des sauvegardes, monté en volume |
 
-Le serveur s'arrête proprement sur `docker stop` (SIGTERM).
+### Sauvegarde
+
+La partie (blocs modifiés, heure, joueurs avec leur inventaire) est enregistrée dans `DATA_DIR/world.sav` toutes les minutes et à l'arrêt (`docker stop`, Ctrl+C). Au redémarrage, la graine et la taille de la sauvegarde l'emportent sur les variables d'environnement. Pour repartir de zéro, supprimer le volume : `docker compose down -v`.
+
+Copie de secours : `docker compose cp server:/data/world.sav ./world.sav`.
+
+En partie locale, la sauvegarde est dans `%APPDATA%\ZombieSurvivors\local` (Windows), `~/Library/Application Support/ZombieSurvivors/local` (macOS) ou `~/.local/share/zombie-survivors/local` (Linux).
+
+Un joueur qui revient avec le même pseudo retrouve sa position, sa santé et son inventaire.
 
 ## Tests
 
