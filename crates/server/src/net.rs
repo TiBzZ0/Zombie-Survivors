@@ -622,12 +622,13 @@ fn handle_reliable(
                     p += dir;
                 }
             }
-            let next = if block == Block::Door {
-                Block::DoorOpen
-            } else {
-                Block::Door
+            let next = match block {
+                Block::Door => Block::DoorOpen,
+                Block::DoorOpen => Block::Door,
+                Block::ElectricDoor => Block::ElectricDoorOpen,
+                _ => Block::ElectricDoor,
             };
-            if next == Block::Door {
+            if next.is_solid() {
                 let blocked = lobby
                     .players
                     .values()

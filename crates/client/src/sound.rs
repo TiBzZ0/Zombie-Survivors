@@ -67,6 +67,7 @@ enum Sfx {
     Heal,
     Crackle,
     Hammer,
+    Zap,
 }
 
 #[derive(Resource)]
@@ -268,6 +269,14 @@ fn synth(sfx: Sfx) -> Vec<f32> {
             }
             s
         }
+        // Arc électrique : bourdonnement grésillant.
+        Sfx::Zap => {
+            let mut noise = Noise(127);
+            samples(0.3, |t, k| {
+                let buzz = (t * 120.0 * TAU).sin().signum() * 0.3;
+                (buzz + noise.next() * 0.4) * (1.0 - k).powi(2) * 0.7
+            })
+        }
         Sfx::Horn => samples(2.5, |t, k| {
             let env = (k * 6.0).min(1.0) * (1.0 - k).powf(0.5);
             ((t * 82.0 * TAU).sin() + 0.5 * (t * 123.0 * TAU).sin() + 0.25 * (t * 164.0 * TAU).sin()) * env * 0.4
@@ -298,6 +307,7 @@ fn build_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>
         Sfx::Heal,
         Sfx::Crackle,
         Sfx::Hammer,
+        Sfx::Zap,
     ];
     all.extend((0..3).map(Sfx::Groan));
     let map = all
@@ -371,6 +381,7 @@ fn world_sounds(
                 play(&mut commands, &sounds, sfx, Some(*origin), 1.0);
             }
             NetEvent::Parried => play(&mut commands, &sounds, Sfx::Parry, None, 0.8),
+            NetEvent::Zap { origin, .. } => play(&mut commands, &sounds, Sfx::Zap, Some(*origin), 0.8),
             NetEvent::Explosion { pos, .. } => play(&mut commands, &sounds, Sfx::Explosion, Some(*pos), 1.0),
             _ => {}
         }
@@ -595,6 +606,7 @@ mod tests {
             Sfx::Heal,
             Sfx::Crackle,
             Sfx::Hammer,
+            Sfx::Zap,
         ] {
             let s = synth(sfx);
             assert!(

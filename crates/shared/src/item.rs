@@ -423,6 +423,7 @@ pub fn drop_for(block: Block) -> Option<Item> {
         Block::IronOre => Some(Item::RawIron),
         Block::CoalOre => Some(Item::Coal),
         Block::DoorOpen => Some(Item::Block(Block::Door)),
+        Block::ElectricDoorOpen => Some(Item::Block(Block::ElectricDoor)),
         // Les cultures rendent leurs graines, le blé mûr du blé (le serveur ajoute des graines).
         Block::Sprout | Block::YoungWheat => Some(Item::Seeds),
         Block::RipeWheat => Some(Item::Wheat),

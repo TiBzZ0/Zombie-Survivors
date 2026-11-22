@@ -200,10 +200,10 @@ fn update_panel(
         return;
     };
     **panel = Visibility::Visible;
-    let heading = if world.block(*pos) == Block::Turret {
-        "TOURELLE (flèches ou cartouches)"
-    } else {
-        "COFFRE"
+    let heading = match world.block(*pos) {
+        Block::Turret => "TOURELLE (flèches ou cartouches)",
+        Block::Generator => "GÉNÉRATEUR (1 charbon = 2 minutes de courant, 12 blocs autour)",
+        _ => "COFFRE",
     };
     if title.0 != heading {
         title.0 = heading.into();

@@ -161,6 +161,30 @@ pub const RECIPES: &[Recipe] = &[
         station: Some(Block::Workbench),
     },
     Recipe {
+        output: b(Block::Generator),
+        count: 1,
+        inputs: &[(Item::IronIngot, 6), (Item::Coal, 4)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: b(Block::Floodlight),
+        count: 1,
+        inputs: &[(Item::IronIngot, 2), (b(Block::Sand), 2), (Item::Coal, 1)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: b(Block::ElectricDoor),
+        count: 1,
+        inputs: &[(Item::IronIngot, 4), (b(Block::Door), 1)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: b(Block::TeslaCoil),
+        count: 1,
+        inputs: &[(Item::IronIngot, 6), (Item::Coal, 2), (b(Block::Stone), 2)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
         output: b(Block::Turret),
         count: 1,
         inputs: &[(Item::IronIngot, 3), (b(Block::Planks), 4), (Item::Bow, 1)],
