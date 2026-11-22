@@ -130,6 +130,12 @@ pub enum NetEvent {
         origin: Vec3,
         end: Vec3,
     },
+    /// Générateurs en marche.
+    Power(Vec<IVec3>),
+    Zap {
+        origin: Vec3,
+        end: Vec3,
+    },
 }
 
 fn fail(commands: &mut Commands, next: &mut NextState<AppState>, message: String) {
@@ -398,6 +404,12 @@ fn receive_messages(
             }
             ServerMessage::Explosion { pos, radius } => {
                 events.write(NetEvent::Explosion { pos, radius });
+            }
+            ServerMessage::Power(running) => {
+                events.write(NetEvent::Power(running));
+            }
+            ServerMessage::Zap { origin, end } => {
+                events.write(NetEvent::Zap { origin, end });
             }
             ServerMessage::Acid { origin, end } => {
                 events.write(NetEvent::Acid { origin, end });

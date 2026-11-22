@@ -16,6 +16,7 @@ use shared::TICK_RATE_HZ;
 pub mod animals;
 pub mod config;
 pub mod daynight;
+pub mod electricity;
 pub mod explosives;
 pub mod farming;
 pub mod net;
@@ -51,6 +52,7 @@ impl Plugin for ServerPlugin {
                 farming::FarmingPlugin,
                 animals::AnimalPlugin,
                 water::WaterPlugin,
+                electricity::ElectricityPlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)

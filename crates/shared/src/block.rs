@@ -59,7 +59,19 @@ pub enum Block {
     Cactus,
     /// Eau qui s'écoule depuis une source (lac ou seau vidé) ; disparaît si la source tarit.
     FlowingWater,
+    /// Générateur : brûle le charbon qu'on y range et alimente les appareils électriques proches.
+    Generator,
+    /// Projecteur : éclaire la nuit et brûle les zombies proches quand il est alimenté.
+    Floodlight,
+    /// Porte électrique blindée : s'ouvre seule devant les joueurs et les survivants si elle est alimentée.
+    ElectricDoor,
+    ElectricDoorOpen,
+    /// Bobine électrique : foudroie le zombie le plus proche quand elle est alimentée.
+    TeslaCoil,
 }
+
+/// Distance à laquelle un générateur en marche alimente les appareils électriques.
+pub const POWER_RADIUS: f32 = 12.0;
 
 /// Distance maximale entre un joueur et l'arme fixe qu'il pilote.
 pub const EMPLACEMENT_REACH: f32 = 3.0;
@@ -95,7 +107,13 @@ impl Block {
     pub const fn is_solid(self) -> bool {
         !matches!(
             self,
-            Block::Air | Block::DoorOpen | Block::BarbedWire | Block::Campfire | Block::Water | Block::FlowingWater
+            Block::Air
+                | Block::DoorOpen
+                | Block::ElectricDoorOpen
+                | Block::BarbedWire
+                | Block::Campfire
+                | Block::Water
+                | Block::FlowingWater
         ) && !self.is_crop()
     }
 
@@ -111,12 +129,23 @@ impl Block {
 
     /// Un bloc opaque est un cube plein : il cache les faces de ses voisins.
     pub const fn is_opaque(self) -> bool {
-        !matches!(self, Block::Air | Block::DoorOpen | Block::BarbedWire | Block::Campfire) && !self.is_crop()
+        !matches!(
+            self,
+            Block::Air | Block::DoorOpen | Block::ElectricDoorOpen | Block::BarbedWire | Block::Campfire
+        ) && !self.is_crop()
     }
 
     /// Bloc qui garde des objets (ouvert avec le panneau du coffre).
     pub const fn is_storage(self) -> bool {
-        matches!(self, Block::Chest | Block::Turret)
+        matches!(self, Block::Chest | Block::Turret | Block::Generator)
+    }
+
+    /// Appareil qui ne marche qu'alimenté par un générateur proche.
+    pub const fn is_electric(self) -> bool {
+        matches!(
+            self,
+            Block::Floodlight | Block::ElectricDoor | Block::ElectricDoorOpen | Block::TeslaCoil
+        )
     }
 
     /// Arme fixe pilotable, avec ses caractéristiques de tir.
@@ -153,7 +182,10 @@ impl Block {
 
     /// Bloc qu'un joueur peut poser depuis son inventaire.
     pub const fn is_placeable(self) -> bool {
-        !matches!(self, Block::Air | Block::DoorOpen | Block::Water | Block::FlowingWater)
+        !matches!(
+            self,
+            Block::Air | Block::DoorOpen | Block::ElectricDoorOpen | Block::Water | Block::FlowingWater
+        )
     }
 
     /// Case où l'on peut poser un bloc : vide ou pleine d'eau.
@@ -170,7 +202,7 @@ impl Block {
     pub const fn partial_shape(self) -> Option<([f32; 3], [f32; 3])> {
         match self {
             // Porte ouverte : un battant fin plaqué contre un côté.
-            Block::DoorOpen => Some(([0.0, 0.0, 0.0], [0.15, 1.0, 1.0])),
+            Block::DoorOpen | Block::ElectricDoorOpen => Some(([0.0, 0.0, 0.0], [0.15, 1.0, 1.0])),
             // Barbelés : une haie basse.
             Block::BarbedWire => Some(([0.05, 0.0, 0.05], [0.95, 0.45, 0.95])),
             Block::Sprout => Some(([0.2, 0.0, 0.2], [0.8, 0.25, 0.8])),
@@ -183,7 +215,10 @@ impl Block {
 
     /// Bloc qu'on peut ouvrir et fermer.
     pub const fn is_door(self) -> bool {
-        matches!(self, Block::Door | Block::DoorOpen)
+        matches!(
+            self,
+            Block::Door | Block::DoorOpen | Block::ElectricDoor | Block::ElectricDoorOpen
+        )
     }
 
     /// Couleur unie (sRGB, 0 à 1) utilisée tant qu'il n'y a pas de textures.
@@ -206,6 +241,10 @@ impl Block {
             Block::Workbench => [0.50, 0.34, 0.20],
             Block::Forge => [0.30, 0.28, 0.30],
             Block::Turret => [0.40, 0.42, 0.46],
+            Block::Generator => [0.75, 0.62, 0.15],
+            Block::Floodlight => [0.92, 0.92, 0.85],
+            Block::ElectricDoor | Block::ElectricDoorOpen => [0.45, 0.50, 0.56],
+            Block::TeslaCoil => [0.55, 0.40, 0.25],
             Block::BarbedWire => [0.55, 0.55, 0.58],
             Block::MachineGun => [0.30, 0.32, 0.30],
             Block::Cannon => [0.22, 0.22, 0.25],
@@ -240,6 +279,10 @@ impl Block {
             Block::Workbench => "Établi",
             Block::Forge => "Forge",
             Block::Turret => "Tourelle",
+            Block::Generator => "Générateur",
+            Block::Floodlight => "Projecteur",
+            Block::ElectricDoor | Block::ElectricDoorOpen => "Porte électrique",
+            Block::TeslaCoil => "Bobine électrique",
             Block::BarbedWire => "Barbelés",
             Block::MachineGun => "Mitrailleuse",
             Block::Cannon => "Canon",
@@ -273,6 +316,10 @@ impl Block {
             Block::ReinforcedWall => 600,
             Block::Spikes => 100,
             Block::Turret => 300,
+            Block::Generator => 300,
+            Block::Floodlight => 150,
+            Block::ElectricDoor | Block::ElectricDoorOpen => 500,
+            Block::TeslaCoil => 300,
             Block::BarbedWire => 60,
             Block::MachineGun => 320,
             Block::Cannon => 400,

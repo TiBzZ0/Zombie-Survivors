@@ -14,6 +14,7 @@ mod chat;
 mod chest;
 mod crafting;
 mod effects;
+mod electricity;
 mod hud;
 mod menu;
 mod meshing;
@@ -127,6 +128,7 @@ fn main() {
             settings::SettingsPlugin,
             minimap::MinimapPlugin,
             tutorial::TutorialPlugin,
+            electricity::ElectricityPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)

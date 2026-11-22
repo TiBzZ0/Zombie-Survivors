@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0011;
+pub const PROTOCOL_ID: u64 = 0x5A53_0012;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -355,6 +355,13 @@ pub enum ServerMessage {
     Animals(Vec<crate::animal::AnimalState>),
     /// Un cracheur a lancé de l'acide.
     Acid {
+        origin: Vec3,
+        end: Vec3,
+    },
+    /// Générateurs en marche (tous ceux du monde), envoyés régulièrement.
+    Power(Vec<IVec3>),
+    /// Arc électrique d'une bobine vers un zombie.
+    Zap {
         origin: Vec3,
         end: Vec3,
     },

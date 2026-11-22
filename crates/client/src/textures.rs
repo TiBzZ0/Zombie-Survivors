@@ -10,7 +10,7 @@ use shared::block::Block;
 pub const TILE: u32 = 16;
 /// Nombre maximal de types de blocs (une texture par valeur possible de `Block`, avec de la marge).
 #[cfg(test)]
-pub const TILES: u32 = 32;
+pub const TILES: u32 = 64;
 
 fn hash(x: u32, y: u32, salt: u32) -> f32 {
     let mut h = x.wrapping_mul(0x85EB_CA6B) ^ y.wrapping_mul(0xC2B2_AE35) ^ salt.wrapping_mul(0x9E37_79B9);
@@ -82,6 +82,41 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
         } else {
             0.7
         }),
+        Block::Generator => {
+            // Carter jaune avec des ailettes sombres.
+            if (3..13).contains(&x) && y % 3 == 1 && (4..13).contains(&y) {
+                return [0.25, 0.22, 0.18];
+            }
+            gray(if x == 0 || y == 0 || x == 15 || y == 15 {
+                0.6
+            } else {
+                0.85 + 0.1 * n
+            })
+        }
+        Block::Floodlight => {
+            // Grande lentille claire dans un cadre sombre.
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            if dx * dx + dy * dy < 30.0 {
+                gray(1.0)
+            } else {
+                gray(0.35 + 0.1 * n)
+            }
+        }
+        Block::ElectricDoor | Block::ElectricDoorOpen => {
+            // Plaques d'acier avec une bande jaune et noire.
+            if (7..9).contains(&y) {
+                return if (x / 2).is_multiple_of(2) {
+                    [1.6, 1.4, 0.2]
+                } else {
+                    [0.2, 0.2, 0.2]
+                };
+            }
+            gray(if x == 0 || x == 15 { 0.6 } else { 0.8 + 0.12 * coarse })
+        }
+        Block::TeslaCoil => {
+            // Bobinage cuivré.
+            gray(if y.is_multiple_of(2) { 1.0 } else { 0.65 + 0.1 * n })
+        }
         Block::Turret => {
             // Caisson riveté en fer, avec une meurtrière sombre.
             if (4..12).contains(&x) && (6..9).contains(&y) {
@@ -213,7 +248,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 30] = [
+const ALL_BLOCKS: [Block; 35] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -244,6 +279,11 @@ const ALL_BLOCKS: [Block; 30] = [
     Block::Snow,
     Block::Cactus,
     Block::FlowingWater,
+    Block::Generator,
+    Block::Floodlight,
+    Block::ElectricDoor,
+    Block::ElectricDoorOpen,
+    Block::TeslaCoil,
 ];
 
 #[cfg(test)]

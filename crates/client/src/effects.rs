@@ -47,6 +47,8 @@ struct Tracer {
     rifle: bool,
     /// Crachat d'acide d'un cracheur.
     acid: bool,
+    /// Arc électrique d'une bobine.
+    zap: bool,
     age: f32,
 }
 
@@ -120,6 +122,7 @@ fn collect_shots(
                 end: *end,
                 rifle: *rifle,
                 acid: false,
+                zap: false,
                 age: 0.0,
             }),
             NetEvent::Acid { origin, end } => tracers.0.push(Tracer {
@@ -127,6 +130,15 @@ fn collect_shots(
                 end: *end,
                 rifle: false,
                 acid: true,
+                zap: false,
+                age: 0.0,
+            }),
+            NetEvent::Zap { origin, end } => tracers.0.push(Tracer {
+                origin: *origin,
+                end: *end,
+                rifle: false,
+                acid: false,
+                zap: true,
                 age: 0.0,
             }),
             NetEvent::BlockDamage { pos, damage: 0 } => {
@@ -215,7 +227,24 @@ fn draw_tracers(time: Res<Time>, mut tracers: ResMut<Tracers>, mut gizmos: Gizmo
     let dt = time.delta_secs();
     tracers.0.retain_mut(|t| {
         t.age += dt;
-        if t.acid {
+        if t.zap {
+            // Éclair : une ligne brisée bleutée qui change de forme à chaque image.
+            let alpha = (1.0 - t.age / 0.2).max(0.0);
+            let color = Color::srgba(0.6, 0.8, 1.0, alpha);
+            let mut last = t.origin;
+            for i in 1..=6 {
+                let k = i as f32 / 6.0;
+                let jitter = if i < 6 {
+                    Vec3::new(fastrand::f32() - 0.5, fastrand::f32() - 0.5, fastrand::f32() - 0.5) * 0.6
+                } else {
+                    Vec3::ZERO
+                };
+                let next = t.origin.lerp(t.end, k) + jitter;
+                gizmos.line(last, next, color);
+                last = next;
+            }
+            t.age < 0.2
+        } else if t.acid {
             // Acide : une boule verte qui file en cloche.
             let duration = (t.origin.distance(t.end) / 18.0).max(0.05);
             let k = (t.age / duration).min(1.0);
