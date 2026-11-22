@@ -9,6 +9,8 @@
 // Sous Windows, pas de fenêtre de console en plus du jeu (en version release).
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod chat;
+mod chest;
 mod crafting;
 mod effects;
 mod hud;
@@ -110,6 +112,8 @@ fn main() {
             crafting::CraftingPlugin,
             effects::EffectsPlugin,
             sound::SoundPlugin,
+            chat::ChatPlugin,
+            chest::ChestPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)

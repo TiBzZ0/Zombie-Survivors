@@ -444,6 +444,7 @@ fn bow_shoots_and_uses_arrows() {
             },
         )],
         deposits: Vec::new(),
+        chests: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
 
@@ -487,5 +488,138 @@ fn bow_shoots_and_uses_arrows() {
         .filter(|m| matches!(m, ServerMessage::Shot { .. }))
         .count();
     assert_eq!(shots, 1, "le premier tir, sans arc en main, devait être ignoré");
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[test]
+fn doors_chests_and_chat() {
+    let port = 20_000 + (std::process::id() % 1000) as u16;
+    let data_dir = std::env::temp_dir().join(format!("zs-test-coffre-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data_dir);
+
+    // Fay revient avec une porte, un coffre et des pommes.
+    let world = WorldState::new(WorldConfig::default());
+    let spawn = server::world::find_spawn(&world);
+    let mut inventory = Inventory::default();
+    inventory.add(Item::Block(Block::Door), 1);
+    inventory.add(Item::Block(Block::Chest), 1);
+    inventory.add(Item::Apple, 5);
+    let save = server::save::SaveFile {
+        version: server::save::SAVE_VERSION,
+        world: WorldConfig::default(),
+        time: GameTime::START,
+        edits: Vec::new(),
+        players: vec![(
+            "Fay".into(),
+            server::save::SavedPlayer {
+                position: spawn,
+                health: 100.0,
+                hunger: 100.0,
+                inventory,
+            },
+        )],
+        deposits: Vec::new(),
+        chests: Vec::new(),
+    };
+    server::save::write(&data_dir, &save).unwrap();
+    let config = ServerConfig {
+        port,
+        data_dir: data_dir.clone(),
+        ..ServerConfig::default()
+    };
+    let _server = spawn_local(config).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let mut fay = TestClient::connect(port, 1, "Fay");
+    let mut gus = TestClient::connect(port, 2, "Gus");
+    pump_until(&mut [&mut fay, &mut gus], "arrivée", |c| {
+        c[0].find(|m| matches!(m, ServerMessage::PlayerJoined { id: 2, .. }).then_some(()))
+            .is_some()
+    });
+
+    // Deux cases d'air au-dessus de la tête de Fay, à portée.
+    let feet = spawn.floor().as_ivec3();
+    let spots: Vec<IVec3> = [(1, 3, 0), (-1, 3, 0), (0, 3, 1), (0, 3, -1), (1, 3, 1)]
+        .into_iter()
+        .map(|(x, y, z)| feet + IVec3::new(x, y, z))
+        .filter(|p| !world.is_solid(*p))
+        .take(2)
+        .collect();
+    let (door, chest) = (spots[0], spots[1]);
+    for (pos, block) in [(door, Block::Door), (chest, Block::Chest)] {
+        fay.send(&ClientMessage::PlaceBlock { pos, block }, true);
+    }
+
+    // La porte s'ouvre pour tout le monde.
+    fay.send(&ClientMessage::ToggleDoor { pos: door }, true);
+    pump_until(&mut [&mut fay, &mut gus], "porte ouverte", |c| {
+        c[1].find(|m| match m {
+            ServerMessage::BlockChanged {
+                pos,
+                block: Block::DoorOpen,
+            } if *pos == door => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+
+    // Fay dépose 3 pommes dans le coffre.
+    fay.received.clear();
+    fay.send(&ClientMessage::OpenChest { pos: chest }, true);
+    fay.send(
+        &ClientMessage::ChestPut {
+            item: Item::Apple,
+            count: 3,
+        },
+        true,
+    );
+    pump_until(&mut [&mut fay, &mut gus], "pommes dans le coffre", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Chest { contents, .. } if contents.count(Item::Apple) == 3 => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+
+    // Gus n'est pas à portée tant qu'il n'est pas venu ; il discute en attendant.
+    gus.send(
+        &ClientMessage::Chat {
+            text: "  j'arrive !\n".into(),
+        },
+        true,
+    );
+    pump_until(&mut [&mut fay, &mut gus], "message de Gus", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Chat { from, text } if from == "Gus" && text == "j'arrive !" => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+
+    // Fay casse le coffre : elle récupère le coffre et ce qu'il contenait.
+    fay.send(&ClientMessage::StartMining { pos: chest }, true);
+    let start = Instant::now();
+    while start.elapsed().as_secs_f32() < break_time(Block::Chest, None).unwrap() + 0.1 {
+        fay.pump();
+        gus.pump();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    fay.received.clear();
+    fay.send(&ClientMessage::BreakBlock { pos: chest }, true);
+    pump_until(&mut [&mut fay, &mut gus], "coffre cassé, contenu récupéré", |c| {
+        let closed = c[0]
+            .find(|m| matches!(m, ServerMessage::ChestClosed).then_some(()))
+            .is_some();
+        let back = c[0]
+            .find(|m| match m {
+                ServerMessage::Inventory(inv)
+                    if inv.count(Item::Apple) == 5 && inv.has(Item::Block(Block::Chest), 1) =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .is_some();
+        closed && back
+    });
     let _ = std::fs::remove_dir_all(&data_dir);
 }

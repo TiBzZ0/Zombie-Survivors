@@ -60,17 +60,38 @@ struct ConnectStarted(f32);
 #[derive(Message, Debug, Clone)]
 pub enum NetEvent {
     BlockChanged(IVec3),
-    PlayerJoined { id: PlayerId, name: String },
+    PlayerJoined {
+        id: PlayerId,
+        name: String,
+    },
     PlayerLeft(PlayerId),
     Players(Vec<(PlayerId, PlayerState)>),
     Teleport(Vec3),
     Chat(String),
     Zombies(Vec<ZombieState>),
-    Time { time: GameTime, zombies_alive: u32 },
-    Vitals { health: f32, hunger: f32 },
+    Time {
+        time: GameTime,
+        zombies_alive: u32,
+    },
+    Vitals {
+        health: f32,
+        hunger: f32,
+    },
     Inventory(shared::item::Inventory),
-    Deposit { pos: IVec3, remaining: u8 },
-    Shot { origin: Vec3, end: Vec3, rifle: bool },
+    Deposit {
+        pos: IVec3,
+        remaining: u8,
+    },
+    Shot {
+        origin: Vec3,
+        end: Vec3,
+        rifle: bool,
+    },
+    Chest {
+        pos: IVec3,
+        contents: shared::item::Inventory,
+    },
+    ChestClosed,
     Died(String),
     ZombieKilled(u32),
 }
@@ -253,6 +274,12 @@ fn receive_messages(
             }
             ServerMessage::Time { time, zombies_alive } => {
                 events.write(NetEvent::Time { time, zombies_alive });
+            }
+            ServerMessage::Chest { pos, contents } => {
+                events.write(NetEvent::Chest { pos, contents });
+            }
+            ServerMessage::ChestClosed => {
+                events.write(NetEvent::ChestClosed);
             }
             ServerMessage::Shot { origin, end, rifle, .. } => {
                 events.write(NetEvent::Shot { origin, end, rifle });

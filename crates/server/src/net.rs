@@ -19,7 +19,7 @@ use shared::raycast::{ray_aabb, raycast};
 
 use crate::ServerConfig;
 use crate::save::{SavedPlayer, SavedPlayers};
-use crate::world::{Deposits, GameWorld, SpawnPoint};
+use crate::world::{Chests, Deposits, GameWorld, SpawnPoint};
 use crate::zombies::{Zombie, ZombieBody};
 
 /// Portée d'un coup de mêlée, en mètres.
@@ -63,6 +63,8 @@ pub struct ConnectedPlayer {
     pub held: Option<Item>,
     /// Bloc en cours de minage et instant du début (secondes depuis le lancement du serveur).
     pub mining: Option<(IVec3, f64)>,
+    /// Coffre ouvert par le joueur.
+    pub open_chest: Option<IVec3>,
 }
 
 /// Santé maximale d'un joueur.
@@ -92,6 +94,7 @@ impl ConnectedPlayer {
             inventory,
             held: None,
             mining: None,
+            open_chest: None,
         }
     }
 
@@ -208,6 +211,7 @@ fn receive_messages(
     time: Res<Time>,
     mut saved: ResMut<SavedPlayers>,
     mut deposits: ResMut<Deposits>,
+    mut chests: ResMut<Chests>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -225,6 +229,7 @@ fn receive_messages(
                 now: time.elapsed_secs_f64(),
                 saved: &mut saved,
                 deposits: &mut deposits,
+                chests: &mut chests,
             };
             handle_reliable(client, message, &mut ctx, &mut zombies);
         }
@@ -245,6 +250,7 @@ struct Context<'a> {
     now: f64,
     saved: &'a mut SavedPlayers,
     deposits: &'a mut Deposits,
+    chests: &'a mut Chests,
 }
 
 fn handle_reliable(
@@ -262,6 +268,7 @@ fn handle_reliable(
         now,
         saved,
         deposits,
+        chests,
     } = ctx;
     let (spawn, now) = (*spawn, *now);
     let ready = lobby.players.get(&client).is_some_and(ConnectedPlayer::is_ready);
@@ -434,6 +441,103 @@ fn handle_reliable(
             }
             send_inventory(server, client, player);
         }
+        ClientMessage::ToggleDoor { pos } => {
+            let Some(player) = lobby.players.get(&client) else {
+                return;
+            };
+            let block = world.block(pos);
+            if !player.is_alive() || !block.is_door() || !within_reach(player, pos) {
+                return;
+            }
+            // Les portes empilées (une porte fait souvent deux blocs de haut) bougent ensemble.
+            let mut column = vec![pos];
+            for dir in [IVec3::Y, IVec3::NEG_Y] {
+                let mut p = pos + dir;
+                while world.block(p) == block && column.len() < 4 {
+                    column.push(p);
+                    p += dir;
+                }
+            }
+            let next = if block == Block::Door {
+                Block::DoorOpen
+            } else {
+                Block::Door
+            };
+            if next == Block::Door {
+                let blocked = lobby
+                    .players
+                    .values()
+                    .any(|p| overlaps_solid(p.state.position, PLAYER_SIZE, &|b| column.contains(&b)));
+                if blocked {
+                    return;
+                }
+            }
+            for p in column {
+                world.set_block(p, next);
+                broadcast(server, &ServerMessage::BlockChanged { pos: p, block: next });
+            }
+            version.0 += 1;
+        }
+        ClientMessage::OpenChest { pos } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if player.is_alive() && world.block(pos) == Block::Chest && within_reach(player, pos) {
+                player.open_chest = Some(pos);
+                let contents = chests.0.get(&pos).cloned().unwrap_or_default();
+                send(server, client, &ServerMessage::Chest { pos, contents });
+            }
+        }
+        ClientMessage::CloseChest => {
+            if let Some(player) = lobby.players.get_mut(&client) {
+                player.open_chest = None;
+            }
+        }
+        ClientMessage::ChestPut { item, count } | ClientMessage::ChestTake { item, count } => {
+            let put = matches!(message, ClientMessage::ChestPut { .. });
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            let Some(pos) = player.open_chest else { return };
+            if !player.is_alive() || world.block(pos) != Block::Chest || !within_reach(player, pos) {
+                player.open_chest = None;
+                send(server, client, &ServerMessage::ChestClosed);
+                return;
+            }
+            let chest = chests.0.entry(pos).or_default();
+            let (from, to) = if put {
+                (&mut player.inventory, chest)
+            } else {
+                (chest, &mut player.inventory)
+            };
+            let moved = count.min(from.count(item));
+            if moved > 0 {
+                from.remove(item, moved);
+                to.add(item, moved);
+            }
+            if chests.0.get(&pos).is_some_and(Inventory::is_empty) {
+                chests.0.remove(&pos);
+            }
+            send_inventory(server, client, player);
+            send_chest_to_viewers(server, lobby, chests, pos);
+        }
+        ClientMessage::Chat { text } => {
+            let Some(player) = lobby.players.get(&client) else {
+                return;
+            };
+            let text: String = text.chars().filter(|c| !c.is_control()).take(200).collect();
+            let text = text.trim();
+            if !text.is_empty() {
+                info!("[chat] {} : {text}", player.name);
+                broadcast(
+                    server,
+                    &ServerMessage::Chat {
+                        from: player.name.clone(),
+                        text: text.to_string(),
+                    },
+                );
+            }
+        }
         ClientMessage::Eat { item } => {
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
@@ -492,6 +596,9 @@ fn handle_reliable(
                     player.inventory.add(Item::Apple, 1);
                 }
                 send_inventory(server, client, player);
+                if block == Block::Chest {
+                    chest_destroyed(server, lobby, chests, pos, Some(client));
+                }
             } else {
                 // Corrige le client qui avait anticipé.
                 send(
@@ -536,6 +643,46 @@ fn handle_reliable(
                 );
             }
             send_inventory(server, client, player);
+        }
+    }
+}
+
+/// Envoie le contenu d'un coffre à tous les joueurs qui l'ont ouvert.
+fn send_chest_to_viewers(server: &mut RenetServer, lobby: &Lobby, chests: &Chests, pos: IVec3) {
+    let contents = chests.0.get(&pos).cloned().unwrap_or_default();
+    for (id, player) in &lobby.players {
+        if player.open_chest == Some(pos) {
+            send(
+                server,
+                *id,
+                &ServerMessage::Chest {
+                    pos,
+                    contents: contents.clone(),
+                },
+            );
+        }
+    }
+}
+
+/// Un coffre a disparu : ses objets vont à celui qui l'a cassé (s'il y en a un), les autres le ferment.
+pub fn chest_destroyed(
+    server: &mut RenetServer,
+    lobby: &mut Lobby,
+    chests: &mut Chests,
+    pos: IVec3,
+    breaker: Option<ClientId>,
+) {
+    let contents = chests.0.remove(&pos).unwrap_or_default();
+    for (id, player) in lobby.players.iter_mut() {
+        if player.open_chest == Some(pos) {
+            player.open_chest = None;
+            send(server, *id, &ServerMessage::ChestClosed);
+        }
+        if Some(*id) == breaker && !contents.is_empty() {
+            for (item, n) in contents.iter() {
+                player.inventory.add(item, n);
+            }
+            send_inventory(server, *id, player);
         }
     }
 }

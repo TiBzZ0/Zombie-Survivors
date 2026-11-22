@@ -11,7 +11,7 @@ use crate::item::{Inventory, Item};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0004;
+pub const PROTOCOL_ID: u64 = 0x5A53_0005;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -65,6 +65,30 @@ pub enum ClientMessage {
     /// Tir avec l'arme à distance en main, dans la direction donnée.
     Shoot {
         direction: Vec3,
+    },
+    /// Ouvre ou ferme une porte (et les portes empilées avec elle).
+    ToggleDoor {
+        pos: IVec3,
+    },
+    /// Ouvre un coffre : le serveur répond avec son contenu et le tient à jour.
+    OpenChest {
+        pos: IVec3,
+    },
+    /// Ferme le coffre ouvert.
+    CloseChest,
+    /// Dépose des objets dans le coffre ouvert.
+    ChestPut {
+        item: Item,
+        count: u32,
+    },
+    /// Prend des objets dans le coffre ouvert.
+    ChestTake {
+        item: Item,
+        count: u32,
+    },
+    /// Message de discussion.
+    Chat {
+        text: String,
     },
     /// Mange ou utilise un consommable.
     Eat {
@@ -164,6 +188,13 @@ pub enum ServerMessage {
     },
     /// Contenu complet de l'inventaire après un changement.
     Inventory(Inventory),
+    /// Contenu d'un coffre ouvert, après chaque changement.
+    Chest {
+        pos: IVec3,
+        contents: Inventory,
+    },
+    /// Le coffre ouvert n'est plus accessible (cassé, trop loin).
+    ChestClosed,
     /// Un joueur a tiré : trajectoire pour l'effet visuel et le son.
     Shot {
         from: PlayerId,

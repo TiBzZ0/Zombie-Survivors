@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use shared::item::Inventory;
 use shared::world::WorldState;
 
 use crate::ServerConfig;
@@ -24,6 +25,10 @@ pub struct GameWorld(pub WorldState);
 /// Récoltes restantes des blocs de filon déjà entamés (absents = intacts).
 #[derive(Resource, Default, Debug)]
 pub struct Deposits(pub HashMap<IVec3, u8>);
+
+/// Contenu des coffres posés dans le monde.
+#[derive(Resource, Default, Debug)]
+pub struct Chests(pub HashMap<IVec3, Inventory>);
 
 /// Point d'apparition des joueurs, au centre de la carte, posé sur le sol.
 #[derive(Resource, Clone, Copy, Debug)]
@@ -50,6 +55,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
         commands.insert_resource(SpawnPoint(find_spawn(&world)));
         commands.insert_resource(GameWorld(world));
         commands.insert_resource(Deposits::default());
+        commands.insert_resource(Chests::default());
         return;
     };
     if save.world != config.world {
@@ -72,6 +78,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
     commands.insert_resource(Clock(save.time));
     commands.insert_resource(SavedPlayers(save.players.into_iter().collect()));
     commands.insert_resource(Deposits(save.deposits.into_iter().collect()));
+    commands.insert_resource(Chests(save.chests.into_iter().collect()));
     commands.insert_resource(SpawnPoint(find_spawn(&world)));
     commands.insert_resource(GameWorld(world));
 }

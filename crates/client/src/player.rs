@@ -74,6 +74,10 @@ pub struct LocalPlayer {
     pub deposits: std::collections::HashMap<IVec3, u8>,
     /// Le panneau de fabrication est ouvert (le curseur est libre).
     pub crafting_open: bool,
+    /// Coffre ouvert et son contenu (le curseur est libre).
+    pub chest: Option<(IVec3, Inventory)>,
+    /// Le joueur écrit dans la discussion (le clavier ne déplace plus le joueur).
+    pub typing: bool,
     held_sent: Option<Option<Item>>,
     /// Cause de la mort tant que le joueur n'a pas réapparu.
     pub dead: Option<String>,
@@ -98,6 +102,11 @@ impl LocalPlayer {
 
     pub fn look_direction(&self) -> Vec3 {
         Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0) * Vec3::NEG_Z
+    }
+
+    /// Un panneau (fabrication, coffre) libère la souris.
+    pub fn panel_open(&self) -> bool {
+        self.crafting_open || self.chest.is_some()
     }
 
     /// Objet de la case sélectionnée, s'il en reste.
@@ -145,25 +154,42 @@ fn grab_cursor(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut player: ResMut<LocalPlayer>,
+    mut client: ResMut<RenetClient>,
 ) {
+    if player.typing {
+        return;
+    }
+    let was_open = player.panel_open();
     if keys.just_pressed(KeyCode::KeyC) || keys.just_pressed(KeyCode::Tab) {
-        player.crafting_open = !player.crafting_open;
-        if player.crafting_open {
-            cursor.visible = true;
-            cursor.grab_mode = CursorGrabMode::None;
+        if player.chest.is_some() {
+            close_chest(&mut player, &mut client);
         } else {
-            cursor.visible = false;
-            cursor.grab_mode = CursorGrabMode::Locked;
+            player.crafting_open = !player.crafting_open;
         }
     }
-    if mouse.just_pressed(MouseButton::Left) && !cursor_locked(&cursor) && !player.crafting_open {
+    if keys.just_pressed(KeyCode::Escape) {
+        let any_panel = player.panel_open();
+        player.crafting_open = false;
+        close_chest(&mut player, &mut client);
+        if !any_panel {
+            cursor.visible = true;
+            cursor.grab_mode = CursorGrabMode::None;
+            return;
+        }
+    }
+    let open = player.panel_open();
+    if open {
+        cursor.visible = true;
+        cursor.grab_mode = CursorGrabMode::None;
+    } else if was_open || (mouse.just_pressed(MouseButton::Left) && !cursor_locked(&cursor)) {
         cursor.visible = false;
         cursor.grab_mode = CursorGrabMode::Locked;
     }
-    if keys.just_pressed(KeyCode::Escape) {
-        player.crafting_open = false;
-        cursor.visible = true;
-        cursor.grab_mode = CursorGrabMode::None;
+}
+
+fn close_chest(player: &mut LocalPlayer, client: &mut RenetClient) {
+    if player.chest.take().is_some() {
+        send_reliable(client, &ClientMessage::CloseChest);
     }
 }
 
@@ -193,11 +219,11 @@ fn select_slot(
         KeyCode::Digit9,
     ];
     for (i, key) in KEYS.iter().enumerate() {
-        if keys.just_pressed(*key) {
+        if keys.just_pressed(*key) && !player.typing {
             player.selected = i;
         }
     }
-    if !player.crafting_open && scroll.delta.y != 0.0 {
+    if !player.panel_open() && scroll.delta.y != 0.0 {
         let step = if scroll.delta.y > 0.0 { HOTBAR_SLOTS - 1 } else { 1 };
         player.selected = (player.selected + step) % HOTBAR_SLOTS;
     }
@@ -234,6 +260,12 @@ fn apply_teleports(
                     player.dead = None;
                 }
             }
+            NetEvent::Chest { pos, contents } => {
+                player.chest = Some((*pos, contents.clone()));
+            }
+            NetEvent::ChestClosed => {
+                player.chest = None;
+            }
             NetEvent::Deposit { pos, remaining } => {
                 player.deposits.insert(*pos, *remaining);
             }
@@ -262,21 +294,24 @@ fn move_player(
     if player.dead.is_some() {
         return;
     }
+    // En train d'écrire : le joueur s'arrête (la gravité continue).
+    let keys_active = !player.typing;
+    let pressed = |k: KeyCode| keys_active && keys.pressed(k);
     // Les touches sont physiques : KeyW est la touche Z sur un clavier AZERTY.
     let mut wish = Vec3::ZERO;
-    if keys.pressed(KeyCode::KeyW) {
+    if pressed(KeyCode::KeyW) {
         wish.z -= 1.0;
     }
-    if keys.pressed(KeyCode::KeyS) {
+    if pressed(KeyCode::KeyS) {
         wish.z += 1.0;
     }
-    if keys.pressed(KeyCode::KeyA) {
+    if pressed(KeyCode::KeyA) {
         wish.x -= 1.0;
     }
-    if keys.pressed(KeyCode::KeyD) {
+    if pressed(KeyCode::KeyD) {
         wish.x += 1.0;
     }
-    let speed = if keys.pressed(KeyCode::ShiftLeft) {
+    let speed = if pressed(KeyCode::ShiftLeft) {
         SPRINT_SPEED
     } else {
         WALK_SPEED
@@ -289,7 +324,7 @@ fn move_player(
     let target = Vec3::new(wish.x, 0.0, wish.z);
     let new_horizontal = horizontal.lerp(target, (control * 15.0 * dt).min(1.0));
     let mut velocity = Vec3::new(new_horizontal.x, player.velocity.y, new_horizontal.z);
-    if player.on_ground && keys.pressed(KeyCode::Space) {
+    if player.on_ground && pressed(KeyCode::Space) {
         velocity.y = JUMP_SPEED;
     }
 
@@ -320,7 +355,9 @@ fn interact(
     zombies: Query<(&ZombieView, &Transform)>,
 ) {
     let dt = time.delta_secs();
-    player.target = raycast(player.eye(), player.look_direction(), REACH, |p| world.is_solid(p));
+    player.target = raycast(player.eye(), player.look_direction(), REACH, |p| {
+        world.block(p).is_targetable()
+    });
     player.cooldown -= dt;
     player.needs_pickaxe = false;
     if !cursor_locked(&cursor) || player.dead.is_some() || !mouse.pressed(MouseButton::Left) {
@@ -365,6 +402,21 @@ fn interact(
 
     if !mouse.pressed(MouseButton::Right) || player.cooldown > 0.0 {
         return;
+    }
+    // Portes et coffres passent avant l'objet en main.
+    if let Some(hit) = player.target {
+        let block = world.block(hit.block);
+        if block.is_door() {
+            send_reliable(&mut client, &ClientMessage::ToggleDoor { pos: hit.block });
+            player.cooldown = 0.35;
+            return;
+        }
+        if block == Block::Chest && mouse.just_pressed(MouseButton::Right) {
+            send_reliable(&mut client, &ClientMessage::OpenChest { pos: hit.block });
+            player.crafting_open = false;
+            player.cooldown = 0.35;
+            return;
+        }
     }
     match player.held() {
         Some(item) if item.food().is_some() => {
