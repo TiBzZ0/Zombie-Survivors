@@ -1,6 +1,8 @@
 //! Sons du jeu, synthétisés au démarrage (pas de fichiers audio à distribuer).
 //!
-//! Les sons du monde (zombies, tirs, blocs) sont spatialisés autour de la caméra.
+//! Les sons du monde (zombies, tirs, blocs, eau, feux de camp, survivants au travail) sont
+//! spatialisés autour de la caméra. Le corps du joueur s'entend aussi : manger, boire,
+//! grelotter de froid, haleter de chaleur, tousser quand l'infection gagne.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,6 +15,7 @@ use crate::AppState;
 use crate::net::{ClientWorld, NetEvent};
 use crate::player::LocalPlayer;
 use crate::sky::GameClock;
+use crate::survivors::SurvivorView;
 use crate::zombies::ZombieView;
 
 const RATE: u32 = 22_050;
@@ -25,7 +28,15 @@ impl Plugin for SoundPlugin {
             .add_systems(Update, add_listener)
             .add_systems(
                 Update,
-                (world_sounds, footsteps, zombie_sounds, alarm)
+                (
+                    world_sounds,
+                    footsteps,
+                    zombie_sounds,
+                    alarm,
+                    body_sounds,
+                    campfire_sounds,
+                    work_sounds,
+                )
                     .run_if(in_state(AppState::Playing))
                     .run_if(resource_exists::<Sounds>),
             );
@@ -46,6 +57,16 @@ enum Sfx {
     Horn,
     Parry,
     Explosion,
+    Splash,
+    Eat,
+    Drink,
+    Cough,
+    Shiver,
+    Pant,
+    Infected,
+    Heal,
+    Crackle,
+    Hammer,
 }
 
 #[derive(Resource)]
@@ -156,6 +177,97 @@ fn synth(sfx: Sfx) -> Vec<f32> {
             }
             s
         }
+        // Plouf : bruit filtré qui monte puis retombe, avec un petit « bloup » grave.
+        Sfx::Splash => {
+            let mut s = noise_burst(0.5, 0.25, 71, |k| (k * 12.0).min(1.0) * (1.0 - k).powi(2) * 0.7);
+            for (i, v) in s.iter_mut().enumerate() {
+                let t = i as f32 / RATE as f32;
+                *v += (t * (300.0 - 400.0 * t) * TAU).sin() * (1.0 - t / 0.2).max(0.0) * 0.3;
+            }
+            s
+        }
+        // Croc : trois petits craquements.
+        Sfx::Eat => {
+            let mut noise = Noise(83);
+            samples(0.45, |_, k| {
+                let bite = (k * 3.0).fract();
+                noise.next() * (1.0 - bite).powi(6) * 0.5
+            })
+        }
+        // Gorgées : deux « glouc » qui descendent.
+        Sfx::Drink => samples(0.5, |t, k| {
+            let gulp = (k * 2.0).fract();
+            let f = 420.0 - 260.0 * gulp;
+            (t * f * TAU).sin() * (gulp * 10.0).min(1.0) * (1.0 - gulp).powi(2) * 0.4
+        }),
+        Sfx::Cough => {
+            let mut s = noise_burst(0.35, 0.45, 89, |k| (k * 30.0).min(1.0) * (1.0 - k).powi(3) * 0.7);
+            for (i, v) in s.iter_mut().enumerate() {
+                let t = i as f32 / RATE as f32;
+                *v += (t * 140.0 * TAU).sin().signum() * 0.12 * (1.0 - t / 0.35).max(0.0);
+            }
+            s
+        }
+        // Dents qui claquent : petits clics rapides et irréguliers.
+        Sfx::Shiver => {
+            let mut noise = Noise(97);
+            samples(0.6, |t, _| {
+                let click = (t * 23.0).fract();
+                noise.next() * (1.0 - click).powi(14) * 0.45
+            })
+        }
+        // Halètement : deux souffles.
+        Sfx::Pant => {
+            let mut noise = Noise(101);
+            let mut low = 0.0;
+            samples(0.9, |_, k| {
+                low += (noise.next() - low) * 0.3;
+                let breath = (k * 2.0).fract();
+                low * (breath * std::f32::consts::PI).sin() * 0.35
+            })
+        }
+        // Battement sourd et inquiétant : l'infection vient de prendre.
+        Sfx::Infected => samples(1.2, |t, _| {
+            let beat = |start: f32| {
+                let d = t - start;
+                if d < 0.0 {
+                    0.0
+                } else {
+                    (d * 55.0 * TAU).sin() * (-d * 18.0).exp()
+                }
+            };
+            (beat(0.0) + 0.8 * beat(0.22) + beat(0.7) + 0.8 * beat(0.92)) * 0.7
+        }),
+        // Guérison : un accord clair qui monte.
+        Sfx::Heal => samples(0.7, |t, k| {
+            let f = if k < 0.33 {
+                523.0
+            } else if k < 0.66 {
+                659.0
+            } else {
+                784.0
+            };
+            (t * f * TAU).sin() * (1.0 - (k * 3.0).fract()).powf(0.5) * 0.25
+        }),
+        // Crépitement du feu : petits claquements au hasard sur un souffle.
+        Sfx::Crackle => {
+            let mut noise = Noise(107);
+            let mut low = 0.0;
+            samples(1.5, |_, k| {
+                low += (noise.next() - low) * 0.05;
+                let pop = if noise.next() > 0.995 { noise.next() } else { 0.0 };
+                (low * 0.3 + pop * 0.8) * (k * 10.0).min(1.0) * (1.0 - k).powf(0.3)
+            })
+        }
+        // Coup de marteau sur du bois.
+        Sfx::Hammer => {
+            let mut s = noise_burst(0.12, 0.6, 113, |k| (1.0 - k).powi(5) * 0.6);
+            for (i, v) in s.iter_mut().enumerate() {
+                let t = i as f32 / RATE as f32;
+                *v += (t * 620.0 * TAU).sin() * (-t * 40.0).exp() * 0.35;
+            }
+            s
+        }
         Sfx::Horn => samples(2.5, |t, k| {
             let env = (k * 6.0).min(1.0) * (1.0 - k).powf(0.5);
             ((t * 82.0 * TAU).sin() + 0.5 * (t * 123.0 * TAU).sin() + 0.25 * (t * 164.0 * TAU).sin()) * env * 0.4
@@ -176,6 +288,16 @@ fn build_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>
         Sfx::Horn,
         Sfx::Parry,
         Sfx::Explosion,
+        Sfx::Splash,
+        Sfx::Eat,
+        Sfx::Drink,
+        Sfx::Cough,
+        Sfx::Shiver,
+        Sfx::Pant,
+        Sfx::Infected,
+        Sfx::Heal,
+        Sfx::Crackle,
+        Sfx::Hammer,
     ];
     all.extend((0..3).map(Sfx::Groan));
     let map = all
@@ -230,7 +352,18 @@ fn world_sounds(
                     continue;
                 }
                 let Some(world) = world.as_deref() else { continue };
-                let sfx = if world.is_solid(*pos) { Sfx::Place } else { Sfx::Break };
+                let block = world.block(*pos);
+                // L'eau courante qui avance ou se retire ne fait pas de bruit à chaque bloc.
+                if block == shared::block::Block::FlowingWater {
+                    continue;
+                }
+                let sfx = if block == shared::block::Block::Water {
+                    Sfx::Splash
+                } else if world.is_solid(*pos) {
+                    Sfx::Place
+                } else {
+                    Sfx::Break
+                };
                 play(&mut commands, &sounds, sfx, Some(pos.as_vec3() + Vec3::splat(0.5)), 0.8);
             }
             NetEvent::Shot { origin, rifle, .. } => {
@@ -309,6 +442,127 @@ fn zombie_sounds(
     }
 }
 
+/// Ce qui arrive au corps du joueur : manger, boire, plonger, l'infection, le froid, la chaleur.
+fn body_sounds(
+    mut commands: Commands,
+    sounds: Res<Sounds>,
+    player: Res<LocalPlayer>,
+    time: Res<Time>,
+    mut last: Local<Option<(f32, f32, f32, bool)>>,
+    mut next_symptom: Local<f32>,
+) {
+    use shared::climate::{HYPOTHERMIA, INFECTION_HARMFUL, OVERHEATING};
+    if player.dead.is_some() {
+        *last = None;
+        return;
+    }
+    if let Some((hunger, thirst, infection, swimming)) = *last {
+        if player.hunger > hunger + 1.0 {
+            play(&mut commands, &sounds, Sfx::Eat, None, 0.6);
+        }
+        if player.thirst > thirst + 1.0 {
+            play(&mut commands, &sounds, Sfx::Drink, None, 0.6);
+        }
+        if infection <= 0.0 && player.infection > 0.0 {
+            play(&mut commands, &sounds, Sfx::Infected, None, 0.8);
+        }
+        if infection > 0.0 && player.infection <= 0.0 {
+            play(&mut commands, &sounds, Sfx::Heal, None, 0.6);
+        }
+        if !swimming && player.swimming {
+            play(&mut commands, &sounds, Sfx::Splash, None, 0.7);
+        }
+    }
+    *last = Some((player.hunger, player.thirst, player.infection, player.swimming));
+
+    // Symptômes qui reviennent tant que dure le mal.
+    *next_symptom -= time.delta_secs();
+    if *next_symptom > 0.0 {
+        return;
+    }
+    let symptom = if player.body_temp < HYPOTHERMIA + 0.5 {
+        Some((Sfx::Shiver, 3.0))
+    } else if player.body_temp > OVERHEATING {
+        Some((Sfx::Pant, 2.5))
+    } else if player.infection >= INFECTION_HARMFUL {
+        Some((Sfx::Cough, 8.0 + fastrand::f32() * 6.0))
+    } else {
+        None
+    };
+    if let Some((sfx, every)) = symptom {
+        play(&mut commands, &sounds, sfx, None, 0.5);
+        *next_symptom = every;
+    } else {
+        *next_symptom = 1.0;
+    }
+}
+
+/// Le feu de camp le plus proche crépite.
+fn campfire_sounds(
+    mut commands: Commands,
+    sounds: Res<Sounds>,
+    world: Option<Res<ClientWorld>>,
+    player: Res<LocalPlayer>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    *timer -= time.delta_secs();
+    if *timer > 0.0 {
+        return;
+    }
+    *timer = 1.4;
+    let Some(world) = world.as_deref() else { return };
+    let me = player.position.floor().as_ivec3();
+    let mut nearest: Option<(IVec3, i32)> = None;
+    for dx in -6..=6 {
+        for dz in -6..=6 {
+            for dy in -3..=3 {
+                let p = me + IVec3::new(dx, dy, dz);
+                let d = dx * dx + dy * dy + dz * dz;
+                if world.block(p) == shared::block::Block::Campfire && nearest.is_none_or(|(_, n)| d < n) {
+                    nearest = Some((p, d));
+                }
+            }
+        }
+    }
+    if let Some((fire, _)) = nearest {
+        play(
+            &mut commands,
+            &sounds,
+            Sfx::Crackle,
+            Some(fire.as_vec3() + Vec3::splat(0.5)),
+            0.5,
+        );
+    }
+}
+
+/// Coups de marteau des survivants qui travaillent près du joueur.
+fn work_sounds(
+    mut commands: Commands,
+    sounds: Res<Sounds>,
+    player: Res<LocalPlayer>,
+    survivors: Query<(&SurvivorView, &Transform)>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    *timer -= time.delta_secs();
+    if *timer > 0.0 {
+        return;
+    }
+    *timer = 1.1;
+    for (view, transform) in &survivors {
+        if view.working() && transform.translation.distance(player.position) < 24.0 {
+            play(
+                &mut commands,
+                &sounds,
+                Sfx::Hammer,
+                Some(transform.translation + Vec3::Y * 1.0),
+                0.5,
+            );
+        }
+    }
+}
+
 /// Corne grave à la tombée de la nuit.
 fn alarm(mut commands: Commands, sounds: Res<Sounds>, clock: Res<GameClock>, mut was_night: Local<Option<bool>>) {
     let night = clock.time.is_night();
@@ -330,5 +584,23 @@ mod tests {
         let data_len = u32::from_le_bytes(bytes[40..44].try_into().unwrap()) as usize;
         assert_eq!(bytes.len(), 44 + data_len);
         assert!(synth(Sfx::Groan(1)).iter().all(|s| s.is_finite() && s.abs() <= 1.0));
+        for sfx in [
+            Sfx::Splash,
+            Sfx::Eat,
+            Sfx::Drink,
+            Sfx::Cough,
+            Sfx::Shiver,
+            Sfx::Pant,
+            Sfx::Infected,
+            Sfx::Heal,
+            Sfx::Crackle,
+            Sfx::Hammer,
+        ] {
+            let s = synth(sfx);
+            assert!(
+                !s.is_empty() && s.iter().all(|v| v.is_finite() && v.abs() <= 1.0),
+                "{sfx:?}"
+            );
+        }
     }
 }
