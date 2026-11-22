@@ -45,6 +45,7 @@ enum Sfx {
     Hurt,
     Horn,
     Parry,
+    Explosion,
 }
 
 #[derive(Resource)]
@@ -146,6 +147,15 @@ fn synth(sfx: Sfx) -> Vec<f32> {
         Sfx::Parry => samples(0.3, |t, k| {
             ((t * 1250.0 * TAU).sin() + 0.6 * (t * 1870.0 * TAU).sin()) * (1.0 - k).powi(3) * 0.4
         }),
+        Sfx::Explosion => {
+            // Détonation sourde : bruit filtré grave qui s'éteint lentement.
+            let mut s = noise_burst(1.2, 0.08, 67, |k| (k * 60.0).min(1.0) * (1.0 - k).powi(3));
+            for (i, v) in s.iter_mut().enumerate() {
+                let t = i as f32 / RATE as f32;
+                *v = (*v * 2.5 + (t * 45.0 * TAU).sin() * (1.0 - t / 1.2).max(0.0).powi(4) * 0.6).clamp(-1.0, 1.0);
+            }
+            s
+        }
         Sfx::Horn => samples(2.5, |t, k| {
             let env = (k * 6.0).min(1.0) * (1.0 - k).powf(0.5);
             ((t * 82.0 * TAU).sin() + 0.5 * (t * 123.0 * TAU).sin() + 0.25 * (t * 164.0 * TAU).sin()) * env * 0.4
@@ -165,6 +175,7 @@ fn build_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>
         Sfx::Hurt,
         Sfx::Horn,
         Sfx::Parry,
+        Sfx::Explosion,
     ];
     all.extend((0..3).map(Sfx::Groan));
     let map = all
@@ -227,6 +238,7 @@ fn world_sounds(
                 play(&mut commands, &sounds, sfx, Some(*origin), 1.0);
             }
             NetEvent::Parried => play(&mut commands, &sounds, Sfx::Parry, None, 0.8),
+            NetEvent::Explosion { pos, .. } => play(&mut commands, &sounds, Sfx::Explosion, Some(*pos), 1.0),
             _ => {}
         }
     }

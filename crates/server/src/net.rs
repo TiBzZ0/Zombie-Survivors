@@ -18,6 +18,7 @@ use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMes
 use shared::raycast::{ray_aabb, raycast};
 
 use crate::ServerConfig;
+use crate::explosives::Projectiles;
 use crate::save::{SavedPlayer, SavedPlayers};
 use crate::survivors::SurvivorTalk;
 use crate::world::{Chests, Deposits, GameWorld, SpawnPoint};
@@ -242,6 +243,7 @@ fn receive_messages(
     mut deposits: ResMut<Deposits>,
     mut chests: ResMut<Chests>,
     mut talk: ResMut<SurvivorTalk>,
+    mut projectiles: ResMut<Projectiles>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -261,6 +263,7 @@ fn receive_messages(
                 deposits: &mut deposits,
                 chests: &mut chests,
                 talk: &mut talk,
+                projectiles: &mut projectiles,
             };
             handle_reliable(client, message, &mut ctx, &mut zombies);
         }
@@ -283,6 +286,7 @@ struct Context<'a> {
     deposits: &'a mut Deposits,
     chests: &'a mut Chests,
     talk: &'a mut SurvivorTalk,
+    projectiles: &'a mut Projectiles,
 }
 
 fn handle_reliable(
@@ -302,6 +306,7 @@ fn handle_reliable(
         deposits,
         chests,
         talk,
+        projectiles,
     } = ctx;
     let (spawn, now) = (*spawn, *now);
     let ready = lobby.players.get(&client).is_some_and(ConnectedPlayer::is_ready);
@@ -409,6 +414,25 @@ fn handle_reliable(
                 }
             }
         }
+        ClientMessage::Throw { direction } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            let Some((item, _)) = player.held_item().and_then(|i| i.throwable().map(|t| (i, t))) else {
+                return;
+            };
+            let dir = direction.normalize_or_zero();
+            if !player.is_alive() || player.attack_cooldown > 0.0 || dir == Vec3::ZERO || !dir.is_finite() {
+                return;
+            }
+            player.inventory.remove(item, 1);
+            player.attack_cooldown = crate::explosives::THROW_COOLDOWN * 0.85;
+            let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
+            let projectile = crate::explosives::Projectile::thrown(client, item, eye, dir);
+            send_inventory(server, client, player);
+            broadcast(server, &projectile.message());
+            projectiles.0.push(projectile);
+        }
         ClientMessage::Guard { active } => {
             if let Some(player) = lobby.players.get_mut(&client) {
                 player.guarding = match (active, player.guarding) {
@@ -439,7 +463,8 @@ fn handle_reliable(
             let wall = raycast(eye, dir, weapon.range, |p| world.is_solid(p))
                 .map(|hit| ray_aabb(eye, dir, hit.block.as_vec3(), hit.block.as_vec3() + Vec3::ONE).unwrap_or(0.0))
                 .unwrap_or(weapon.range);
-            let target = zombies
+            // Les zombies sur la trajectoire, du plus proche au plus loin ; un carreau en traverse plusieurs.
+            let mut hits: Vec<(Mut<Zombie>, f32)> = zombies
                 .iter_mut()
                 .filter_map(|(z, body)| {
                     let size = z.kind.stats().size;
@@ -449,17 +474,20 @@ fn handle_reliable(
                         .filter(|t| *t < wall)
                         .map(|t| (z, t))
                 })
-                .min_by(|a, b| a.1.total_cmp(&b.1));
-            let end = match target {
-                Some((mut z, t)) => {
-                    z.health -= weapon.damage;
-                    z.hurt_timer = 0.3;
-                    z.knockback = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 3.0;
-                    z.last_attacker = Some(client);
-                    eye + dir * t
+                .collect();
+            hits.sort_by(|a, b| a.1.total_cmp(&b.1));
+            hits.truncate(weapon.pierce as usize);
+            let pierced_all = hits.len() == weapon.pierce as usize;
+            let mut end = eye + dir * wall;
+            for (z, t) in &mut hits {
+                z.health -= weapon.damage;
+                z.hurt_timer = 0.3;
+                z.knockback = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 3.0;
+                z.last_attacker = Some(client);
+                if pierced_all {
+                    end = eye + dir * *t;
                 }
-                None => eye + dir * wall,
-            };
+            }
             send_inventory(server, client, player);
             broadcast(
                 server,

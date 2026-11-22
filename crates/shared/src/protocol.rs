@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0009;
+pub const PROTOCOL_ID: u64 = 0x5A53_000A;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -105,6 +105,10 @@ pub enum ClientMessage {
     /// Lève ou baisse la garde (arme de mêlée en main, clic droit maintenu).
     Guard {
         active: bool,
+    },
+    /// Lance l'explosif tenu en main dans cette direction.
+    Throw {
+        direction: Vec3,
     },
 }
 
@@ -304,6 +308,18 @@ pub enum ServerMessage {
     },
     /// Le joueur a paré un coup au bon moment.
     Parried,
+    /// Un explosif a été lancé (le client simule sa trajectoire pour l'afficher).
+    Thrown {
+        origin: Vec3,
+        velocity: Vec3,
+        fuse: f32,
+        item: Item,
+    },
+    /// Une explosion a eu lieu.
+    Explosion {
+        pos: Vec3,
+        radius: f32,
+    },
 }
 
 /// Sérialise un message.

@@ -26,6 +26,8 @@ const JUMP_SPEED: f32 = 8.5;
 const MOUSE_SENSITIVITY: f32 = 0.0025;
 /// Délai entre deux poses de blocs quand le bouton reste enfoncé.
 const ACTION_COOLDOWN: f32 = 0.22;
+/// Délai entre deux lancers d'explosif (le serveur applique le même).
+const THROW_COOLDOWN: f32 = 0.8;
 /// Délai après avoir mangé.
 const EAT_COOLDOWN: f32 = 0.6;
 
@@ -409,6 +411,19 @@ fn interact(
         player.mining = None;
     }
     if !cursor_locked(&cursor) || player.dead.is_some() {
+        return;
+    }
+
+    if mouse.pressed(MouseButton::Left)
+        && let Some(item) = player.held().filter(|i| i.throwable().is_some())
+    {
+        // Explosif en main : le clic gauche le lance.
+        player.mining = None;
+        if player.cooldown <= 0.0 && mouse.just_pressed(MouseButton::Left) && player.inventory.remove(item, 1) {
+            let direction = player.look_direction();
+            send_reliable(&mut client, &ClientMessage::Throw { direction });
+            player.cooldown = THROW_COOLDOWN;
+        }
         return;
     }
 

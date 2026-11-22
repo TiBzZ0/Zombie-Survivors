@@ -111,6 +111,16 @@ pub enum NetEvent {
     },
     /// Un coup de zombie a été paré.
     Parried,
+    Thrown {
+        origin: Vec3,
+        velocity: Vec3,
+        fuse: f32,
+        item: shared::item::Item,
+    },
+    Explosion {
+        pos: Vec3,
+        radius: f32,
+    },
 }
 
 fn fail(commands: &mut Commands, next: &mut NextState<AppState>, message: String) {
@@ -349,6 +359,22 @@ fn receive_messages(
             }
             ServerMessage::Parried => {
                 events.write(NetEvent::Parried);
+            }
+            ServerMessage::Thrown {
+                origin,
+                velocity,
+                fuse,
+                item,
+            } => {
+                events.write(NetEvent::Thrown {
+                    origin,
+                    velocity,
+                    fuse,
+                    item,
+                });
+            }
+            ServerMessage::Explosion { pos, radius } => {
+                events.write(NetEvent::Explosion { pos, radius });
             }
             ServerMessage::Players(_) | ServerMessage::Zombies(_) | ServerMessage::Survivors(_) => {}
         }
