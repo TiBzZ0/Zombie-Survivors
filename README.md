@@ -29,9 +29,18 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | Espace | Sauter |
 | Maj gauche | Courir |
 | Souris | Regarder (clic dans la fenêtre pour capturer la souris, Échap pour la libérer) |
-| Clic gauche | Casser un bloc |
-| Clic droit | Poser le bloc sélectionné |
-| `1` à `7` | Choisir le bloc à poser |
+| Clic gauche (maintenu) | Frapper un zombie, ou miner le bloc visé |
+| Clic droit | Poser le bloc en main, ou manger |
+| `1` à `9`, molette | Choisir l'objet en main |
+| `C` ou `Tab` | Ouvrir le panneau de fabrication |
+| Entrée | Réapparaître après la mort |
+
+### Survivre
+
+- Le jour, récolte : le bois des arbres, la pierre et le minerai de fer sous la surface. Les feuilles donnent parfois des pommes.
+- Fabrique des planches, des bâtons, puis des pioches et des épées (bois, pierre, fer). Le minerai de fer et les murs renforcés se cassent seulement à la pioche.
+- La faim baisse avec le temps. Sans manger, la vie ne remonte plus, puis diminue. Trois pommes font une ration ; feuilles et bâton font un bandage.
+- La nuit, les zombies sortent et cassent les murs pour t'atteindre. Toutes les 7 nuits arrive une grande horde. Les murs renforcés tiennent longtemps, les piques blessent les zombies qui les frappent ou marchent dessus.
 
 Sous Linux, Bevy demande `libasound2-dev`, `libudev-dev`, `libwayland-dev` et `libxkbcommon-dev`.
 
