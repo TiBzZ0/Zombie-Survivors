@@ -46,6 +46,8 @@ fn main() {
         (Item::Helmet(Tier::Iron), 1),
         (Item::BodyArmor(Tier::Wood), 1),
         (Item::Ration, 5),
+        (Item::Flask, 1),
+        (Item::WaterFlask, 2),
     ] {
         inventory.add(item, n);
     }

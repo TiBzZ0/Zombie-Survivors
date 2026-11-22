@@ -159,13 +159,13 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
         }
         Block::Water => {
             // Vaguelettes claires.
-            let ripple = (x + 2 * (y / 3) + (hash(0, y / 3, salt) * 4.0) as u32) % 7 == 0;
+            let ripple = (x + 2 * (y / 3) + (hash(0, y / 3, salt) * 4.0) as u32).is_multiple_of(7);
             gray(if ripple { 1.0 } else { 0.85 + 0.08 * coarse })
         }
         Block::Snow => gray(0.94 + 0.06 * n),
         Block::Cactus => {
             // Côtes verticales et épines.
-            let rib = x % 4 == 0;
+            let rib = x.is_multiple_of(4);
             if n > 0.93 {
                 gray(1.0)
             } else if rib {

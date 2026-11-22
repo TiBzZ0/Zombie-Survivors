@@ -430,6 +430,7 @@ fn bow_shoots_and_uses_arrows() {
     inventory.add(Item::Bow, 1);
     inventory.add(Item::Arrow, 5);
     inventory.add(Item::Grenade, 2);
+    inventory.add(Item::WaterFlask, 1);
     let save = server::save::SaveFile {
         version: server::save::SAVE_VERSION,
         world: WorldConfig::default(),
@@ -442,7 +443,7 @@ fn bow_shoots_and_uses_arrows() {
                 health: 100.0,
                 hunger: 100.0,
                 inventory,
-                thirst: 100.0,
+                thirst: 30.0,
             },
         )],
         deposits: Vec::new(),
@@ -526,6 +527,24 @@ fn bow_shoots_and_uses_arrows() {
     pump_until(&mut [&mut eve], "explosion", |c| {
         c[0].find(|m| matches!(m, ServerMessage::Explosion { .. }).then_some(()))
             .is_some()
+    });
+
+    // Eve avait soif (30) : la gourde d'eau la désaltère et la gourde vide lui reste.
+    eve.send(&ClientMessage::Eat { item: Item::WaterFlask }, true);
+    pump_until(&mut [&mut eve], "gourde bue", |c| {
+        let drank = c[0]
+            .find(|m| match m {
+                ServerMessage::Vitals { thirst, .. } if *thirst > 80.0 => Some(()),
+                _ => None,
+            })
+            .is_some();
+        let flask = c[0]
+            .find(|m| match m {
+                ServerMessage::Inventory(inv) if inv.has(Item::Flask, 1) && !inv.has(Item::WaterFlask, 1) => Some(()),
+                _ => None,
+            })
+            .is_some();
+        drank && flask
     });
     let _ = std::fs::remove_dir_all(&data_dir);
 }

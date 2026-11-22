@@ -351,7 +351,7 @@ impl WorldGenerator {
         if h % 100 >= RUIN_CHANCE {
             return None;
         }
-        let half = if self.modern() && (h >> 4) % 4 == 0 {
+        let half = if self.modern() && (h >> 4).is_multiple_of(4) {
             BIG_RUIN_HALF
         } else {
             RUIN_HALF
