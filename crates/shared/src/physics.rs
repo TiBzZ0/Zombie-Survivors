@@ -142,13 +142,7 @@ mod tests {
         let mut pos = Vec3::new(0.5, 10.0, 0.5);
         let mut hit = false;
         for _ in 0..60 {
-            let r = step_body(
-                pos,
-                Vec3::new(5.0, 0.0, 0.0),
-                PLAYER_SIZE,
-                1.0 / 30.0,
-                &wall,
-            );
+            let r = step_body(pos, Vec3::new(5.0, 0.0, 0.0), PLAYER_SIZE, 1.0 / 30.0, &wall);
             pos = r.position;
             hit |= r.hit_wall;
         }

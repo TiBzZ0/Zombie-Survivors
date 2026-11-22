@@ -87,8 +87,7 @@ fn spawn_task(commands: &mut Commands, world: &WorldState, pos: ChunkPos) {
         let origin = IVec3::from(pos.origin());
         for (p, block) in &edits {
             let local = *p - origin;
-            if local.cmpge(IVec3::ZERO).all() && local.cmplt(IVec3::splat(CHUNK_SIZE as i32)).all()
-            {
+            if local.cmpge(IVec3::ZERO).all() && local.cmplt(IVec3::splat(CHUNK_SIZE as i32)).all() {
                 chunk.set(local.x as usize, local.y as usize, local.z as usize, *block);
             }
         }
@@ -138,10 +137,7 @@ fn request_chunks(
             }
             for y in 0..config.height_chunks {
                 let pos = ChunkPos::new(center.x + dx, y, center.z + dz);
-                if config.contains_chunk(pos)
-                    && !terrain.loaded.contains_key(&pos)
-                    && !terrain.pending.contains(&pos)
-                {
+                if config.contains_chunk(pos) && !terrain.loaded.contains_key(&pos) && !terrain.pending.contains(&pos) {
                     wanted.push(pos);
                 }
             }
@@ -191,15 +187,12 @@ fn finish_chunks(
             continue;
         }
         let vertex_count = data.positions.len();
-        let mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::RENDER_WORLD,
-        )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, data.positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 0.0]; vertex_count])
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, data.colors)
-        .with_inserted_indices(Indices::U32(data.indices));
+        let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, data.positions)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 0.0]; vertex_count])
+            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, data.colors)
+            .with_inserted_indices(Indices::U32(data.indices));
         let [ox, oy, oz] = pos.origin();
         let entity = commands
             .spawn((

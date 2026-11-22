@@ -8,6 +8,11 @@ edition = "2024"
 license = "UNLICENSED"
 publish = false
 
+# Les systèmes Bevy ont souvent beaucoup de paramètres et des requêtes longues.
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+
 [workspace.dependencies]
 shared = { path = "crates/shared" }
 server = { path = "crates/server" }

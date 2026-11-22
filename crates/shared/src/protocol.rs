@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::block::Block;
 use crate::config::WorldConfig;
+use crate::daytime::GameTime;
+use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
 pub const PROTOCOL_ID: u64 = 0x5A53_0001;
@@ -40,6 +42,58 @@ pub enum ClientMessage {
         pos: IVec3,
         block: Block,
     },
+    /// Coup porté à un zombie visé.
+    Attack {
+        zombie: u32,
+    },
+    /// Demande de réapparition après la mort.
+    Respawn,
+}
+
+/// Position compacte d'un zombie (12 octets environ une fois sérialisée).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ZombieState {
+    pub id: u32,
+    /// Position en 1/32 de mètre.
+    pub x: u16,
+    pub y: u16,
+    pub z: u16,
+    /// Orientation sur 256 pas.
+    pub yaw: u8,
+    pub kind: u8,
+    /// Bits d'état : 1 = attaque, 2 = vient d'être touché.
+    pub flags: u8,
+}
+
+impl ZombieState {
+    pub const ATTACKING: u8 = 1;
+    pub const HURT: u8 = 2;
+
+    pub fn new(id: u32, position: Vec3, yaw: f32, kind: ZombieKind, flags: u8) -> Self {
+        let q = |v: f32| (v * 32.0).clamp(0.0, u16::MAX as f32) as u16;
+        let turn = yaw.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
+        Self {
+            id,
+            x: q(position.x),
+            y: q(position.y),
+            z: q(position.z),
+            yaw: (turn * 256.0) as u8,
+            kind: kind as u8,
+            flags,
+        }
+    }
+
+    pub fn position(&self) -> Vec3 {
+        Vec3::new(self.x as f32, self.y as f32, self.z as f32) / 32.0
+    }
+
+    pub fn yaw(&self) -> f32 {
+        self.yaw as f32 / 256.0 * std::f32::consts::TAU
+    }
+
+    pub fn kind(&self) -> ZombieKind {
+        ZombieKind::from_u8(self.kind)
+    }
 }
 
 /// Messages du serveur vers le client.
@@ -74,6 +128,26 @@ pub enum ServerMessage {
         from: String,
         text: String,
     },
+    /// Zombies proches du joueur (canal non fiable). Un zombie absent a disparu ou est trop loin.
+    Zombies(Vec<ZombieState>),
+    /// Heure de la partie et nombre de zombies en vie.
+    Time {
+        time: GameTime,
+        zombies_alive: u32,
+    },
+    /// Santé du joueur après un changement.
+    Health {
+        health: f32,
+    },
+    /// Le joueur est mort ; il peut demander à réapparaître.
+    Died {
+        cause: String,
+    },
+    /// Un zombie est mort (pour l'effet visuel et le compteur).
+    ZombieKilled {
+        id: u32,
+        by: Option<PlayerId>,
+    },
 }
 
 /// Sérialise un message.
@@ -100,6 +174,15 @@ mod tests {
             pitch: -0.1,
         });
         assert_eq!(decode::<ClientMessage>(&encode(&msg)), Some(msg));
+    }
+
+    #[test]
+    fn zombie_state_is_compact_and_precise() {
+        let state = ZombieState::new(7, Vec3::new(512.3, 40.0, 100.9), 1.5, ZombieKind::Runner, 0);
+        assert!(state.position().distance(Vec3::new(512.3, 40.0, 100.9)) < 0.05);
+        assert!((state.yaw() - 1.5).abs() < 0.03);
+        assert_eq!(state.kind(), ZombieKind::Runner);
+        assert!(encode(&state).len() <= 14);
     }
 
     #[test]

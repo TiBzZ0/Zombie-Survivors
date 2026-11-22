@@ -10,9 +10,7 @@ pub const CHUNK_SIZE: usize = 32;
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
 /// Position d'un chunk dans la grille des chunks.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ChunkPos {
     pub x: i32,
     pub y: i32,
@@ -54,9 +52,7 @@ impl Default for Chunk {
 impl std::fmt::Debug for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let solid = self.blocks.iter().filter(|b| b.is_solid()).count();
-        f.debug_struct("Chunk")
-            .field("solid_blocks", &solid)
-            .finish()
+        f.debug_struct("Chunk").field("solid_blocks", &solid).finish()
     }
 }
 

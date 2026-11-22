@@ -16,9 +16,7 @@ impl Plugin for RemotePlayersPlugin {
             .add_systems(Startup, setup_assets)
             .add_systems(
                 Update,
-                (handle_events, interpolate)
-                    .chain()
-                    .run_if(in_state(AppState::Playing)),
+                (handle_events, interpolate).chain().run_if(in_state(AppState::Playing)),
             )
             .add_systems(OnExit(AppState::Playing), clear);
     }
@@ -58,12 +56,7 @@ fn setup_assets(
     });
 }
 
-fn spawn_remote(
-    commands: &mut Commands,
-    assets: &RemoteAssets,
-    position: Vec3,
-    yaw: f32,
-) -> Entity {
+fn spawn_remote(commands: &mut Commands, assets: &RemoteAssets, position: Vec3, yaw: f32) -> Entity {
     commands
         .spawn((
             RemotePlayer {
@@ -112,18 +105,13 @@ fn handle_events(
                     if *id == session.my_id {
                         continue;
                     }
-                    match remotes
-                        .entities
-                        .get(id)
-                        .and_then(|e| players.get_mut(*e).ok())
-                    {
+                    match remotes.entities.get(id).and_then(|e| players.get_mut(*e).ok()) {
                         Some(mut remote) => {
                             remote.target = state.position;
                             remote.target_yaw = state.yaw;
                         }
                         None => {
-                            let entity =
-                                spawn_remote(&mut commands, &assets, state.position, state.yaw);
+                            let entity = spawn_remote(&mut commands, &assets, state.position, state.yaw);
                             remotes.entities.insert(*id, entity);
                         }
                     }

@@ -6,6 +6,7 @@ use crate::AppState;
 use crate::net::NetEvent;
 use crate::player::{HOTBAR, LocalPlayer};
 use crate::remote::RemotePlayers;
+use crate::sky::GameClock;
 
 pub struct HudPlugin;
 
@@ -16,7 +17,7 @@ impl Plugin for HudPlugin {
             .add_systems(OnExit(AppState::Playing), despawn_hud)
             .add_systems(
                 Update,
-                (collect_chat, update_hud, draw_target).run_if(in_state(AppState::Playing)),
+                (collect_chat, update_hud, update_status, draw_target).run_if(in_state(AppState::Playing)),
             );
     }
 }
@@ -29,6 +30,24 @@ struct HotbarText;
 
 #[derive(Component)]
 struct ChatText;
+
+#[derive(Component)]
+struct ClockText;
+
+#[derive(Component)]
+struct HealthFill;
+
+#[derive(Component)]
+struct HealthText;
+
+#[derive(Component)]
+struct HurtOverlay;
+
+#[derive(Component)]
+struct DeathScreen;
+
+#[derive(Component)]
+struct DeathText;
 
 /// Derniers messages affichés, avec leur heure d'arrivée.
 #[derive(Resource, Default)]
@@ -88,6 +107,84 @@ fn spawn_hud(mut commands: Commands, mut chat: ResMut<ChatLog>) {
                 },
                 children![(text("", 20.0), HotbarText)],
             ),
+            // Heure et nombre de zombies, en haut à droite.
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: px(12),
+                    top: px(10),
+                    ..default()
+                },
+                text("", 18.0),
+                TextLayout::justify(Justify::Right),
+                ClockText,
+            ),
+            // Barre de vie, en bas à gauche.
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(16),
+                    bottom: px(52),
+                    width: px(220),
+                    height: px(20),
+                    border: px(2).all(),
+                    ..default()
+                },
+                BorderColor::from(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+                BackgroundColor(Color::srgba(0.1, 0.0, 0.0, 0.6)),
+                children![
+                    (
+                        Node {
+                            width: percent(100),
+                            height: percent(100),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.75, 0.12, 0.1)),
+                        HealthFill,
+                    ),
+                    (
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(8),
+                            ..default()
+                        },
+                        text("100", 15.0),
+                        HealthText,
+                    ),
+                ],
+            ),
+            // Voile rouge quand on est touché.
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: percent(100),
+                    height: percent(100),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+                HurtOverlay,
+            ),
+            // Écran de mort.
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: percent(100),
+                    height: percent(100),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    row_gap: px(16),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.25, 0.0, 0.0, 0.7)),
+                Visibility::Hidden,
+                DeathScreen,
+                children![
+                    text("VOUS ÊTES MORT", 52.0),
+                    (text("", 22.0), DeathText),
+                    text("Appuyez sur Entrée pour réapparaître", 20.0),
+                ],
+            ),
         ],
     ));
 }
@@ -119,7 +216,7 @@ fn update_hud(
         .iter()
         .enumerate()
         .map(|(i, b)| {
-            let name = format!("{b:?}");
+            let name = b.name();
             if i == player.selected {
                 format!("[{} {}]", i + 1, name)
             } else {
@@ -132,6 +229,50 @@ fn update_hud(
     let mut lines = vec![format!("Joueurs en ligne : {}", remotes.names.len() + 1)];
     lines.extend(chat.0.iter().map(|(_, l)| l.clone()));
     chat_text.0 = lines.join("\n");
+}
+
+fn format_secs(secs: f32) -> String {
+    let s = secs.max(0.0) as u32;
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
+fn update_status(
+    clock: Res<GameClock>,
+    player: Res<LocalPlayer>,
+    mut clock_text: Single<&mut Text, (With<ClockText>, Without<HealthText>, Without<DeathText>)>,
+    mut health_text: Single<&mut Text, (With<HealthText>, Without<ClockText>, Without<DeathText>)>,
+    mut death_text: Single<&mut Text, (With<DeathText>, Without<ClockText>, Without<HealthText>)>,
+    mut fill: Single<&mut Node, With<HealthFill>>,
+    mut overlay: Single<&mut BackgroundColor, With<HurtOverlay>>,
+    mut death: Single<&mut Visibility, With<DeathScreen>>,
+) {
+    let t = clock.time;
+    clock_text.0 = if t.is_night() {
+        let horde = if t.is_horde_night() { " · GRANDE HORDE" } else { "" };
+        format!(
+            "Nuit {}{horde}\nAube dans {}\nZombies : {}",
+            t.day,
+            format_secs(t.secs_until_dawn()),
+            clock.zombies_alive
+        )
+    } else {
+        let next = if (t.day).is_multiple_of(shared::daytime::HORDE_EVERY) {
+            "\nCette nuit : grande horde !"
+        } else {
+            ""
+        };
+        format!("Jour {}\nNuit dans {}{next}", t.day, format_secs(t.secs_until_night()))
+    };
+    health_text.0 = format!("{:.0}", player.health.ceil());
+    fill.width = percent(player.health.clamp(0.0, 100.0));
+    overlay.0 = Color::srgba(0.8, 0.0, 0.0, player.hurt_flash * 0.35);
+    match &player.dead {
+        Some(cause) => {
+            **death = Visibility::Visible;
+            death_text.0 = cause.clone();
+        }
+        None => **death = Visibility::Hidden,
+    }
 }
 
 fn draw_target(player: Res<LocalPlayer>, mut gizmos: Gizmos) {
