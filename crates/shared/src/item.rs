@@ -50,6 +50,14 @@ pub enum Item {
     Flask,
     /// Gourde pleine : se boit n'importe où.
     WaterFlask,
+    /// Peau d'un animal chassé.
+    Hide,
+    /// Manteau de fourrure : protège du froid.
+    FurCoat,
+    /// Chapeau de paille : protège de la chaleur.
+    StrawHat,
+    /// Antidote : guérit l'infection.
+    Antidote,
 }
 
 /// Caractéristiques d'un explosif qu'on lance.
@@ -152,6 +160,10 @@ impl Item {
             Item::CookedMeat => "Viande cuite".into(),
             Item::Flask => "Gourde vide".into(),
             Item::WaterFlask => "Gourde d'eau".into(),
+            Item::Hide => "Peau".into(),
+            Item::FurCoat => "Manteau de fourrure".into(),
+            Item::StrawHat => "Chapeau de paille".into(),
+            Item::Antidote => "Antidote".into(),
         }
     }
 
@@ -252,6 +264,27 @@ impl Item {
         }
     }
 
+    /// Degrés gagnés contre le froid quand on porte ce vêtement.
+    pub const fn warmth(self) -> f32 {
+        match self {
+            Item::FurCoat => 22.0,
+            _ => 0.0,
+        }
+    }
+
+    /// Degrés gagnés contre la chaleur quand on porte ce vêtement.
+    pub const fn cooling(self) -> f32 {
+        match self {
+            Item::StrawHat => 8.0,
+            _ => 0.0,
+        }
+    }
+
+    /// Objet qu'on consomme au clic droit (aliment, boisson ou remède).
+    pub const fn is_consumable(self) -> bool {
+        self.food().is_some() || self.drink().is_some() || matches!(self, Item::Antidote)
+    }
+
     /// Arme qu'on peut confier à un survivant.
     pub const fn is_weapon(self) -> bool {
         self.is_melee_weapon() || matches!(self, Item::Bow | Item::Rifle | Item::Crossbow)
@@ -349,6 +382,12 @@ impl Inventory {
                 .map(|(i, _)| i)
         };
         (best(ArmorSlot::Head), best(ArmorSlot::Body))
+    }
+
+    /// Protection des vêtements portés (le meilleur de chaque sorte) : (contre le froid, contre la chaleur).
+    pub fn clothing(&self) -> (f32, f32) {
+        let best = |f: fn(Item) -> f32| self.items.keys().map(|i| f(*i)).fold(0.0f32, f32::max);
+        (best(Item::warmth), best(Item::cooling))
     }
 
     /// Part des dégâts absorbée par l'armure portée.

@@ -20,7 +20,7 @@ use crate::world::{Chests, Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
 
 /// Change si le format du fichier change de façon incompatible.
-pub const SAVE_VERSION: u32 = 7;
+pub const SAVE_VERSION: u32 = 8;
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";
@@ -44,6 +44,9 @@ pub struct SavedPlayer {
     pub inventory: Inventory,
     /// Soif (depuis la version 7).
     pub thirst: f32,
+    /// Infection : enregistrée à part, à la fin du fichier (depuis la version 8).
+    #[serde(skip)]
+    pub infection: f32,
 }
 
 impl SavedPlayer {
@@ -54,6 +57,7 @@ impl SavedPlayer {
             hunger: player.hunger,
             inventory: player.inventory.clone(),
             thirst: player.thirst,
+            infection: player.infection,
         }
     }
 }
@@ -75,6 +79,7 @@ impl From<SavedPlayerV6> for SavedPlayer {
             hunger: p.hunger,
             inventory: p.inventory,
             thirst: crate::net::MAX_THIRST,
+            infection: 0.0,
         }
     }
 }
@@ -194,6 +199,8 @@ pub struct SaveFile {
     pub chests: Vec<(IVec3, Inventory)>,
     /// Survivants recrutés (depuis la version 4).
     pub survivors: Vec<SavedSurvivor>,
+    /// Joueurs infectés et avancée de l'infection (depuis la version 8).
+    pub infections: Vec<(String, f32)>,
 }
 
 pub fn save_path(data_dir: &Path) -> PathBuf {
@@ -231,17 +238,28 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
     } else {
         (Vec::new(), rest)
     };
-    let survivors: Vec<SavedSurvivor> = if version >= 6 {
-        postcard::take_from_bytes(rest).map_err(invalid)?.0
+    let (survivors, rest): (Vec<SavedSurvivor>, &[u8]) = if version >= 6 {
+        postcard::take_from_bytes(rest).map_err(invalid)?
     } else if version == 5 {
-        let (old, _) = postcard::take_from_bytes::<Vec<SavedSurvivorV5>>(rest).map_err(invalid)?;
-        old.into_iter().map(Into::into).collect()
+        let (old, rest) = postcard::take_from_bytes::<Vec<SavedSurvivorV5>>(rest).map_err(invalid)?;
+        (old.into_iter().map(Into::into).collect(), rest)
     } else if version == 4 {
-        let (old, _) = postcard::take_from_bytes::<Vec<SavedSurvivorV4>>(rest).map_err(invalid)?;
-        old.into_iter().map(Into::into).collect()
+        let (old, rest) = postcard::take_from_bytes::<Vec<SavedSurvivorV4>>(rest).map_err(invalid)?;
+        (old.into_iter().map(Into::into).collect(), rest)
+    } else {
+        (Vec::new(), rest)
+    };
+    let infections: Vec<(String, f32)> = if version >= 8 {
+        postcard::take_from_bytes(rest).map_err(invalid)?.0
     } else {
         Vec::new()
     };
+    let mut players = players;
+    for (name, player) in &mut players {
+        if let Some((_, amount)) = infections.iter().find(|(n, _)| n == name) {
+            player.infection = *amount;
+        }
+    }
     if version > SAVE_VERSION {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -257,6 +275,7 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
         deposits,
         chests,
         survivors,
+        infections,
     };
     Ok(Some(save))
 }
@@ -288,6 +307,11 @@ fn snapshot(
     edits.sort_by_key(|(p, _)| (p.x, p.y, p.z));
     let mut players: Vec<_> = players.into_iter().collect();
     players.sort_by(|a, b| a.0.cmp(&b.0));
+    let infections = players
+        .iter()
+        .filter(|(_, p)| p.infection > 0.0)
+        .map(|(name, p)| (name.clone(), p.infection))
+        .collect();
     let mut deposits: Vec<_> = deposits.0.iter().map(|(p, n)| (*p, *n)).collect();
     deposits.sort_by_key(|(p, _)| (p.x, p.y, p.z));
     let mut chests: Vec<_> = chests.0.iter().map(|(p, inv)| (*p, inv.clone())).collect();
@@ -301,6 +325,7 @@ fn snapshot(
         deposits,
         chests,
         survivors: survivors.0.clone(),
+        infections,
     }
 }
 
@@ -404,6 +429,7 @@ mod tests {
                     hunger: 70.0,
                     inventory,
                     thirst: 40.0,
+                    infection: 30.0,
                 },
             )],
             deposits: vec![(IVec3::new(4, 5, 6), 7)],
@@ -419,6 +445,7 @@ mod tests {
                 weapon: Some(Item::Bow),
                 armor: [Some(Item::Helmet(shared::item::Tier::Iron)), None],
             }],
+            infections: vec![("Alice".into(), 30.0)],
         };
         write(&dir, &save).unwrap();
         assert_eq!(load(&dir).unwrap(), Some(save));

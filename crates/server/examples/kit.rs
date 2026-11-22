@@ -102,11 +102,13 @@ fn main() {
                 hunger: 100.0,
                 inventory,
                 thirst: 100.0,
+                infection: 0.0,
             },
         )],
         deposits: Vec::new(),
         chests: vec![(turret, ammo)],
         survivors,
+        infections: Vec::new(),
     };
     write(std::path::Path::new(&dir), &save).expect("écriture de la sauvegarde");
     println!("Sauvegarde écrite dans {dir}");

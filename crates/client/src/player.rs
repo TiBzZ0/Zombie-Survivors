@@ -72,6 +72,12 @@ pub struct LocalPlayer {
     pub health: f32,
     pub hunger: f32,
     pub thirst: f32,
+    /// Température du corps, en °C.
+    pub body_temp: f32,
+    /// Air ressenti, en °C.
+    pub felt: f32,
+    /// Avancée de l'infection (0 = sain).
+    pub infection: f32,
     pub inventory: Inventory,
     /// Objets rangés dans la barre, dans l'ordre des touches.
     pub hotbar: [Option<Item>; HOTBAR_SLOTS],
@@ -163,6 +169,8 @@ fn spawn_player(mut player: ResMut<LocalPlayer>, session: Res<Session>) {
         health: 100.0,
         hunger: 100.0,
         thirst: 100.0,
+        body_temp: shared::climate::BODY_NORMAL,
+        felt: 18.0,
         position: session.spawn,
         yaw: -std::f32::consts::FRAC_PI_4,
         ..default()
@@ -282,7 +290,17 @@ fn apply_teleports(
                 player.position = *position;
                 player.velocity = Vec3::ZERO;
             }
-            NetEvent::Vitals { health, hunger, thirst } => {
+            NetEvent::Vitals {
+                health,
+                hunger,
+                thirst,
+                body_temp,
+                felt,
+                infection,
+            } => {
+                player.body_temp = *body_temp;
+                player.felt = *felt;
+                player.infection = *infection;
                 if *health < player.health - 0.5 {
                     player.hurt_flash = 1.0;
                 }
@@ -575,7 +593,7 @@ fn interact(
         }
     }
     match player.held() {
-        Some(item) if item.food().is_some() || item.drink().is_some() => {
+        Some(item) if item.is_consumable() => {
             send_reliable(&mut client, &ClientMessage::Eat { item });
             player.cooldown = EAT_COOLDOWN;
         }

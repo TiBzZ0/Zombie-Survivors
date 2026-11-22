@@ -17,13 +17,18 @@ impl Plugin for HudPlugin {
             .add_systems(OnExit(AppState::Playing), despawn_hud)
             .add_systems(
                 Update,
-                (collect_chat, update_hud, update_status, draw_target).run_if(in_state(AppState::Playing)),
+                (collect_chat, update_hud, update_condition, update_status, draw_target)
+                    .run_if(in_state(AppState::Playing)),
             );
     }
 }
 
 #[derive(Component)]
 struct HudRoot;
+
+/// Température et infection, au-dessus de la barre de vie.
+#[derive(Component)]
+struct ConditionText;
 
 #[derive(Component)]
 struct HotbarText;
@@ -177,6 +182,17 @@ fn spawn_hud(mut commands: Commands, mut chat: ResMut<ChatLog>) {
                 text("", 18.0),
                 TextLayout::justify(Justify::Right),
                 ClockText,
+            ),
+            // Température et infection, au-dessus de la vie.
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(16),
+                    bottom: px(112),
+                    ..default()
+                },
+                text("", 17.0),
+                ConditionText,
             ),
             // Vie et faim, en bas à gauche.
             gauge(
@@ -478,6 +494,8 @@ fn update_status(
         "Clic droit : manger".into()
     } else if player.held().is_some_and(|i| i.drink().is_some()) {
         "Clic droit : boire".into()
+    } else if player.held() == Some(shared::item::Item::Antidote) {
+        "Clic droit : prendre l'antidote".into()
     } else if player.aimed_water.is_some() && player.held() == Some(shared::item::Item::Flask) {
         "Clic droit : remplir la gourde".into()
     } else if player.aimed_water.is_some() && !player.held().is_some_and(|i| matches!(i, shared::item::Item::Block(_)))
@@ -522,5 +540,39 @@ fn draw_target(player: Res<LocalPlayer>, mut gizmos: Gizmos) {
             Transform::from_translation(center).with_scale(Vec3::splat(1.003)),
             Color::srgba(0.0, 0.0, 0.0, 0.8),
         );
+    }
+}
+
+/// Température du corps (si elle s'écarte de la normale ou si l'air est rude) et infection.
+fn update_condition(player: Res<LocalPlayer>, mut text: Single<(&mut Text, &mut TextColor), With<ConditionText>>) {
+    use shared::climate::*;
+    let mut parts: Vec<String> = Vec::new();
+    let mut color = Color::WHITE;
+    let feeling = feeling(player.felt);
+    if feeling.is_some() || (player.body_temp - BODY_NORMAL).abs() >= 0.1 {
+        let temp = format!("{:.1} °C", player.body_temp).replace('.', ",");
+        let state = if player.body_temp < HYPOTHERMIA {
+            color = Color::srgb(0.5, 0.75, 1.0);
+            " · Hypothermie ! Un feu, un toit ou un manteau".to_string()
+        } else if player.body_temp > HEATSTROKE {
+            color = Color::srgb(1.0, 0.5, 0.3);
+            " · Coup de chaleur ! De l'ombre ou un chapeau".to_string()
+        } else {
+            feeling.map(|f| format!(" · {f}")).unwrap_or_default()
+        };
+        parts.push(format!("{temp}{state}"));
+    }
+    if player.infection > 0.0 {
+        if player.infection >= INFECTION_HARMFUL {
+            color = Color::srgb(0.55, 0.9, 0.3);
+        }
+        parts.push(format!("Infecté {:.0} % · un antidote guérit", player.infection.ceil()));
+    }
+    let joined = parts.join("\n");
+    if text.0.0 != joined {
+        text.0.0 = joined;
+    }
+    if text.1.0 != color {
+        text.1.0 = color;
     }
 }

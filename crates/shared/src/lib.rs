@@ -7,6 +7,7 @@
 pub mod animal;
 pub mod block;
 pub mod chunk;
+pub mod climate;
 pub mod config;
 pub mod crafting;
 pub mod daytime;

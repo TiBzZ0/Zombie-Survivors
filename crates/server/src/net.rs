@@ -71,6 +71,12 @@ pub struct ConnectedPlayer {
     pub open_chest: Option<IVec3>,
     /// Depuis combien de secondes le joueur tient sa garde levée.
     pub guarding: Option<f32>,
+    /// Température du corps, en °C.
+    pub body_temp: f32,
+    /// Air ressenti autour du joueur, avec ses vêtements, en °C.
+    pub felt: f32,
+    /// Avancée de l'infection : 0 = sain, puis de 1 à 100.
+    pub infection: f32,
 }
 
 /// Durée après avoir levé la garde pendant laquelle un coup est paré.
@@ -112,6 +118,9 @@ impl ConnectedPlayer {
             mining: None,
             open_chest: None,
             guarding: None,
+            body_temp: shared::climate::BODY_NORMAL,
+            felt: 18.0,
+            infection: 0.0,
         }
     }
 
@@ -151,6 +160,9 @@ pub fn send_vitals(server: &mut RenetServer, client: ClientId, player: &Connecte
             health: player.health,
             hunger: player.hunger,
             thirst: player.thirst,
+            body_temp: player.body_temp,
+            felt: player.felt,
+            infection: player.infection,
         },
     );
 }
@@ -368,6 +380,7 @@ fn handle_reliable(
                     player.health = back.health;
                     player.hunger = back.hunger;
                     player.thirst = back.thirst;
+                    player.infection = back.infection;
                     player.inventory = back.inventory;
                 }
                 send_inventory(server, client, player);
@@ -561,6 +574,8 @@ fn handle_reliable(
                 player.health = MAX_HEALTH;
                 player.hunger = player.hunger.max(MAX_HUNGER * 0.5);
                 player.thirst = player.thirst.max(MAX_THIRST * 0.5);
+                player.body_temp = shared::climate::BODY_NORMAL;
+                player.infection = 0.0;
                 player.since_hit = 0.0;
                 player.state.position = spawn;
                 send(server, client, &ServerMessage::Teleport { position: spawn });
@@ -714,6 +729,9 @@ fn handle_reliable(
                 // La gourde vidée reste dans l'inventaire.
                 player.inventory.add(Item::Flask, 1);
                 player.thirst = (player.thirst + thirst).min(MAX_THIRST);
+                send_vitals(server, client, player);
+            } else if item == Item::Antidote && player.is_alive() && player.inventory.remove(item, 1) {
+                player.infection = 0.0;
                 send_vitals(server, client, player);
             }
             send_inventory(server, client, player);

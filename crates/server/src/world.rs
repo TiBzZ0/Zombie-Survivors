@@ -63,6 +63,7 @@ pub fn ruin_loot(seed: u64) -> Inventory {
     maybe(0.8, Item::Apple, 2, 5);
     maybe(0.5, Item::Ration, 1, 2);
     maybe(0.5, Item::Bandage, 1, 2);
+    maybe(0.2, Item::Antidote, 1, 1);
     maybe(0.6, Item::Block(Block::Planks), 4, 10);
     maybe(0.35, Item::IronIngot, 1, 3);
     maybe(0.4, Item::Arrow, 6, 12);
