@@ -36,6 +36,8 @@ const SPAWN_MAX_DIST: f32 = 40.0;
 const DESPAWN_DIST: f32 = 120.0;
 /// Rayon dans lequel un joueur reçoit les zombies.
 const VIEW_DIST: f32 = 90.0;
+/// En deçà, les zombies sont envoyés à chaque fois (15 fois par seconde).
+const NEAR_DIST: f32 = 40.0;
 /// Dégâts du soleil par seconde.
 const SUN_DPS: f32 = 6.0;
 /// Assez pour franchir une marche d'un bloc avec de la marge.
@@ -1001,11 +1003,16 @@ fn broadcast_zombies(
     if !tick.is_multiple_of(2) {
         return;
     }
+    // Les zombies lointains ne sont envoyés que 5 fois par seconde : de loin, ça ne se voit pas.
+    let far_too = tick.is_multiple_of(6);
     let Some(server) = server.as_deref_mut() else { return };
     for (id, player) in lobby.players.iter().filter(|(_, p)| p.is_ready()) {
         let states: Vec<ZombieState> = zombies
             .iter()
-            .filter(|(_, b)| b.position.distance(player.state.position) < VIEW_DIST)
+            .filter(|(_, b)| {
+                let d = b.position.distance(player.state.position);
+                d < NEAR_DIST || (far_too && d < VIEW_DIST)
+            })
             .map(|(z, b)| {
                 let mut flags = 0;
                 if z.attacking > 0.0 {

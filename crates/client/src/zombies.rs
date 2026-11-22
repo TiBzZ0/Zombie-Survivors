@@ -95,6 +95,9 @@ fn setup_assets(
 }
 
 /// Hauteur d'un zombie selon son type (le modèle est mis à l'échelle).
+/// Au-delà (en mètres), un zombie glisse sans animer ses bras.
+const DETAIL_DIST: f32 = 40.0;
+
 fn scale(kind: ZombieKind) -> Vec3 {
     let s = kind.stats().size;
     Vec3::new(s.half_width / 0.3, s.height / 1.8, s.half_width / 0.3)
@@ -214,15 +217,21 @@ fn animate_zombies(
     mut arms: Query<(&Arm, &mut Transform), Without<ZombieView>>,
     mut parts: Query<(&mut MeshMaterial3d<StandardMaterial>, &ZombieBodyPart)>,
     children: Query<&Children>,
+    camera: Query<&GlobalTransform, With<Camera3d>>,
 ) {
     let dt = time.delta_secs();
     let t = (dt * 10.0).min(1.0);
+    let eye = camera.iter().next().map(|c| c.translation());
     for (mut view, mut transform, kids) in &mut zombies {
         let moved = transform.translation.distance(view.target);
         transform.translation = transform.translation.lerp(view.target, t);
         transform.rotation = transform.rotation.slerp(Quat::from_rotation_y(view.target_yaw), t);
         let speed = view.kind.stats().speed;
         view.walk_phase += (moved / dt.max(1e-3)).min(speed) * dt * 3.0;
+        // De loin, les bras et le flash rouge ne se voient pas : on s'épargne ce travail.
+        if eye.is_some_and(|e| e.distance(transform.translation) > DETAIL_DIST) {
+            continue;
+        }
         let attacking = view.flags & ZombieState::ATTACKING != 0;
         let hurt = view.flags & ZombieState::HURT != 0;
         for kid in kids.iter() {
@@ -241,7 +250,7 @@ fn animate_zombies(
         }
         // Flash rouge quand il est touché.
         for kid in kids.iter() {
-            let grandchildren: Vec<Entity> = children.get(kid).map(|c| c.iter().collect()).unwrap_or_default();
+            let grandchildren = children.get(kid).into_iter().flat_map(|c| c.iter());
             for e in std::iter::once(kid).chain(grandchildren) {
                 if let Ok((mut material, part)) = parts.get_mut(e) {
                     let wanted = if hurt { &assets.hurt } else { &part.0 };
