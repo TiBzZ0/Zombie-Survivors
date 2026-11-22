@@ -29,6 +29,10 @@ pub enum Block {
     DoorOpen,
     /// Coffre : stockage partagé entre les joueurs.
     Chest,
+    /// Établi : outils en pierre, arc, portes, coffres.
+    Workbench,
+    /// Forge : tout ce qui demande du fer.
+    Forge,
 }
 
 /// Nombre de récoltes d'un bloc de filon avant qu'il ne disparaisse.
@@ -87,6 +91,8 @@ impl Block {
             Block::CoalOre => [0.20, 0.20, 0.22],
             Block::Door | Block::DoorOpen => [0.55, 0.38, 0.20],
             Block::Chest => [0.62, 0.44, 0.18],
+            Block::Workbench => [0.50, 0.34, 0.20],
+            Block::Forge => [0.30, 0.28, 0.30],
         }
     }
 
@@ -107,6 +113,8 @@ impl Block {
             Block::CoalOre => "Filon de charbon",
             Block::Door | Block::DoorOpen => "Porte",
             Block::Chest => "Coffre",
+            Block::Workbench => "Établi",
+            Block::Forge => "Forge",
         }
     }
 
@@ -122,6 +130,8 @@ impl Block {
             Block::CoalOre => 70,
             Block::Door | Block::DoorOpen => 200,
             Block::Chest => 80,
+            Block::Workbench => 100,
+            Block::Forge => 250,
             Block::Planks => 120,
             Block::ReinforcedWall => 600,
             Block::Spikes => 100,
