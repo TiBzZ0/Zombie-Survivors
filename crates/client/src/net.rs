@@ -78,6 +78,7 @@ pub enum NetEvent {
     Vitals {
         health: f32,
         hunger: f32,
+        thirst: f32,
     },
     Inventory(shared::item::Inventory),
     Deposit {
@@ -334,8 +335,8 @@ fn receive_messages(
             ServerMessage::Inventory(inventory) => {
                 events.write(NetEvent::Inventory(inventory));
             }
-            ServerMessage::Vitals { health, hunger } => {
-                events.write(NetEvent::Vitals { health, hunger });
+            ServerMessage::Vitals { health, hunger, thirst } => {
+                events.write(NetEvent::Vitals { health, hunger, thirst });
             }
             ServerMessage::Died { cause } => {
                 events.write(NetEvent::Died(cause));

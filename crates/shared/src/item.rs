@@ -46,6 +46,10 @@ pub enum Item {
     Bread,
     RawMeat,
     CookedMeat,
+    /// Gourde vide : se remplit à un lac.
+    Flask,
+    /// Gourde pleine : se boit n'importe où.
+    WaterFlask,
 }
 
 /// Caractéristiques d'un explosif qu'on lance.
@@ -146,6 +150,8 @@ impl Item {
             Item::Bread => "Pain".into(),
             Item::RawMeat => "Viande crue".into(),
             Item::CookedMeat => "Viande cuite".into(),
+            Item::Flask => "Gourde vide".into(),
+            Item::WaterFlask => "Gourde d'eau".into(),
         }
     }
 
@@ -234,6 +240,14 @@ impl Item {
             Item::Bread => Some((40.0, 0.0)),
             Item::RawMeat => Some((12.0, 0.0)),
             Item::CookedMeat => Some((60.0, 8.0)),
+            _ => None,
+        }
+    }
+
+    /// Soif étanchée par une boisson.
+    pub const fn drink(self) -> Option<f32> {
+        match self {
+            Item::WaterFlask => Some(60.0),
             _ => None,
         }
     }

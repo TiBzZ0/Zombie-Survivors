@@ -51,6 +51,12 @@ pub enum Block {
     RipeWheat,
     /// Feu de camp : on y cuit la viande et le pain.
     Campfire,
+    /// Eau des lacs : on la traverse à la nage, on s'y désaltère.
+    Water,
+    /// Neige qui couvre le sol des terres froides.
+    Snow,
+    /// Cactus du désert : il pique.
+    Cactus,
 }
 
 /// Distance maximale entre un joueur et l'arme fixe qu'il pilote.
@@ -85,7 +91,10 @@ impl Block {
 
     /// Un bloc solide bloque le déplacement et cache les faces voisines.
     pub const fn is_solid(self) -> bool {
-        !matches!(self, Block::Air | Block::DoorOpen | Block::BarbedWire | Block::Campfire) && !self.is_crop()
+        !matches!(
+            self,
+            Block::Air | Block::DoorOpen | Block::BarbedWire | Block::Campfire | Block::Water
+        ) && !self.is_crop()
     }
 
     /// Culture qui pousse sur la terre.
@@ -137,12 +146,17 @@ impl Block {
 
     /// Bloc qu'un joueur peut poser depuis son inventaire.
     pub const fn is_placeable(self) -> bool {
-        !matches!(self, Block::Air | Block::DoorOpen)
+        !matches!(self, Block::Air | Block::DoorOpen | Block::Water)
+    }
+
+    /// Case où l'on peut poser un bloc : vide ou pleine d'eau.
+    pub const fn is_replaceable(self) -> bool {
+        matches!(self, Block::Air | Block::Water)
     }
 
     /// Un bloc visable par le joueur (pour casser ou utiliser), même s'il ne bloque pas.
     pub const fn is_targetable(self) -> bool {
-        !matches!(self, Block::Air)
+        !matches!(self, Block::Air | Block::Water)
     }
 
     /// Forme d'un bloc qui n'est pas un cube plein : coin minimal et maximal dans le bloc.
@@ -193,6 +207,9 @@ impl Block {
             Block::YoungWheat => [0.50, 0.70, 0.25],
             Block::RipeWheat => [0.85, 0.72, 0.30],
             Block::Campfire => [0.80, 0.40, 0.15],
+            Block::Water => [0.20, 0.40, 0.75],
+            Block::Snow => [0.95, 0.97, 1.0],
+            Block::Cactus => [0.25, 0.55, 0.25],
         }
     }
 
@@ -224,6 +241,9 @@ impl Block {
             Block::YoungWheat => "Blé en herbe",
             Block::RipeWheat => "Blé mûr",
             Block::Campfire => "Feu de camp",
+            Block::Water => "Eau",
+            Block::Snow => "Neige",
+            Block::Cactus => "Cactus",
         }
     }
 
@@ -251,6 +271,9 @@ impl Block {
             Block::Catapult => 260,
             Block::Sprout | Block::YoungWheat | Block::RipeWheat => 4,
             Block::Campfire => 60,
+            Block::Water => 1,
+            Block::Snow => 30,
+            Block::Cactus => 30,
         }
     }
 }

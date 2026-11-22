@@ -61,7 +61,9 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - Les filons de fer et de charbon (rochers sombres en surface, poches sous terre) se récoltent 20 fois par bloc. Lingot = minerai de fer + charbon.
 - Arc et flèches, puis fusil et cartouches, pour tenir les zombies à distance.
 - Portes (deux blocs empilés s'ouvrent ensemble) et coffres partagés pour la base. Un coffre cassé par un joueur lui rend son contenu ; cassé par un zombie, le contenu est perdu.
-- Des **ruines** (maisons écroulées) parsèment la carte : leur coffre contient de la nourriture, des munitions, parfois une arme. Chaque coffre ne se pille qu'une fois.
+- Le monde a ses **biomes** : prairies dégagées, forêts denses, déserts de sable et de cactus, terres enneigées. Les creux sont remplis de **lacs** où l'on nage (Espace pour remonter).
+- La **soif** baisse plus vite que la faim (environ 10 minutes). Clic droit sur l'eau, main libre, pour boire. La **gourde** (établi : 1 lingot de fer et 1 bâton) se remplit au lac et se boit n'importe où. Sans boire, la vie ne remonte plus, puis diminue.
+- Des **ruines** (maisons écroulées) parsèment la carte : leur coffre contient de la nourriture, des munitions, parfois une arme. Les grands **entrepôts** en ruine ont trois coffres. Chaque coffre ne se pille qu'une fois.
 - Des **survivants** (losange jaune au-dessus de la tête) errent le jour, souvent près des ruines. Donne-leur une ration ou 3 pommes pour les recruter (autant que tu veux). Chacun a sa force (dégâts), son endurance (vie) et son habileté (vitesse de travail). Clic droit sur un de tes survivants (losange vert) pour changer son ordre : **suivre**, **garder** l'endroit, **récolter** (bois, pierre, pommes, charbon, rangés dans le coffre le plus proche de son poste, sinon dans ton inventaire ; le jour seulement) ou **réparer** les blocs abîmés autour de lui. Ils se battent contre les zombies proches, mais les zombies s'en prennent aussi à eux. Confie-leur une arme (épée, lance, hache, masse, arc, fusil) et des pièces d'armure : armés d'une arme à distance, ils tirent avec les munitions de ton sac quand ils te suivent, ou avec celles du coffre près de leur poste.
 - **Nourriture** : l'herbe donne parfois des **graines** ; sème-les (clic droit sur la terre ou l'herbe) et le blé mûrit en quelques minutes. Récolte-le mûr pour du blé et de nouvelles graines. Le **gibier** (lapins, cerfs, sangliers) se promène dans les prairies et fuit à ton approche ; abats-le pour sa viande (attention, le sanglier blessé charge). Au **feu de camp** (4 bâtons, 3 pierres, 1 charbon), cuis la viande et fais du pain avec 3 blés. Un pain et une viande cuite donnent 2 rations.
 - Tes **survivants** ont faim eux aussi : ils mangent ce qu'il y a dans ton sac quand ils te suivent, sinon dans le coffre près de leur poste. Affamés, ils arrêtent de travailler et dépérissent.
@@ -100,7 +102,7 @@ Variables d'environnement :
 
 ### Sauvegarde
 
-La partie (blocs modifiés, heure, joueurs avec leur inventaire, coffres, survivants recrutés) est enregistrée dans `DATA_DIR/world.sav` toutes les minutes et à l'arrêt (`docker stop`, Ctrl+C). Au redémarrage, la graine et la taille de la sauvegarde l'emportent sur les variables d'environnement. Pour repartir de zéro, supprimer le volume : `docker compose down -v`.
+La partie (blocs modifiés, heure, joueurs avec leur inventaire, coffres, survivants recrutés) est enregistrée dans `DATA_DIR/world.sav` toutes les minutes et à l'arrêt (`docker stop`, Ctrl+C). Au redémarrage, la graine et la taille de la sauvegarde l'emportent sur les variables d'environnement. Les mondes créés avant les biomes gardent leur terrain d'origine (sans lacs, donc sans soif). Pour repartir de zéro, supprimer le volume : `docker compose down -v`.
 
 Copie de secours : `docker compose cp server:/data/world.sav ./world.sav`.
 

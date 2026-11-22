@@ -311,6 +311,12 @@ pub const RECIPES: &[Recipe] = &[
         station: Some(Block::Campfire),
     },
     Recipe {
+        output: Item::Flask,
+        count: 1,
+        inputs: &[(Item::IronIngot, 1), (Item::Stick, 1)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
         output: Item::Ration,
         count: 2,
         inputs: &[(Item::Bread, 1), (Item::CookedMeat, 1)],

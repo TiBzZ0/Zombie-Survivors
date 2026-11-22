@@ -277,7 +277,7 @@ fn ruin_near(world: &GameWorld, around: Vec3) -> Option<Vec3> {
     let ruins: Vec<Vec3> = (-1..=1)
         .flat_map(|dx| (-1..=1).map(move |dz| (cx + dx, cz + dz)))
         .filter_map(|(x, z)| generator.ruin_in_cell(x, z))
-        .map(|(x, ground, z, _)| Vec3::new(x as f32 + 0.5, ground as f32, z as f32 + 0.5))
+        .map(|r| Vec3::new(r.x as f32 + 0.5, r.ground as f32, r.z as f32 + 0.5))
         .filter(|p| (20.0..90.0).contains(&p.distance(around)))
         .collect();
     (!ruins.is_empty()).then(|| ruins[fastrand::usize(0..ruins.len())])
