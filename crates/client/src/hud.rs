@@ -474,6 +474,8 @@ fn update_status(
             ""
         };
         format!("Clic gauche : lancer (explose après {:.0} s{blocks})", t.fuse)
+    } else if player.held() == Some(shared::item::Item::Seeds) {
+        "Clic droit sur la terre ou l'herbe : semer (le blé mûrit en quelques minutes)".into()
     } else if player.guarding {
         "Garde levée".into()
     } else if player.held().is_some_and(|i| i.is_melee_weapon()) {

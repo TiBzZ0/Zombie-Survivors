@@ -322,11 +322,22 @@ fn draw_markers(
 }
 
 /// Texte d'aide sur le survivant visé : qui il est et ce qu'un clic droit fera.
-fn update_hint(registry: Res<SurvivorRegistry>, session: Option<Res<Session>>, mut player: ResMut<LocalPlayer>) {
+fn update_hint(
+    registry: Res<SurvivorRegistry>,
+    session: Option<Res<Session>>,
+    views: Query<&SurvivorView>,
+    mut player: ResMut<LocalPlayer>,
+) {
+    let hungry = |id: u32| views.iter().any(|v| v.id == id && v.flags & SurvivorState::HUNGRY != 0);
     let hint = player
         .aimed_survivor
-        .and_then(|id| registry.infos.get(&id))
-        .map(|info| {
+        .and_then(|id| registry.infos.get(&id).map(|info| (id, info)))
+        .map(|(id, info)| {
+            let hunger = if hungry(id) {
+                " · AFFAMÉ : mets de la nourriture dans ton sac ou dans le coffre de son poste"
+            } else {
+                ""
+            };
             let me = session.as_ref().map(|s| s.my_name.as_str());
             let armed: String = info
                 .weapon
@@ -341,7 +352,7 @@ fn update_hint(registry: Res<SurvivorRegistry>, session: Option<Res<Session>>, m
                     info.stats.describe()
                 ),
                 Some(leader) if Some(leader.as_str()) == me => format!(
-                    "{} {} ({}{armed})\nClic droit : ordre suivant ({}) · Ctrl : confier l'arme ou l'armure tenue · Maj : renvoyer",
+                    "{} {} ({}{armed}){hunger}\nClic droit : ordre suivant ({}) · Ctrl : confier l'arme ou l'armure tenue · Maj : renvoyer",
                     info.name,
                     info.order.label(),
                     info.stats.describe(),

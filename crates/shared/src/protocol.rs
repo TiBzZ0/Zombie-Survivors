@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_000B;
+pub const PROTOCOL_ID: u64 = 0x5A53_000C;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -115,6 +115,10 @@ pub enum ClientMessage {
         pos: IVec3,
         direction: Vec3,
     },
+    /// Frappe un animal au corps-à-corps.
+    AttackAnimal {
+        id: u32,
+    },
 }
 
 /// Position compacte d'un survivant.
@@ -135,6 +139,8 @@ impl SurvivorState {
     pub const ATTACKING: u8 = 1;
     pub const HURT: u8 = 2;
     pub const WORKING: u8 = 4;
+    /// Le survivant a faim : il ne travaille plus et perd de la vie.
+    pub const HUNGRY: u8 = 8;
 
     pub fn new(id: u32, position: Vec3, yaw: f32, health: f32, flags: u8) -> Self {
         let z = ZombieState::new(id, position, yaw, ZombieKind::Walker, 0, 0.0);
@@ -325,6 +331,8 @@ pub enum ServerMessage {
         pos: Vec3,
         radius: f32,
     },
+    /// Animaux proches du joueur (canal non fiable).
+    Animals(Vec<crate::animal::AnimalState>),
 }
 
 /// Sérialise un message.

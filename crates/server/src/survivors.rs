@@ -97,6 +97,8 @@ pub struct Survivor {
     pub weapon: Option<Item>,
     /// Casque et armure confiés par son chef.
     pub armor: [Option<Item>; 2],
+    /// Faim : 100 = rassasié. Seuls les survivants recrutés ont faim.
+    pub hunger: f32,
     /// Endroit gardé, récolté ou réparé (son camp s'il n'a pas de chef).
     pub post: Vec3,
     pub position: Vec3,
@@ -126,6 +128,7 @@ impl Survivor {
             order: Order::Idle,
             weapon: None,
             armor: [None; 2],
+            hunger: SURVIVOR_MAX_HUNGER,
             post: position,
             position,
             velocity: Vec3::ZERO,
@@ -433,9 +436,29 @@ fn survivor_ai(
                 .find(|(_, p)| &p.name == name && p.is_alive())
                 .map(|(id, p)| (*id, p.state.position))
         });
-        // Un survivant dont le chef est absent garde l'endroit où il se trouve.
+        // Un survivant recruté a faim : il mange ce que son chef ou le coffre du poste lui offre.
+        if s.leader.is_some() {
+            s.hunger = (s.hunger - SURVIVOR_HUNGER_PER_SEC * dt).max(0.0);
+            if s.hunger < EAT_BELOW {
+                eat(
+                    s,
+                    leader.map(|(id, _)| id),
+                    &world,
+                    &mut lobby,
+                    &mut chests,
+                    server.as_deref_mut(),
+                );
+            }
+            if s.hunger <= 0.0 {
+                s.health -= STARVATION_DPS * dt;
+                s.since_hit = 0.0;
+            }
+        }
+        let starving = s.leader.is_some() && s.hunger <= 0.0;
+        // Un survivant dont le chef est absent garde l'endroit où il se trouve ; affamé, il ne travaille plus.
         let order = match s.order {
             Order::Follow if leader.is_none() => Order::Guard,
+            Order::Gather | Order::Repair if starving => Order::Guard,
             order => order,
         };
         if order == Order::Follow {
@@ -478,7 +501,7 @@ fn survivor_ai(
                 if s.attack_cooldown <= 0.0 {
                     s.attack_cooldown = weapon.cooldown * 2.0;
                     s.attacking = 0.3;
-                    take_ammo(source, weapon.ammo, &mut lobby, &mut chests, server.as_deref_mut());
+                    take_one(source, weapon.ammo, &mut lobby, &mut chests, server.as_deref_mut());
                     if let Some((mut z, _)) = zombies.iter_mut().find(|(z, _)| z.id == zombie_id) {
                         z.health -= weapon.damage;
                         z.hurt_timer = 0.3;
@@ -636,9 +659,9 @@ pub(crate) fn clear_line(world: &GameWorld, from: Vec3, to: Vec3) -> bool {
     }
 }
 
-/// D'où un survivant tire ses munitions.
+/// D'où un survivant tire ses munitions ou sa nourriture.
 #[derive(Clone, Copy)]
-enum AmmoSource {
+enum Supply {
     /// Le sac de son chef, s'il le suit.
     Leader(ClientId),
     /// Le coffre le plus proche de son poste.
@@ -652,12 +675,12 @@ fn ammo_source(
     lobby: &Lobby,
     chests: &Chests,
     world: &GameWorld,
-) -> Option<AmmoSource> {
+) -> Option<Supply> {
     if s.order == Order::Follow
         && let Some(id) = leader
         && lobby.players.get(&id).is_some_and(|p| p.inventory.has(ammo, 1))
     {
-        return Some(AmmoSource::Leader(id));
+        return Some(Supply::Leader(id));
     }
     chests
         .0
@@ -667,28 +690,73 @@ fn ammo_source(
                 && world.block(**pos) == Block::Chest
                 && (pos.as_vec3() + Vec3::splat(0.5)).distance(s.post) < WORK_RADIUS
         })
-        .map(|(pos, _)| AmmoSource::Chest(*pos))
+        .map(|(pos, _)| Supply::Chest(*pos))
         .next()
 }
 
-fn take_ammo(source: AmmoSource, ammo: Item, lobby: &mut Lobby, chests: &mut Chests, server: Option<&mut RenetServer>) {
+fn take_one(source: Supply, item: Item, lobby: &mut Lobby, chests: &mut Chests, server: Option<&mut RenetServer>) {
     match source {
-        AmmoSource::Leader(id) => {
+        Supply::Leader(id) => {
             if let Some(player) = lobby.players.get_mut(&id) {
-                player.inventory.remove(ammo, 1);
+                player.inventory.remove(item, 1);
                 if let Some(server) = server {
                     send_inventory(server, id, player);
                 }
             }
         }
-        AmmoSource::Chest(pos) => {
+        Supply::Chest(pos) => {
             if let Some(inv) = chests.0.get_mut(&pos) {
-                inv.remove(ammo, 1);
+                inv.remove(item, 1);
             }
             if let Some(server) = server {
                 send_chest_to_viewers(server, lobby, chests, pos);
             }
         }
+    }
+}
+
+/// Faim maximale d'un survivant.
+pub const SURVIVOR_MAX_HUNGER: f32 = 100.0;
+/// Un survivant rassasié tient environ 20 minutes.
+const SURVIVOR_HUNGER_PER_SEC: f32 = SURVIVOR_MAX_HUNGER / 1200.0;
+/// En dessous, il cherche à manger.
+const EAT_BELOW: f32 = 50.0;
+/// Vie perdue par seconde quand il meurt de faim.
+const STARVATION_DPS: f32 = 0.5;
+
+/// Le survivant mange un aliment du sac de son chef (s'il le suit) ou du coffre près de son poste.
+fn eat(
+    s: &mut Survivor,
+    leader: Option<ClientId>,
+    world: &GameWorld,
+    lobby: &mut Lobby,
+    chests: &mut Chests,
+    server: Option<&mut RenetServer>,
+) {
+    let is_food = |item: &Item| item.food().is_some_and(|(hunger, _)| hunger > 0.0);
+    let from_leader = leader.filter(|_| s.order == Order::Follow).and_then(|id| {
+        let food = lobby.players.get(&id)?.inventory.iter().map(|(i, _)| i).find(is_food)?;
+        Some((id, food))
+    });
+    let (food, source) = if let Some((id, food)) = from_leader {
+        (food, Supply::Leader(id))
+    } else {
+        let Some((pos, food)) = chests
+            .0
+            .iter()
+            .filter(|(pos, _)| {
+                world.block(**pos) == Block::Chest && (pos.as_vec3() + Vec3::splat(0.5)).distance(s.post) < WORK_RADIUS
+            })
+            .find_map(|(pos, inv)| inv.iter().map(|(i, _)| i).find(is_food).map(|f| (*pos, f)))
+        else {
+            return;
+        };
+        (food, Supply::Chest(pos))
+    };
+    take_one(source, food, lobby, chests, server);
+    if let Some((hunger, heal)) = food.food() {
+        s.hunger = (s.hunger + hunger).min(SURVIVOR_MAX_HUNGER);
+        s.health = (s.health + heal).min(s.stats.max_health());
     }
 }
 
@@ -881,6 +949,9 @@ fn broadcast_survivors(
                 }
                 if s.working {
                     flags |= SurvivorState::WORKING;
+                }
+                if s.leader.is_some() && s.hunger <= 0.0 {
+                    flags |= SurvivorState::HUNGRY;
                 }
                 SurvivorState::new(s.id, s.position, s.yaw, s.health / s.stats.max_health(), flags)
             })

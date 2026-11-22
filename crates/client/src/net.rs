@@ -70,6 +70,7 @@ pub enum NetEvent {
     Teleport(Vec3),
     Chat(String),
     Zombies(Vec<ZombieState>),
+    Animals(Vec<shared::animal::AnimalState>),
     Time {
         time: GameTime,
         zombies_alive: u32,
@@ -376,7 +377,10 @@ fn receive_messages(
             ServerMessage::Explosion { pos, radius } => {
                 events.write(NetEvent::Explosion { pos, radius });
             }
-            ServerMessage::Players(_) | ServerMessage::Zombies(_) | ServerMessage::Survivors(_) => {}
+            ServerMessage::Players(_)
+            | ServerMessage::Zombies(_)
+            | ServerMessage::Survivors(_)
+            | ServerMessage::Animals(_) => {}
         }
     }
     if let Some(world) = fresh_world {
@@ -392,6 +396,9 @@ fn receive_messages(
             }
             Some(ServerMessage::Survivors(survivors)) => {
                 events.write(NetEvent::Survivors(survivors));
+            }
+            Some(ServerMessage::Animals(animals)) => {
+                events.write(NetEvent::Animals(animals));
             }
             _ => {}
         }

@@ -9,6 +9,7 @@
 // Sous Windows, pas de fenêtre de console en plus du jeu (en version release).
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod animals;
 mod chat;
 mod chest;
 mod crafting;
@@ -112,6 +113,7 @@ fn main() {
             hud::HudPlugin,
             sky::SkyPlugin,
             zombies::ZombiesPlugin,
+            animals::AnimalsPlugin,
             crafting::CraftingPlugin,
             effects::EffectsPlugin,
             sound::SoundPlugin,

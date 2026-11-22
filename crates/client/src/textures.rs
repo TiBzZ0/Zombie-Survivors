@@ -122,6 +122,29 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
             }
             gray(v)
         }
+        Block::Sprout | Block::YoungWheat | Block::RipeWheat => {
+            // Tiges verticales sur fond de terre.
+            let stalk = x % 3 == 1 && hash(x, 0, salt) > 0.2;
+            let ear = block == Block::RipeWheat && y < 5 && stalk;
+            if ear {
+                gray(1.0)
+            } else if stalk {
+                gray(0.8 + 0.15 * n)
+            } else {
+                [0.35, 0.25, 0.15]
+            }
+        }
+        Block::Campfire => {
+            // Bûches croisées et braises.
+            let log = (x + y) % 8 < 2 || (x + 16 - y) % 8 < 2;
+            if log {
+                [0.45, 0.3, 0.2]
+            } else if n > 0.6 {
+                [1.0, 0.85, 0.4]
+            } else {
+                gray(0.75 + 0.2 * n)
+            }
+        }
         Block::BarbedWire => {
             // Fils tendus avec des pointes.
             let wire = y % 5 == 2 || (x + y).is_multiple_of(7);
@@ -173,7 +196,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 22] = [
+const ALL_BLOCKS: [Block; 26] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -196,6 +219,10 @@ const ALL_BLOCKS: [Block; 22] = [
     Block::MachineGun,
     Block::Cannon,
     Block::Catapult,
+    Block::Sprout,
+    Block::YoungWheat,
+    Block::RipeWheat,
+    Block::Campfire,
 ];
 
 #[cfg(test)]
