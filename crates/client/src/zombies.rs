@@ -39,7 +39,7 @@ pub struct ZombieView {
     pub kind: ZombieKind,
     target: Vec3,
     target_yaw: f32,
-    flags: u8,
+    pub flags: u8,
     last_seen: f32,
     walk_phase: f32,
 }
