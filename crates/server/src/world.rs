@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use shared::block::Block;
 use shared::item::{Inventory, Item, Tier};
 use shared::world::WorldState;
+use shared::worldgen::Biome;
 
 use crate::ServerConfig;
 use crate::daynight::Clock;
@@ -130,16 +131,39 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
     commands.insert_resource(GameWorld(world));
 }
 
-/// Cherche, en spirale autour du centre, une colonne avec un vrai sol (pas une grotte ouverte).
-pub fn find_spawn(world: &WorldState) -> Vec3 {
+/// Centre de départ : le milieu de la carte, ou la prairie ou forêt la plus proche
+/// (on ne commence pas dans un désert sans bois ni dans la neige).
+fn green_center(world: &WorldState) -> (i32, i32) {
+    let generator = world.generator();
     let center = world.config().size_blocks() / 2;
+    let level = generator.water_level().unwrap_or(i32::MIN);
+    for radius in 0..40i32 {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx.abs() != radius && dz.abs() != radius {
+                    continue;
+                }
+                let (x, z) = (center + dx * 8, center + dz * 8);
+                let green = matches!(generator.biome(x, z), Biome::Forest | Biome::Plains);
+                if green && generator.surface_height(x, z) > level + 1 {
+                    return (x, z);
+                }
+            }
+        }
+    }
+    (center, center)
+}
+
+/// Cherche, en spirale autour du centre de départ, une colonne avec un vrai sol (pas une grotte ouverte).
+pub fn find_spawn(world: &WorldState) -> Vec3 {
+    let (cx, cz) = green_center(world);
     for radius in 0..64i32 {
         for dx in -radius..=radius {
             for dz in -radius..=radius {
                 if dx.abs() != radius && dz.abs() != radius {
                     continue;
                 }
-                let (x, z) = (center + dx, center + dz);
+                let (x, z) = (cx + dx, cz + dz);
                 let ground = world.generator().surface_height(x, z);
                 let solid = |y: i32| world.is_solid(IVec3::new(x, y, z));
                 let dry = world.block(IVec3::new(x, ground, z)) == Block::Air;
@@ -149,8 +173,8 @@ pub fn find_spawn(world: &WorldState) -> Vec3 {
             }
         }
     }
-    let ground = world.generator().surface_height(center, center);
-    Vec3::new(center as f32 + 0.5, ground as f32 + 1.0, center as f32 + 0.5)
+    let ground = world.generator().surface_height(cx, cz);
+    Vec3::new(cx as f32 + 0.5, ground as f32 + 1.0, cz as f32 + 0.5)
 }
 
 #[cfg(test)]
@@ -170,6 +194,11 @@ mod tests {
             let below = (spawn - Vec3::Y * 0.5).floor().as_ivec3();
             assert!(world.is_solid(below), "graine {seed} : pas de sol sous {spawn}");
             assert!(!overlaps_solid(spawn, PLAYER_SIZE, &|p| world.is_solid(p)));
+            let biome = world.generator().biome(spawn.x as i32, spawn.z as i32);
+            assert!(
+                matches!(biome, Biome::Forest | Biome::Plains),
+                "graine {seed} : départ en {biome:?}"
+            );
         }
     }
 }

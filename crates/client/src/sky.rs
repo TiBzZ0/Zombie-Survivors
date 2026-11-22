@@ -48,7 +48,11 @@ fn update_sky(
     mut ambient: ResMut<GlobalAmbientLight>,
     mut sun: Single<(&mut DirectionalLight, &mut Transform)>,
     mut fog: Single<&mut DistanceFog>,
+    settings: Res<crate::settings::Settings>,
 ) {
+    // Le brouillard cache le bord du terrain chargé, quelle que soit la distance d'affichage.
+    let end = settings.view_distance as f32 * 32.0 + 26.0;
+    fog.falloff = FogFalloff::Linear { start: end * 0.5, end };
     let h = clock.time.sun_height();
     let day = h.clamp(0.0, 1.0);
     // Teinte orangée quand le soleil est bas.

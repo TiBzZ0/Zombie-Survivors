@@ -69,7 +69,9 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - Tes **survivants** ont faim eux aussi : ils mangent ce qu'il y a dans ton sac quand ils te suivent, sinon dans le coffre près de leur poste. Affamés, ils arrêtent de travailler et dépérissent.
 - La nuit, les zombies sortent et cassent les murs pour t'atteindre. Toutes les 7 nuits arrive une grande horde, menée par un **colosse** énorme qui défonce les murs. Dès la deuxième nuit apparaissent les **cracheurs**, qui s'arrêtent à distance pour cracher de l'acide (la garde le bloque). Et à partir de la deuxième nuit aussi, les zombies serrés contre un mur **grimpent les uns sur les autres** pour passer par-dessus : au fil des nuits, il en faut moins et ils montent plus haut (jusqu'à 6 blocs). Les murs renforcés tiennent longtemps, les piques blessent les zombies qui les frappent ou marchent dessus. Les **barbelés** (établi : 1 lingot de fer et 2 bâtons pour 4) se traversent, mais ralentissent fortement les zombies et les blessent, en s'usant peu à peu. La **tourelle** (forge : 3 lingots de fer, 4 planches et un arc) s'ouvre comme un coffre : range-y des cartouches (55 dégâts, 24 m) ou des flèches (30 dégâts, 18 m) et elle tire seule sur le zombie visible le plus proche.
 
-Le menu règle la sensibilité de la souris, le volume et le plein écran (enregistrés dans `reglages.txt`, à côté de la sauvegarde locale).
+En haut à droite, une **carte** montre le terrain autour de toi, les zombies (rouge), les survivants (jaune), le gibier et les autres joueurs (bleu) ; M la masque. À gauche, les **objectifs** guident les premiers pas et se cochent tout seuls ; H les masque.
+
+Le menu règle la sensibilité de la souris, le volume, le plein écran et la distance d'affichage (à baisser si le jeu rame) (enregistrés dans `reglages.txt`, à côté de la sauvegarde locale).
 
 Sous Linux, Bevy demande `libasound2-dev`, `libudev-dev`, `libwayland-dev` et `libxkbcommon-dev`.
 
