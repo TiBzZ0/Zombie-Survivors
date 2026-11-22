@@ -25,6 +25,7 @@ cargo run -p client --release                              # menu principal
 cargo run -p client --release -- --solo                    # partie locale directe
 cargo run -p client --release -- --connect 1.2.3.4:7777    # rejoindre un serveur
 cargo run -p client --release -- --name Pseudo             # choisir son pseudo
+cargo run -p client --release -- --solo --pvp              # héberger une partie avec combat entre joueurs
 ```
 
 En partie locale, le client héberge le serveur : les joueurs du même réseau peuvent rejoindre avec ton adresse IP locale (port UDP 7777).
@@ -56,6 +57,7 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - **Électricité** : le **générateur** (forge : 6 lingots de fer, 4 charbons) brûle le charbon qu'on range dedans (1 charbon = 2 minutes) et alimente sans câble les appareils à 12 blocs autour. Le **projecteur** (établi) éclaire la nuit et brûle les zombies à moins de 7 m. La **porte électrique** (forge, très solide) s'ouvre seule devant toi et tes survivants et reste fermée aux zombies ; sans courant, elle s'ouvre à la main. La **bobine électrique** (forge) foudroie le zombie visible le plus proche à 10 m, sans munitions.
 - **Événements** (à partir du jour 2, tirés au sort à chaque aube) : un **brouillard** épais cache le soleil, les zombies ne brûlent plus et quelques-uns rôdent en plein jour ; un **largage** de ravitaillement tombe à 30-70 m d'un joueur (le chat donne la direction, la caisse orange se voit sur la carte : cartouches, rations, bandages, parfois un antidote, des grenades, un fusil, une armure ou un générateur) ; un **marchand** passe près d'un joueur jusqu'au soir et propose trois échanges (par exemple 4 peaux contre 12 cartouches), clic droit pour échanger.
 - **Solidité des constructions** : un bloc posé doit reposer, de proche en proche, sur le sol ou la roche. Un pilier monte aussi haut qu'on veut, mais chaque bloc en porte-à-faux perd de la solidité : 1 bloc pour la terre ou le sable, 3 pour la pierre, 4 pour le bois et les planches, 7 pour le mur renforcé (un pont de planches franchit 8 blocs entre deux piliers). Un bloc qui ne tiendrait pas est refusé. Si un pilier est cassé, explosé ou abattu par les zombies, tout ce qu'il portait s'effondre : les blocs retombent tout droit, écrasent zombies et joueurs dessous, et les coffres emportent leur contenu dans leur chute.
+- **JcJ optionnel et bases protégées** (serveur lancé avec `PVP=oui`, ou partie locale avec `--pvp`) : les joueurs peuvent se frapper et se tirer dessus. Chacun peut planter une **bannière** (établi : 2 planches, 2 peaux, 2 bâtons) : dans un rayon de 12 m, les autres joueurs ne peuvent ni casser, ni poser, ni ouvrir de coffre ou de porte, ni faire sauter quoi que ce soit, et le propriétaire n'y prend aucun coup des autres joueurs. Une bannière par joueur, et deux bases ne se chevauchent pas. Les zombies ignorent tout ça : une bannière abattue libère la base. L'écran rappelle que le JcJ est actif et dans quelle base on se trouve.
 - **Armes fixes** à piloter (clic droit dessus pour prendre les commandes, clic gauche pour tirer, clic droit pour descendre) : la **mitrailleuse** (forge, avec un fusil) tire très vite avec tes cartouches ; le **canon** (forge) envoie des boulets qui explosent à l'impact ; la **catapulte** (établi) lance tes blocs de pierre en cloche, par-dessus tes propres murs.
 - **Armures** : casque et armure en bois, en pierre (établi) ou en fer (forge). Le meilleur casque et la meilleure armure de ton sac sont portés d'office et absorbent jusqu'à 45 % des dégâts.
 - Certaines recettes demandent un atelier posé à moins de 4 blocs : l'**établi** (6 planches) pour les outils en pierre, l'arc, les flèches, les portes et les coffres ; la **forge** (10 pierres et 2 charbons, à l'établi) pour fondre le fer, les outils en fer, les murs renforcés, les pics et le fusil.
@@ -108,6 +110,7 @@ Variables d'environnement :
 | `WORLD_SEED` | `42` | Graine du monde |
 | `WORLD_SIZE_CHUNKS` | `32` | Côté de la carte en chunks de 32 blocs (4 à 256) |
 | `DATA_DIR` | `/data` | Dossier des sauvegardes, monté en volume |
+| `PVP` | `non` | Combat entre joueurs (`oui`/`non`) ; les bannières protègent alors les bases |
 
 ### Sauvegarde
 

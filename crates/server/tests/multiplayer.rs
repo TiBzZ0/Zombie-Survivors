@@ -467,6 +467,7 @@ fn bow_shoots_and_uses_arrows() {
         chests: Vec::new(),
         survivors: Vec::new(),
         infections: Vec::new(),
+        claims: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
 
@@ -600,6 +601,7 @@ fn doors_chests_and_chat() {
         chests: Vec::new(),
         survivors: Vec::new(),
         infections: Vec::new(),
+        claims: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {
@@ -747,6 +749,7 @@ fn survivors_are_recruited_and_given_orders() {
         chests: Vec::new(),
         survivors: vec![wild("Marie"), wild("Lucas")],
         infections: Vec::new(),
+        claims: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {
@@ -916,4 +919,119 @@ fn survivors_are_recruited_and_given_orders() {
     assert_eq!(saved.survivors[0].weapon, Some(sword));
     assert_eq!(saved.survivors[0].armor, [Some(helmet), None]);
     let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[test]
+fn pvp_hurts_other_players_except_at_home() {
+    let port = 22_000 + (std::process::id() % 1000) as u16;
+    let data_dir = std::env::temp_dir().join(format!("zs-test-pvp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data_dir);
+    // Jon revient avec une bannière.
+    let world = WorldState::new(WorldConfig::default());
+    let spawn = server::world::find_spawn(&world);
+    let mut inventory = Inventory::default();
+    inventory.add(Item::Block(Block::Banner), 1);
+    let save = server::save::SaveFile {
+        version: server::save::SAVE_VERSION,
+        world: WorldConfig::default(),
+        time: GameTime::START,
+        edits: Vec::new(),
+        players: vec![(
+            "Jon".into(),
+            server::save::SavedPlayer {
+                position: spawn,
+                health: 100.0,
+                hunger: 100.0,
+                inventory,
+                thirst: 100.0,
+                infection: 0.0,
+            },
+        )],
+        deposits: Vec::new(),
+        chests: Vec::new(),
+        survivors: Vec::new(),
+        infections: Vec::new(),
+        claims: Vec::new(),
+    };
+    server::save::write(&data_dir, &save).unwrap();
+    let config = ServerConfig {
+        port,
+        data_dir: data_dir.clone(),
+        pvp: true,
+        ..ServerConfig::default()
+    };
+    let _server = spawn_local(config).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let mut ivy = TestClient::connect(port, 1, "Ivy");
+    let mut jon = TestClient::connect(port, 2, "Jon");
+    pump_until(&mut [&mut ivy, &mut jon], "arrivée", |c| {
+        c[0].find(|m| matches!(m, ServerMessage::PlayerJoined { id: 2, .. }).then_some(()))
+            .is_some()
+    });
+    assert_eq!(
+        ivy.find(|m| match m {
+            ServerMessage::Welcome { pvp, .. } => Some(*pvp),
+            _ => None,
+        }),
+        Some(true)
+    );
+    fn health_of(c: &TestClient) -> Option<f32> {
+        c.received.iter().rev().find_map(|m| match m {
+            ServerMessage::Vitals { health, .. } => Some(*health),
+            _ => None,
+        })
+    }
+
+    // Ivy frappe Jon (ils sont côte à côte au point d'apparition) : il est blessé.
+    ivy.send(&ClientMessage::AttackPlayer { id: 2 }, true);
+    pump_until(&mut [&mut ivy, &mut jon], "Jon blessé", |c| {
+        health_of(c[1]).is_some_and(|h| h < 100.0)
+    });
+    let hurt = health_of(&jon).unwrap();
+
+    // Jon plante sa bannière : la base est annoncée à tous.
+    let banner = ground_spots(&world, spawn.floor().as_ivec3())[0];
+    jon.send(
+        &ClientMessage::PlaceBlock {
+            pos: banner,
+            block: Block::Banner,
+        },
+        true,
+    );
+    pump_until(&mut [&mut ivy, &mut jon], "base annoncée", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Claims(list) if list.iter().any(|(p, n)| *p == banner && n == "Jon") => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+
+    // Chez lui, Jon ne prend plus de coups, et Ivy ne peut pas casser sa bannière.
+    std::thread::sleep(Duration::from_millis(900));
+    ivy.received.clear();
+    ivy.send(&ClientMessage::AttackPlayer { id: 2 }, true);
+    ivy.send(&ClientMessage::BreakBlock { pos: banner }, true);
+    pump_until(&mut [&mut ivy, &mut jon], "Jon protégé", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Chat { text, .. } if text.contains("protégé") => Some(()),
+            _ => None,
+        })
+        .is_some()
+            && c[0]
+                .find(|m| match m {
+                    ServerMessage::BlockChanged {
+                        pos,
+                        block: Block::Banner,
+                    } if *pos == banner => Some(()),
+                    _ => None,
+                })
+                .is_some()
+    });
+    assert_eq!(health_of(&jon), Some(hurt));
+
+    // Ivy, elle, n'est pas chez elle : Jon peut la frapper.
+    jon.send(&ClientMessage::AttackPlayer { id: 1 }, true);
+    pump_until(&mut [&mut ivy, &mut jon], "Ivy blessée", |c| {
+        health_of(c[0]).is_some_and(|h| h < 100.0)
+    });
 }

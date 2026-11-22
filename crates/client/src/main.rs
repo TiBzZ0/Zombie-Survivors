@@ -4,7 +4,8 @@
 //! - sans argument : menu principal (solo/hébergement local ou rejoindre un serveur) ;
 //! - `--solo` : lance directement une partie locale ;
 //! - `--connect <adresse:port>` : rejoint directement un serveur ;
-//! - `--name <pseudo>` : choisit le pseudo.
+//! - `--name <pseudo>` : choisit le pseudo ;
+//! - `--pvp` : la partie hébergée autorise le combat entre joueurs (bases protégées par bannière).
 
 // Sous Windows, pas de fenêtre de console en plus du jeu (en version release).
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
@@ -52,6 +53,8 @@ pub struct LaunchOptions {
     pub host_locally: bool,
     /// Saute le menu au démarrage.
     pub auto_start: bool,
+    /// Partie locale hébergée avec le combat entre joueurs.
+    pub pvp: bool,
 }
 
 impl LaunchOptions {
@@ -63,6 +66,7 @@ impl LaunchOptions {
             address: format!("127.0.0.1:{}", shared::DEFAULT_PORT),
             host_locally: true,
             auto_start: false,
+            pvp: false,
         };
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -78,6 +82,7 @@ impl LaunchOptions {
                         options.auto_start = true;
                     }
                 }
+                "--pvp" => options.pvp = true,
                 "--name" => {
                     if let Some(name) = args.next() {
                         options.name = name;

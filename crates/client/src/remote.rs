@@ -30,7 +30,8 @@ pub struct RemotePlayers {
 }
 
 #[derive(Component)]
-struct RemotePlayer {
+pub struct RemotePlayer {
+    pub id: PlayerId,
     target: Vec3,
     target_yaw: f32,
 }
@@ -56,10 +57,11 @@ fn setup_assets(
     });
 }
 
-fn spawn_remote(commands: &mut Commands, assets: &RemoteAssets, position: Vec3, yaw: f32) -> Entity {
+fn spawn_remote(commands: &mut Commands, assets: &RemoteAssets, id: PlayerId, position: Vec3, yaw: f32) -> Entity {
     commands
         .spawn((
             RemotePlayer {
+                id,
                 target: position,
                 target_yaw: yaw,
             },
@@ -111,7 +113,7 @@ fn handle_events(
                             remote.target_yaw = state.yaw;
                         }
                         None => {
-                            let entity = spawn_remote(&mut commands, &assets, state.position, state.yaw);
+                            let entity = spawn_remote(&mut commands, &assets, *id, state.position, state.yaw);
                             remotes.entities.insert(*id, entity);
                         }
                     }

@@ -1,5 +1,6 @@
 //! Types de blocs du monde voxel.
 
+use bevy_math::IVec3;
 use serde::{Deserialize, Serialize};
 
 /// Un bloc du monde. Tient sur un octet pour garder les chunks compacts.
@@ -70,6 +71,17 @@ pub enum Block {
     TeslaCoil,
     /// Caisse de ravitaillement larguée du ciel, pleine de matériel.
     SupplyCrate,
+    /// Bannière : marque la base de son propriétaire, protégée des autres joueurs en JcJ.
+    Banner,
+}
+
+/// Rayon (à l'horizontale, sur toute la hauteur) de la base protégée par une bannière.
+pub const CLAIM_RADIUS: f32 = 12.0;
+
+/// La case `pos` est-elle dans la base de la bannière posée en `banner` ?
+pub fn in_claim(banner: IVec3, pos: IVec3) -> bool {
+    let d = (pos - banner).as_vec3();
+    d.x * d.x + d.z * d.z <= CLAIM_RADIUS * CLAIM_RADIUS
 }
 
 /// Distance à laquelle un générateur en marche alimente les appareils électriques.
@@ -251,6 +263,7 @@ impl Block {
             Block::ElectricDoor | Block::ElectricDoorOpen => [0.45, 0.50, 0.56],
             Block::TeslaCoil => [0.55, 0.40, 0.25],
             Block::SupplyCrate => [0.95, 0.50, 0.10],
+            Block::Banner => [0.75, 0.12, 0.15],
             Block::BarbedWire => [0.55, 0.55, 0.58],
             Block::MachineGun => [0.30, 0.32, 0.30],
             Block::Cannon => [0.22, 0.22, 0.25],
@@ -290,6 +303,7 @@ impl Block {
             Block::ElectricDoor | Block::ElectricDoorOpen => "Porte électrique",
             Block::TeslaCoil => "Bobine électrique",
             Block::SupplyCrate => "Caisse de ravitaillement",
+            Block::Banner => "Bannière",
             Block::BarbedWire => "Barbelés",
             Block::MachineGun => "Mitrailleuse",
             Block::Cannon => "Canon",
@@ -328,6 +342,7 @@ impl Block {
             Block::ElectricDoor | Block::ElectricDoorOpen => 500,
             Block::TeslaCoil => 300,
             Block::SupplyCrate => 150,
+            Block::Banner => 200,
             Block::BarbedWire => 60,
             Block::MachineGun => 320,
             Block::Cannon => 400,

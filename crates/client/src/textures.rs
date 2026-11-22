@@ -124,6 +124,16 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
                 0.85 + 0.1 * n
             })
         }
+        Block::Banner => {
+            // Étoffe rouge frappée d'une croix blanche, sur un mât de bois.
+            if x < 2 {
+                return [0.45, 0.3, 0.15];
+            }
+            if (7..9).contains(&x) || (7..9).contains(&y) {
+                return [1.5, 1.5, 1.4];
+            }
+            gray(0.85 + 0.1 * n)
+        }
         Block::TeslaCoil => {
             // Bobinage cuivré.
             gray(if y.is_multiple_of(2) { 1.0 } else { 0.65 + 0.1 * n })
@@ -259,7 +269,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 36] = [
+const ALL_BLOCKS: [Block; 37] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -296,6 +306,7 @@ const ALL_BLOCKS: [Block; 36] = [
     Block::ElectricDoorOpen,
     Block::TeslaCoil,
     Block::SupplyCrate,
+    Block::Banner,
 ];
 
 #[cfg(test)]

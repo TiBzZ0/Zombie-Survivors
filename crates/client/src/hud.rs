@@ -332,7 +332,10 @@ fn format_secs(secs: f32) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_status(
+    session: Option<Res<crate::net::Session>>,
+    claims: Option<Res<crate::net::Claims>>,
     clock: Res<GameClock>,
     world: Option<Res<crate::net::ClientWorld>>,
     player: Res<LocalPlayer>,
@@ -419,6 +422,15 @@ fn update_status(
             format_secs(t.secs_until_night())
         )
     };
+    // JcJ : rappel permanent, et la base où l'on se trouve.
+    if session.is_some_and(|s| s.pvp) {
+        let mine = claims.as_ref().and_then(|c| c.owner_at(player.position));
+        let place = match mine {
+            Some(owner) => format!(" · base de {owner}"),
+            None => String::new(),
+        };
+        clock_text.0.push_str(&format!("\nJcJ activé{place}"));
+    }
     let armor = player.inventory.armor_reduction();
     health_text.0 = if armor > 0.0 {
         format!("{:.0} · armure {:.0} %", player.health.ceil(), armor * 100.0)

@@ -20,6 +20,7 @@ use shared::structure::would_hold;
 
 use crate::ServerConfig;
 use crate::animals::Animal;
+use crate::claims::{ClaimRefusal, Claims};
 use crate::explosives::Projectiles;
 use crate::save::{SavedPlayer, SavedPlayers};
 use crate::survivors::SurvivorTalk;
@@ -267,6 +268,8 @@ fn receive_messages(
     mut talk: ResMut<SurvivorTalk>,
     mut projectiles: ResMut<Projectiles>,
     mut animals: Query<&mut Animal>,
+    mut claims: ResMut<Claims>,
+    config: Res<ServerConfig>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -287,6 +290,8 @@ fn receive_messages(
                 chests: &mut chests,
                 talk: &mut talk,
                 projectiles: &mut projectiles,
+                claims: &mut claims,
+                pvp: config.pvp,
             };
             handle_reliable(client, message, &mut ctx, &mut zombies, &mut animals);
         }
@@ -310,6 +315,8 @@ struct Context<'a> {
     chests: &'a mut Chests,
     talk: &'a mut SurvivorTalk,
     projectiles: &'a mut Projectiles,
+    claims: &'a mut Claims,
+    pvp: bool,
 }
 
 fn handle_reliable(
@@ -331,9 +338,40 @@ fn handle_reliable(
         chests,
         talk,
         projectiles,
+        claims,
+        pvp,
     } = ctx;
-    let (spawn, now) = (*spawn, *now);
+    let (spawn, now, pvp) = (*spawn, *now, *pvp);
     let ready = lobby.players.get(&client).is_some_and(ConnectedPlayer::is_ready);
+    // En JcJ, rien ne se touche dans la base d'un autre joueur.
+    let touched = match &message {
+        ClientMessage::BreakBlock { pos }
+        | ClientMessage::PlaceBlock { pos, .. }
+        | ClientMessage::StartMining { pos }
+        | ClientMessage::OpenChest { pos }
+        | ClientMessage::ToggleDoor { pos }
+        | ClientMessage::PourWater { pos }
+        | ClientMessage::FireEmplacement { pos, .. } => Some(*pos),
+        _ => None,
+    };
+    if pvp
+        && ready
+        && let Some(pos) = touched
+        && let Some(player) = lobby.players.get(&client)
+        && let Some(owner) = claims.foreign_owner(pos, &player.name)
+    {
+        if !matches!(message, ClientMessage::StartMining { .. }) {
+            notify(server, client, format!("Base de {owner} : protégée."));
+        }
+        if matches!(
+            message,
+            ClientMessage::BreakBlock { .. } | ClientMessage::PlaceBlock { .. }
+        ) {
+            let block = world.block(pos);
+            send(server, client, &ServerMessage::BlockChanged { pos, block });
+        }
+        return;
+    }
     match message {
         ClientMessage::Hello { name } if !ready => {
             let name = sanitize_name(&name, client);
@@ -350,8 +388,10 @@ fn handle_reliable(
                     your_name: name.clone(),
                     world: world.config().clone(),
                     spawn: start,
+                    pvp,
                 },
             );
+            send(server, client, &claims.message());
             let edits: Vec<_> = world.edits().iter().map(|(p, b)| (*p, *b)).collect();
             for batch in edits.chunks(EDITS_PER_MESSAGE) {
                 send(server, client, &ServerMessage::WorldEdits(batch.to_vec()));
@@ -439,6 +479,32 @@ fn handle_reliable(
                     z.last_attacker = Some(client);
                 }
             }
+        }
+        ClientMessage::AttackPlayer { id } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if !pvp
+                || id == client
+                || !player.is_alive()
+                || player.attack_cooldown > 0.0
+                || player.guard_time().is_some()
+            {
+                return;
+            }
+            let melee = Item::melee(player.held_item());
+            let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
+            let in_reach = lobby
+                .players
+                .get(&id)
+                .is_some_and(|v| (v.state.position + Vec3::Y * 0.9).distance(eye) <= melee.reach + 1.0);
+            if !in_reach {
+                return;
+            }
+            if let Some(player) = lobby.players.get_mut(&client) {
+                player.attack_cooldown = melee.cooldown * 0.85;
+            }
+            pvp_hit(server, lobby, claims, client, id, melee.damage);
         }
         ClientMessage::Throw { direction } => {
             let Some(player) = lobby.players.get_mut(&client) else {
@@ -545,10 +611,17 @@ fn handle_reliable(
             // Petite marge : le client et le serveur ne mesurent pas le temps tout à fait pareil.
             player.attack_cooldown = weapon.cooldown * 0.85;
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
+            // En JcJ, un joueur sur la trajectoire arrête le tir.
+            let victim = if pvp {
+                aimed_player(lobby, client, eye, dir, weapon.range, world)
+            } else {
+                None
+            };
+            let range = victim.map_or(weapon.range, |(_, t)| t);
             let end = hitscan(
                 eye,
                 dir,
-                weapon.range,
+                range,
                 weapon.damage,
                 weapon.pierce,
                 client,
@@ -556,6 +629,14 @@ fn handle_reliable(
                 zombies,
                 animals,
             );
+            if let Some((id, t)) = victim
+                && end.distance(eye) >= t - 0.05
+            {
+                pvp_hit(server, lobby, claims, client, id, weapon.damage);
+            }
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
             send_inventory(server, client, player);
             broadcast(
                 server,
@@ -897,19 +978,37 @@ fn handle_reliable(
             // Un bloc trop loin de tout appui s'effondrerait aussitôt : on refuse de le poser.
             let holds = would_hold(pos, block, |p| world.block(p), |p| world.edits().contains_key(&p));
             if allowed && !holds {
-                send(
+                notify(
                     server,
                     client,
-                    &ServerMessage::Chat {
-                        from: "Serveur".into(),
-                        text: "Ce bloc ne tiendrait pas : rapprochez-le d'un pilier ou du sol.".into(),
-                    },
+                    "Ce bloc ne tiendrait pas : rapprochez-le d'un pilier ou du sol.".into(),
                 );
             }
-            if allowed && holds && world.set_block(pos, block) {
+            // Une bannière par joueur, et deux bases ne se chevauchent pas.
+            let plant = if block == Block::Banner && allowed && holds {
+                claims.can_plant(pos, &player.name)
+            } else {
+                Ok(())
+            };
+            match &plant {
+                Err(ClaimRefusal::AlreadyOwns(at)) => notify(
+                    server,
+                    client,
+                    format!("Vous avez déjà une bannière en {} {} {}.", at.x, at.y, at.z),
+                ),
+                Err(ClaimRefusal::TooClose(owner)) => {
+                    notify(server, client, format!("Trop près de la base de {owner}."))
+                }
+                Ok(()) => {}
+            }
+            if allowed && holds && plant.is_ok() && world.set_block(pos, block) {
                 player.inventory.remove(cost, 1);
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block });
+                if block == Block::Banner {
+                    claims.0.insert(pos, player.name.clone());
+                    broadcast(server, &claims.message());
+                }
             } else {
                 send(
                     server,
@@ -988,6 +1087,79 @@ fn hitscan(
         }
     }
     end
+}
+
+/// Message du serveur à un seul joueur.
+fn notify(server: &mut RenetServer, client: ClientId, text: String) {
+    send(
+        server,
+        client,
+        &ServerMessage::Chat {
+            from: "Serveur".into(),
+            text,
+        },
+    );
+}
+
+/// Premier joueur (autre que le tireur) sur la trajectoire, avant le premier mur.
+fn aimed_player(
+    lobby: &Lobby,
+    shooter: ClientId,
+    eye: Vec3,
+    dir: Vec3,
+    range: f32,
+    world: &GameWorld,
+) -> Option<(ClientId, f32)> {
+    let wall = raycast(eye, dir, range, |p| world.is_solid(p))
+        .map(|hit| ray_aabb(eye, dir, hit.block.as_vec3(), hit.block.as_vec3() + Vec3::ONE).unwrap_or(0.0))
+        .unwrap_or(range);
+    lobby
+        .players
+        .iter()
+        .filter(|(id, p)| **id != shooter && p.is_alive())
+        .filter_map(|(id, p)| {
+            let half = Vec3::new(PLAYER_SIZE.half_width, 0.0, PLAYER_SIZE.half_width);
+            let min = p.state.position - half;
+            let max = p.state.position + half + Vec3::Y * PLAYER_SIZE.height;
+            ray_aabb(eye, dir, min, max).filter(|t| *t < wall).map(|t| (*id, t))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// Un joueur en frappe un autre. Personne n'est blessé chez soi (dans sa propre base).
+fn pvp_hit(
+    server: &mut RenetServer,
+    lobby: &mut Lobby,
+    claims: &Claims,
+    attacker: ClientId,
+    victim: ClientId,
+    damage: f32,
+) {
+    let Some(name) = lobby.players.get(&attacker).map(|p| p.name.clone()) else {
+        return;
+    };
+    let Some(target) = lobby.players.get_mut(&victim) else {
+        return;
+    };
+    if !target.is_alive() {
+        return;
+    }
+    if claims.at_home(target.state.position.floor().as_ivec3(), &target.name) {
+        notify(server, attacker, format!("{} est chez lui : protégé.", target.name));
+        return;
+    }
+    let amount = damage * (1.0 - target.inventory.armor_reduction());
+    crate::zombies::hurt_player(victim, target, amount, &format!("Tué par {name}"), Some(server));
+    if !target.is_alive() {
+        let text = format!("{} a été tué par {name}.", target.name);
+        broadcast(
+            server,
+            &ServerMessage::Chat {
+                from: "Serveur".into(),
+                text,
+            },
+        );
+    }
 }
 
 /// Envoie le contenu d'un coffre à tous les joueurs qui l'ont ouvert.

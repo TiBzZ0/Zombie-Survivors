@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0014;
+pub const PROTOCOL_ID: u64 = 0x5A53_0015;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -126,6 +126,10 @@ pub enum ClientMessage {
     /// Frappe un animal au corps-à-corps.
     AttackAnimal {
         id: u32,
+    },
+    /// Frappe au corps à corps sur un autre joueur (JcJ seulement).
+    AttackPlayer {
+        id: PlayerId,
     },
 }
 
@@ -245,6 +249,8 @@ pub enum ServerMessage {
         your_name: String,
         world: WorldConfig,
         spawn: Vec3,
+        /// Les joueurs peuvent se blesser entre eux (bases protégées par les bannières).
+        pvp: bool,
     },
     /// Un paquet de blocs modifiés, envoyé à l'arrivée pour rattraper l'état du monde.
     WorldEdits(Vec<(IVec3, Block)>),
@@ -371,6 +377,8 @@ pub enum ServerMessage {
         origin: Vec3,
         end: Vec3,
     },
+    /// Bases protégées : position de chaque bannière et pseudo de son propriétaire.
+    Claims(Vec<(IVec3, String)>),
     /// Une construction s'est effondrée (pour la poussière et le grondement).
     Collapse {
         pos: Vec3,
