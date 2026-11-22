@@ -1,0 +1,12 @@
+[package]
+name = "client"
+description = "Client du jeu : rendu, entrées, interface."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+shared.workspace = true
+server.workspace = true
+bevy = { workspace = true, default-features = true, features = ["free_camera"] }
