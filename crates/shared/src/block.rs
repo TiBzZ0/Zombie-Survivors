@@ -33,6 +33,10 @@ pub enum Block {
     Workbench,
     /// Forge : tout ce qui demande du fer.
     Forge,
+    /// Tourelle : tire seule sur les zombies avec les flèches ou cartouches rangées dedans.
+    Turret,
+    /// Barbelés : se traversent, mais ralentissent et blessent les zombies (et s'usent).
+    BarbedWire,
 }
 
 /// Nombre de récoltes d'un bloc de filon avant qu'il ne disparaisse.
@@ -47,11 +51,21 @@ impl Block {
 
     /// Un bloc solide bloque le déplacement et cache les faces voisines.
     pub const fn is_solid(self) -> bool {
-        !matches!(self, Block::Air | Block::DoorOpen)
+        !matches!(self, Block::Air | Block::DoorOpen | Block::BarbedWire)
     }
 
     /// Un bloc opaque est un cube plein : il cache les faces de ses voisins.
     pub const fn is_opaque(self) -> bool {
+        !matches!(self, Block::Air | Block::DoorOpen | Block::BarbedWire)
+    }
+
+    /// Bloc qui garde des objets (ouvert avec le panneau du coffre).
+    pub const fn is_storage(self) -> bool {
+        matches!(self, Block::Chest | Block::Turret)
+    }
+
+    /// Bloc qu'un joueur peut poser depuis son inventaire.
+    pub const fn is_placeable(self) -> bool {
         !matches!(self, Block::Air | Block::DoorOpen)
     }
 
@@ -65,6 +79,8 @@ impl Block {
         match self {
             // Porte ouverte : un battant fin plaqué contre un côté.
             Block::DoorOpen => Some(([0.0, 0.0, 0.0], [0.15, 1.0, 1.0])),
+            // Barbelés : une haie basse.
+            Block::BarbedWire => Some(([0.05, 0.0, 0.05], [0.95, 0.45, 0.95])),
             _ => None,
         }
     }
@@ -93,6 +109,8 @@ impl Block {
             Block::Chest => [0.62, 0.44, 0.18],
             Block::Workbench => [0.50, 0.34, 0.20],
             Block::Forge => [0.30, 0.28, 0.30],
+            Block::Turret => [0.40, 0.42, 0.46],
+            Block::BarbedWire => [0.55, 0.55, 0.58],
         }
     }
 
@@ -115,6 +133,8 @@ impl Block {
             Block::Chest => "Coffre",
             Block::Workbench => "Établi",
             Block::Forge => "Forge",
+            Block::Turret => "Tourelle",
+            Block::BarbedWire => "Barbelés",
         }
     }
 
@@ -135,6 +155,8 @@ impl Block {
             Block::Planks => 120,
             Block::ReinforcedWall => 600,
             Block::Spikes => 100,
+            Block::Turret => 300,
+            Block::BarbedWire => 60,
         }
     }
 }

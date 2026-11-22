@@ -490,7 +490,7 @@ fn handle_reliable(
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
             };
-            if player.is_alive() && world.block(pos) == Block::Chest && within_reach(player, pos) {
+            if player.is_alive() && world.block(pos).is_storage() && within_reach(player, pos) {
                 chests.fill_ruin_chest(world, pos);
                 player.open_chest = Some(pos);
                 let contents = chests.0.get(&pos).cloned().unwrap_or_default();
@@ -508,7 +508,7 @@ fn handle_reliable(
                 return;
             };
             let Some(pos) = player.open_chest else { return };
-            if !player.is_alive() || world.block(pos) != Block::Chest || !within_reach(player, pos) {
+            if !player.is_alive() || !world.block(pos).is_storage() || !within_reach(player, pos) {
                 player.open_chest = None;
                 send(server, client, &ServerMessage::ChestClosed);
                 return;
@@ -547,8 +547,13 @@ fn handle_reliable(
                 );
             }
         }
-        ClientMessage::TalkToSurvivor { id, dismiss } => {
-            talk.0.push((client, id, dismiss));
+        ClientMessage::TalkToSurvivor { id, dismiss, give } => {
+            talk.0.push(crate::survivors::TalkRequest {
+                client,
+                id,
+                dismiss,
+                give,
+            });
         }
         ClientMessage::Eat { item } => {
             let Some(player) = lobby.players.get_mut(&client) else {
@@ -576,7 +581,7 @@ fn handle_reliable(
                 (Some((p, start)), Some(needed)) => p == pos && now - start >= needed as f64 * MINING_TOLERANCE - 0.1,
                 _ => false,
             };
-            let allowed = pos.y > 0 && within_reach(player, pos) && block.is_solid() && mined_long_enough;
+            let allowed = pos.y > 0 && within_reach(player, pos) && block.is_placeable() && mined_long_enough;
             if allowed && block == Block::Chest {
                 // Un coffre de ruine cassé sans avoir été ouvert rend quand même son butin.
                 chests.fill_ruin_chest(world, pos);
@@ -612,7 +617,7 @@ fn handle_reliable(
                     player.inventory.add(Item::Apple, 1);
                 }
                 send_inventory(server, client, player);
-                if block == Block::Chest {
+                if block.is_storage() {
                     chest_destroyed(server, lobby, chests, pos, Some(client));
                 }
             } else {
@@ -638,11 +643,12 @@ fn handle_reliable(
             if !player.is_alive() {
                 return;
             }
-            let allowed = block.is_solid()
+            // Les barbelés se posent même là où un joueur se tient.
+            let allowed = block.is_placeable()
                 && player.inventory.has(Item::Block(block), 1)
                 && within_reach(player, pos)
-                && !world.is_solid(pos)
-                && !blocked_by_player
+                && world.block(pos) == Block::Air
+                && (!blocked_by_player || !block.is_solid())
                 && world.in_bounds(pos);
             if allowed && world.set_block(pos, block) {
                 player.inventory.remove(Item::Block(block), 1);

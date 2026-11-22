@@ -22,6 +22,8 @@ fn main() {
         (Item::Block(Block::Planks), 64),
         (Item::Block(Block::ReinforcedWall), 16),
         (Item::Block(Block::Spikes), 8),
+        (Item::Block(Block::Turret), 2),
+        (Item::Block(Block::BarbedWire), 16),
         (Item::Bow, 1),
         (Item::Arrow, 32),
         (Item::Rifle, 1),
@@ -45,6 +47,7 @@ fn main() {
         health: 70.0,
         position: at,
         post: at,
+        weapon: leader.as_ref().map(|_| Item::Bow),
         leader,
         order,
     };
@@ -52,11 +55,20 @@ fn main() {
         survivor("Marie", ground(0.0, -4.0), None, Order::Idle),
         survivor("Hugo", ground(2.5, -5.0), Some(name.clone()), Order::Guard),
     ];
+    // Une rangée de barbelés et une tourelle chargée, un peu plus loin.
+    let block_at = |dx: f32, dz: f32| ground(dx, dz).floor().as_ivec3();
+    let mut edits: Vec<_> = (-2..=1)
+        .map(|dx| (block_at(dx as f32, -8.0), Block::BarbedWire))
+        .collect();
+    let turret = block_at(3.0, -7.0);
+    edits.push((turret, Block::Turret));
+    let mut ammo = Inventory::default();
+    ammo.add(Item::Arrow, 20);
     let save = SaveFile {
         version: SAVE_VERSION,
         world: WorldConfig::default(),
         time: GameTime::START,
-        edits: Vec::new(),
+        edits,
         players: vec![(
             name,
             SavedPlayer {
@@ -67,7 +79,7 @@ fn main() {
             },
         )],
         deposits: Vec::new(),
-        chests: Vec::new(),
+        chests: vec![(turret, ammo)],
         survivors,
     };
     write(std::path::Path::new(&dir), &save).expect("écriture de la sauvegarde");

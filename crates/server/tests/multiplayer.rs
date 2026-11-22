@@ -641,6 +641,7 @@ fn survivors_are_recruited_and_given_orders() {
     let mut inventory = Inventory::default();
     inventory.add(Item::Ration, 1);
     inventory.add(Item::Apple, 2);
+    inventory.add(Item::Sword(shared::item::Tier::Iron), 1);
     let wild = |name: &str| SavedSurvivor {
         name: name.into(),
         stats: SurvivorStats::from_seed(99),
@@ -649,6 +650,7 @@ fn survivors_are_recruited_and_given_orders() {
         post: spawn,
         leader: None,
         order: Order::Idle,
+        weapon: None,
     };
     let save = server::save::SaveFile {
         version: server::save::SAVE_VERSION,
@@ -705,6 +707,7 @@ fn survivors_are_recruited_and_given_orders() {
         &ClientMessage::TalkToSurvivor {
             id: marie,
             dismiss: false,
+            give: false,
         },
         true,
     );
@@ -735,6 +738,7 @@ fn survivors_are_recruited_and_given_orders() {
         &ClientMessage::TalkToSurvivor {
             id: lucas,
             dismiss: false,
+            give: false,
         },
         true,
     );
@@ -751,6 +755,7 @@ fn survivors_are_recruited_and_given_orders() {
         &ClientMessage::TalkToSurvivor {
             id: marie,
             dismiss: false,
+            give: false,
         },
         true,
     );
@@ -766,7 +771,35 @@ fn survivors_are_recruited_and_given_orders() {
         .is_some()
     });
 
-    // À l'arrêt, seule Marie (recrutée) est sauvegardée, avec son ordre.
+    // Hal lui confie son épée.
+    let sword = Item::Sword(shared::item::Tier::Iron);
+    hal.received.clear();
+    hal.send(&ClientMessage::Hold { item: Some(sword) }, true);
+    hal.send(
+        &ClientMessage::TalkToSurvivor {
+            id: marie,
+            dismiss: false,
+            give: true,
+        },
+        true,
+    );
+    pump_until(&mut [&mut hal], "Marie reçoit l'épée", |c| {
+        let armed = c[0]
+            .find(|m| match m {
+                ServerMessage::SurvivorInfo { id, weapon, .. } if *id == marie && *weapon == Some(sword) => Some(()),
+                _ => None,
+            })
+            .is_some();
+        let given = c[0]
+            .find(|m| match m {
+                ServerMessage::Inventory(inv) if !inv.has(sword, 1) => Some(()),
+                _ => None,
+            })
+            .is_some();
+        armed && given
+    });
+
+    // À l'arrêt, seule Marie (recrutée) est sauvegardée, avec son ordre et son arme.
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(700) {
         hal.pump();
@@ -778,5 +811,6 @@ fn survivors_are_recruited_and_given_orders() {
     assert_eq!(saved.survivors[0].name, "Marie");
     assert_eq!(saved.survivors[0].leader.as_deref(), Some("Hal"));
     assert_eq!(saved.survivors[0].order, Order::Guard);
+    assert_eq!(saved.survivors[0].weapon, Some(sword));
     let _ = std::fs::remove_dir_all(&data_dir);
 }

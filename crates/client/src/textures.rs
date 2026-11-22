@@ -88,6 +88,33 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
         } else {
             0.7
         }),
+        Block::Turret => {
+            // Caisson riveté en fer, avec une meurtrière sombre.
+            if (4..12).contains(&x) && (6..9).contains(&y) {
+                return [0.15, 0.13, 0.12];
+            }
+            let rivet = (x == 2 || x == 13) && (y == 2 || y == 13);
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            gray(if rivet {
+                1.0
+            } else if edge {
+                0.55
+            } else {
+                0.72 + 0.08 * n
+            })
+        }
+        Block::BarbedWire => {
+            // Fils tendus avec des pointes.
+            let wire = y % 5 == 2 || (x + y).is_multiple_of(7);
+            let barb = wire && x % 4 == 1;
+            if barb {
+                gray(1.0)
+            } else if wire {
+                gray(0.75)
+            } else {
+                [0.35, 0.3, 0.25]
+            }
+        }
         Block::Air => gray(1.0),
     }
 }
@@ -127,7 +154,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 17] = [
+const ALL_BLOCKS: [Block; 19] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -143,6 +170,8 @@ const ALL_BLOCKS: [Block; 17] = [
     Block::Door,
     Block::DoorOpen,
     Block::Chest,
+    Block::Turret,
+    Block::BarbedWire,
     Block::Workbench,
     Block::Forge,
 ];
