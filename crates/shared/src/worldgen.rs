@@ -19,6 +19,13 @@ const BOULDER_CELL: i32 = 24;
 /// Pourcentage de cellules qui ont un rocher de filon.
 const BOULDER_CHANCE: u32 = 40;
 
+/// Taille d'une cellule de la grille des ruines, en blocs.
+pub const RUIN_CELL: i32 = 72;
+/// Pourcentage de cellules qui ont une ruine (si le terrain est assez plat).
+const RUIN_CHANCE: u32 = 45;
+/// Demi-largeur d'une ruine : les murs sont à cette distance du centre.
+pub const RUIN_HALF: i32 = 3;
+
 /// Petit hachage entier, stable d'une plateforme à l'autre.
 fn hash3(seed: i32, a: i32, b: i32) -> u32 {
     let mut h = (seed as u32).wrapping_mul(0x9E37_79B9)
@@ -90,6 +97,9 @@ impl WorldGenerator {
         // Pas de grotte sous y = 2 (le fond de la carte), ni juste sous la surface (le sol reste propre).
         let surface = self.surface_height(x, z);
         if y >= surface {
+            if let Some(block) = self.ruin_block_at(x, y, z) {
+                return block;
+            }
             let deposit = self.boulder_block_at(x, y, z);
             if deposit != Block::Air {
                 return deposit;
@@ -206,6 +216,84 @@ impl WorldGenerator {
         if inside { kind } else { Block::Air }
     }
 
+    /// Ruine éventuelle d'une cellule : centre au sol, et côté de la porte (0 à 3).
+    ///
+    /// Une maison en ruine de 7 × 7 blocs, aux murs troués, avec un coffre dans un coin.
+    pub fn ruin_in_cell(&self, cx: i32, cz: i32) -> Option<(i32, i32, i32, u32)> {
+        let (x, z, h) = self.ruin_spot(cx, cz)?;
+        let ground = self.surface_height(x, z);
+        if self.is_beach(ground) || ground + 6 >= self.config.height_blocks() {
+            return None;
+        }
+        // Seulement sur un terrain presque plat.
+        let r = RUIN_HALF;
+        let flat = [(-r, -r), (r, -r), (-r, r), (r, r)]
+            .iter()
+            .all(|(dx, dz)| (self.surface_height(x + dx, z + dz) - ground).abs() <= 1);
+        flat.then_some((x, ground, z, (h >> 24) % 4))
+    }
+
+    /// Position (sans le relief) de la ruine éventuelle d'une cellule : peu coûteux.
+    fn ruin_spot(&self, cx: i32, cz: i32) -> Option<(i32, i32, u32)> {
+        let h = hash3(self.config.seed.wrapping_add(4242), cx, cz);
+        if h % 100 >= RUIN_CHANCE {
+            return None;
+        }
+        let margin = RUIN_HALF + 2;
+        let span = (RUIN_CELL - 2 * margin) as u32;
+        let x = cx * RUIN_CELL + margin + ((h >> 8) % span) as i32;
+        let z = cz * RUIN_CELL + margin + ((h >> 16) % span) as i32;
+        let size = self.config.size_blocks();
+        (x >= margin && z >= margin && x < size - margin && z < size - margin).then_some((x, z, h))
+    }
+
+    /// Position du coffre d'une ruine.
+    pub fn ruin_chest(&self, ruin: (i32, i32, i32, u32)) -> (i32, i32, i32) {
+        let (x, ground, z, _) = ruin;
+        let (cx, cz) = (x + RUIN_HALF - 1, z + RUIN_HALF - 1);
+        // Posé sur le sol, même si le terrain monte d'un bloc dans ce coin.
+        (cx, ground.max(self.surface_height(cx, cz)), cz)
+    }
+
+    /// Bloc d'une ruine (murs, coffre, ou air à l'intérieur), ou `None` hors des ruines.
+    fn ruin_block_at(&self, x: i32, y: i32, z: i32) -> Option<Block> {
+        let (cx, cz) = (x.div_euclid(RUIN_CELL), z.div_euclid(RUIN_CELL));
+        let (rx, rz, _) = self.ruin_spot(cx, cz)?;
+        let (dx, dz) = (x - rx, z - rz);
+        if dx.abs() > RUIN_HALF || dz.abs() > RUIN_HALF {
+            return None;
+        }
+        let ruin = self.ruin_in_cell(cx, cz)?;
+        let (_, ground, _, door) = ruin;
+        let dy = y - ground;
+        if !(0..=4).contains(&dy) {
+            return None;
+        }
+        let (chest_x, chest_y, chest_z) = self.ruin_chest(ruin);
+        if (x, y, z) == (chest_x, chest_y, chest_z) {
+            return Some(Block::Chest);
+        }
+        let wall = dx.abs() == RUIN_HALF || dz.abs() == RUIN_HALF;
+        if !wall || dy > 2 {
+            return Some(Block::Air);
+        }
+        let doorway = match door {
+            0 => dz == -RUIN_HALF && dx == 0,
+            1 => dz == RUIN_HALF && dx == 0,
+            2 => dx == -RUIN_HALF && dz == 0,
+            _ => dx == RUIN_HALF && dz == 0,
+        };
+        if doorway && dy <= 1 {
+            return Some(Block::Air);
+        }
+        // Murs écroulés : de plus en plus de trous en montant.
+        let decay = hash3(self.config.seed.wrapping_add(5), x * 31 + y, z) % 100;
+        if decay < 20 + dy as u32 * 20 {
+            return Some(Block::Air);
+        }
+        Some(if dy == 0 { Block::Stone } else { Block::Planks })
+    }
+
     /// Génère tout un chunk.
     pub fn generate_chunk(&self, pos: ChunkPos) -> Chunk {
         let mut chunk = Chunk::default();
@@ -291,6 +379,22 @@ mod tests {
         assert_eq!(generator.block_at(x + 1, ground, z), kind);
         assert_eq!(generator.block_at(x, ground + 1, z), kind);
         assert_eq!(generator.block_at(x, ground + 2, z), Block::Air);
+    }
+
+    #[test]
+    fn ruins_have_a_chest() {
+        let generator = WorldGenerator::new(WorldConfig::default());
+        let ruins: Vec<_> = (0..8)
+            .flat_map(|cx| (0..8).map(move |cz| (cx, cz)))
+            .filter_map(|(cx, cz)| generator.ruin_in_cell(cx, cz))
+            .collect();
+        assert!(ruins.len() >= 5, "seulement {} ruines", ruins.len());
+        for ruin in ruins {
+            let (x, y, z) = generator.ruin_chest(ruin);
+            assert_eq!(generator.block_at(x, y, z), Block::Chest);
+            // L'intérieur est dégagé.
+            assert_eq!(generator.block_at(ruin.0, ruin.1 + 1, ruin.2), Block::Air);
+        }
     }
 
     #[test]

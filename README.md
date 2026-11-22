@@ -39,6 +39,7 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | Clic gauche, arc ou fusil en main | Tirer |
 | Clic droit | Parler à un survivant, ouvrir une porte ou un coffre, sinon poser le bloc en main ou manger |
 | Maj + clic droit | Renvoyer un de vos survivants |
+| F11 | Plein écran |
 | `T` | Écrire dans la discussion (Entrée pour envoyer) |
 | `1` à `9`, molette | Choisir l'objet en main |
 | `C` ou `Tab` | Ouvrir le panneau de fabrication |
@@ -54,8 +55,11 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - Les filons de fer et de charbon (rochers sombres en surface, poches sous terre) se récoltent 20 fois par bloc. Lingot = minerai de fer + charbon.
 - Arc et flèches, puis fusil et cartouches, pour tenir les zombies à distance.
 - Portes (deux blocs empilés s'ouvrent ensemble) et coffres partagés pour la base. Un coffre cassé par un joueur lui rend son contenu ; cassé par un zombie, le contenu est perdu.
-- Des **survivants** (losange jaune au-dessus de la tête) errent dans le monde le jour. Donne-leur une ration ou 3 pommes pour les recruter (4 au plus par joueur). Chacun a sa force (dégâts), son endurance (vie) et son habileté (vitesse de travail). Clic droit sur un de tes survivants (losange vert) pour changer son ordre : **suivre**, **garder** l'endroit, **récolter** (bois, pierre, pommes, charbon, rangés dans le coffre le plus proche de son poste, sinon dans ton inventaire ; le jour seulement) ou **réparer** les blocs abîmés autour de lui. Ils se battent contre les zombies proches, mais les zombies s'en prennent aussi à eux.
+- Des **ruines** (maisons écroulées) parsèment la carte : leur coffre contient de la nourriture, des munitions, parfois une arme. Chaque coffre ne se pille qu'une fois.
+- Des **survivants** (losange jaune au-dessus de la tête) errent le jour, souvent près des ruines. Donne-leur une ration ou 3 pommes pour les recruter (4 au plus par joueur). Chacun a sa force (dégâts), son endurance (vie) et son habileté (vitesse de travail). Clic droit sur un de tes survivants (losange vert) pour changer son ordre : **suivre**, **garder** l'endroit, **récolter** (bois, pierre, pommes, charbon, rangés dans le coffre le plus proche de son poste, sinon dans ton inventaire ; le jour seulement) ou **réparer** les blocs abîmés autour de lui. Ils se battent contre les zombies proches, mais les zombies s'en prennent aussi à eux.
 - La nuit, les zombies sortent et cassent les murs pour t'atteindre. Toutes les 7 nuits arrive une grande horde. Les murs renforcés tiennent longtemps, les piques blessent les zombies qui les frappent ou marchent dessus.
+
+Le menu règle la sensibilité de la souris, le volume et le plein écran (enregistrés dans `reglages.txt`, à côté de la sauvegarde locale).
 
 Sous Linux, Bevy demande `libasound2-dev`, `libudev-dev`, `libwayland-dev` et `libxkbcommon-dev`.
 

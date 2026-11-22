@@ -6,12 +6,15 @@
 use shared::block::Block;
 use shared::chunk::{CHUNK_SIZE, Chunk};
 
+use crate::textures::atlas_uv;
+
 /// Données brutes d'un maillage, prêtes à être converties en `Mesh` Bevy.
 #[derive(Default, Debug)]
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub colors: Vec<[f32; 4]>,
+    pub uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
 }
 
@@ -69,6 +72,13 @@ pub fn build_chunk_mesh(chunk: &Chunk, solid_outside: impl Fn(i32, i32, i32) -> 
                     };
                     let base = mesh.positions.len() as u32;
                     for c in corners {
+                        // Coordonnées de texture prises dans le plan de la face.
+                        let (u, v) = match normal {
+                            [_, 0, 0] if normal[0] != 0 => (c[2], c[1]),
+                            [0, _, 0] if normal[1] != 0 => (c[0], c[2]),
+                            _ => (c[0], c[1]),
+                        };
+                        mesh.uvs.push(atlas_uv(block, u, v));
                         let c = match shape {
                             Some((min, max)) => [0, 1, 2].map(|i| min[i] + c[i] * (max[i] - min[i])),
                             None => c,
