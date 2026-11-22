@@ -103,9 +103,10 @@ struct Flow {
     version: u64,
 }
 
-/// Dégâts accumulés sur les blocs que les zombies frappent.
+/// Dégâts accumulés sur les blocs que les zombies frappent (avec le type du bloc :
+/// un bloc remplacé repart à zéro).
 #[derive(Resource, Default)]
-struct BlockDamage(HashMap<IVec3, f32>);
+struct BlockDamage(HashMap<IVec3, (Block, f32)>);
 
 #[derive(Resource, Default)]
 struct Waves {
@@ -411,8 +412,26 @@ fn zombie_ai(
                         zombie.hurt_timer = zombie.hurt_timer.max(0.1);
                     }
                     let hp = wall_block.max_health() as f32;
-                    let dealt = damage.0.entry(block_pos).or_insert(0.0);
+                    let entry = damage.0.entry(block_pos).or_insert((wall_block, 0.0));
+                    if entry.0 != wall_block {
+                        *entry = (wall_block, 0.0);
+                    }
+                    let dealt = &mut entry.1;
+                    let step_before = (*dealt / hp * 8.0) as u32;
                     *dealt += stats.block_dps * dt;
+                    // Les fissures s'affichent par huitièmes, pour ne pas inonder le réseau.
+                    if *dealt < hp
+                        && (*dealt / hp * 8.0) as u32 != step_before
+                        && let Some(server) = server.as_deref_mut()
+                    {
+                        server.broadcast_message(
+                            DefaultChannel::ReliableOrdered,
+                            encode(&ServerMessage::BlockDamage {
+                                pos: block_pos,
+                                damage: (*dealt / hp * 255.0) as u8,
+                            }),
+                        );
+                    }
                     if *dealt >= hp {
                         damage.0.remove(&block_pos);
                         if world.set_block(block_pos, Block::Air) {
@@ -665,7 +684,7 @@ fn broadcast_zombies(
                 if z.hurt_timer > 0.0 {
                     flags |= ZombieState::HURT;
                 }
-                ZombieState::new(z.id, b.position, b.yaw, z.kind, flags)
+                ZombieState::new(z.id, b.position, b.yaw, z.kind, flags, z.health)
             })
             .collect();
         // Découpe en paquets raisonnables pour le canal non fiable.

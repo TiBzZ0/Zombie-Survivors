@@ -4,11 +4,12 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button, observe};
 use bevy_renet::RenetClient;
-use shared::crafting::RECIPES;
+use shared::block::Block;
+use shared::crafting::{RECIPES, Recipe, station_near};
 use shared::protocol::ClientMessage;
 
 use crate::AppState;
-use crate::net::send_reliable;
+use crate::net::{ClientWorld, send_reliable};
 use crate::player::LocalPlayer;
 
 pub struct CraftingPlugin;
@@ -59,7 +60,32 @@ fn recipe_text(index: usize) -> String {
         .iter()
         .map(|(item, n)| format!("{n} {}", item.name()))
         .collect();
-    format!("{} ×{}  ←  {}", recipe.output.name(), recipe.count, inputs.join(" + "))
+    let station = match recipe.station {
+        Some(Block::Workbench) => "  [Établi]",
+        Some(Block::Forge) => "  [Forge]",
+        Some(_) => "  [Atelier]",
+        None => "",
+    };
+    format!(
+        "{} ×{}  ←  {}{station}",
+        recipe.output.name(),
+        recipe.count,
+        inputs.join(" + ")
+    )
+}
+
+/// Vrai si l'atelier demandé par la recette est à portée du joueur (le serveur vérifie aussi).
+fn station_ok(recipe: &Recipe, player: &LocalPlayer, world: Option<&ClientWorld>) -> bool {
+    let Some(station) = recipe.station else {
+        return true;
+    };
+    let Some(world) = world else { return false };
+    let feet = player.position.floor().as_ivec3();
+    station_near(feet, station, |p| world.0.block(p))
+}
+
+fn craftable(recipe: &Recipe, player: &LocalPlayer, world: Option<&ClientWorld>) -> bool {
+    recipe.can_craft(&player.inventory) && station_ok(recipe, player, world)
 }
 
 fn spawn_panel(mut commands: Commands) {
@@ -116,9 +142,12 @@ fn spawn_panel(mut commands: Commands) {
             ChildOf(recipes),
             children![(label(&recipe_text(index), 16.0), RecipeLabel(index))],
             observe(
-                move |_: On<Activate>, mut client: ResMut<RenetClient>, player: Res<LocalPlayer>| {
+                move |_: On<Activate>,
+                      mut client: ResMut<RenetClient>,
+                      player: Res<LocalPlayer>,
+                      world: Option<Res<ClientWorld>>| {
                     debug!("Fabrication demandée : {}", recipe.output.name());
-                    if recipe.can_craft(&player.inventory) {
+                    if craftable(recipe, &player, world.as_deref()) {
                         send_reliable(&mut client, &ClientMessage::Craft { recipe: index as u16 });
                     }
                 },
@@ -126,7 +155,11 @@ fn spawn_panel(mut commands: Commands) {
         ));
     }
     commands.spawn((
-        colored_label("C / Tab : fermer · Clic : fabriquer", 14.0, Color::srgb(0.6, 0.6, 0.6)),
+        colored_label(
+            "C / Tab : fermer · Clic : fabriquer · [Établi] / [Forge] : à moins de 4 blocs",
+            14.0,
+            Color::srgb(0.6, 0.6, 0.6),
+        ),
         ChildOf(recipes),
     ));
 
@@ -154,6 +187,7 @@ fn update_panel(
     mut buttons: Query<(&RecipeButton, &Hovered, &mut BackgroundColor)>,
     mut labels: Query<(&RecipeLabel, &mut TextColor)>,
     mut inventory: Single<&mut Text, With<InventoryText>>,
+    world: Option<Res<ClientWorld>>,
 ) {
     **panel = if player.crafting_open && player.dead.is_none() {
         Visibility::Visible
@@ -164,7 +198,7 @@ fn update_panel(
         return;
     }
     for (button, hovered, mut color) in &mut buttons {
-        let ok = RECIPES[button.0].can_craft(&player.inventory);
+        let ok = craftable(&RECIPES[button.0], &player, world.as_deref());
         color.0 = match (ok, hovered.get()) {
             (true, true) => AVAILABLE_HOVER,
             (true, false) => AVAILABLE,
@@ -172,7 +206,7 @@ fn update_panel(
         };
     }
     for (label, mut color) in &mut labels {
-        let ok = RECIPES[label.0].can_craft(&player.inventory);
+        let ok = craftable(&RECIPES[label.0], &player, world.as_deref());
         color.0 = if ok { Color::WHITE } else { Color::srgb(0.5, 0.5, 0.5) };
     }
     inventory.0 = if player.inventory.is_empty() {

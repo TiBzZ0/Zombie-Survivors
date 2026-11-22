@@ -40,6 +40,8 @@ pub struct ZombieView {
     target: Vec3,
     target_yaw: f32,
     pub flags: u8,
+    /// Part de vie restante (0 à 1).
+    pub health: f32,
     last_seen: f32,
     walk_phase: f32,
 }
@@ -104,6 +106,7 @@ fn spawn_zombie(commands: &mut Commands, assets: &ZombieAssets, state: &ZombieSt
                 target: state.position(),
                 target_yaw: state.yaw(),
                 flags: state.flags,
+                health: state.health_fraction(),
                 last_seen: now,
                 walk_phase: (state.id % 7) as f32,
             },
@@ -171,6 +174,7 @@ fn receive_zombies(
                             view.target = state.position();
                             view.target_yaw = state.yaw();
                             view.flags = state.flags;
+                            view.health = state.health_fraction();
                             view.last_seen = now;
                         }
                         None => {

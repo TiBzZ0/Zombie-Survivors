@@ -92,6 +92,10 @@ pub enum NetEvent {
         contents: shared::item::Inventory,
     },
     ChestClosed,
+    BlockDamage {
+        pos: IVec3,
+        damage: u8,
+    },
     Died(String),
     ZombieKilled(u32),
 }
@@ -277,6 +281,9 @@ fn receive_messages(
             }
             ServerMessage::Chest { pos, contents } => {
                 events.write(NetEvent::Chest { pos, contents });
+            }
+            ServerMessage::BlockDamage { pos, damage } => {
+                events.write(NetEvent::BlockDamage { pos, damage });
             }
             ServerMessage::ChestClosed => {
                 events.write(NetEvent::ChestClosed);

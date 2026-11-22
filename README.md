@@ -47,6 +47,8 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 
 - Le jour, récolte : le bois des arbres, la pierre et le minerai de fer sous la surface. Les feuilles donnent parfois des pommes.
 - Fabrique des planches, des bâtons, puis des pioches et des épées (bois, pierre, fer). Le minerai de fer et les murs renforcés se cassent seulement à la pioche.
+- Certaines recettes demandent un atelier posé à moins de 4 blocs : l'**établi** (6 planches) pour les outils en pierre, l'arc, les flèches, les portes et les coffres ; la **forge** (10 pierres et 2 charbons, à l'établi) pour fondre le fer, les outils en fer, les murs renforcés, les pics et le fusil.
+- Les blocs attaqués par les zombies se fissurent et rougissent avant de céder ; une barre de vie s'affiche au-dessus des zombies blessés.
 - La faim baisse avec le temps. Sans manger, la vie ne remonte plus, puis diminue. Trois pommes font une ration ; feuilles et bâton font un bandage.
 - Les filons de fer et de charbon (rochers sombres en surface, poches sous terre) se récoltent 20 fois par bloc. Lingot = minerai de fer + charbon.
 - Arc et flèches, puis fusil et cartouches, pour tenir les zombies à distance.

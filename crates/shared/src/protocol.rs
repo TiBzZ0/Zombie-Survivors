@@ -11,7 +11,7 @@ use crate::item::{Inventory, Item};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0005;
+pub const PROTOCOL_ID: u64 = 0x5A53_0006;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -109,13 +109,15 @@ pub struct ZombieState {
     pub kind: u8,
     /// Bits d'état : 1 = attaque, 2 = vient d'être touché.
     pub flags: u8,
+    /// Vie restante sur 255.
+    pub health: u8,
 }
 
 impl ZombieState {
     pub const ATTACKING: u8 = 1;
     pub const HURT: u8 = 2;
 
-    pub fn new(id: u32, position: Vec3, yaw: f32, kind: ZombieKind, flags: u8) -> Self {
+    pub fn new(id: u32, position: Vec3, yaw: f32, kind: ZombieKind, flags: u8, health: f32) -> Self {
         let q = |v: f32| (v * 32.0).clamp(0.0, u16::MAX as f32) as u16;
         let turn = yaw.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
         Self {
@@ -126,6 +128,7 @@ impl ZombieState {
             yaw: (turn * 256.0) as u8,
             kind: kind as u8,
             flags,
+            health: ((health / kind.stats().health).clamp(0.0, 1.0) * 255.0).ceil() as u8,
         }
     }
 
@@ -139,6 +142,11 @@ impl ZombieState {
 
     pub fn kind(&self) -> ZombieKind {
         ZombieKind::from_u8(self.kind)
+    }
+
+    /// Part de vie restante, de 0 à 1.
+    pub fn health_fraction(&self) -> f32 {
+        self.health as f32 / 255.0
     }
 }
 
@@ -202,6 +210,11 @@ pub enum ServerMessage {
         end: Vec3,
         rifle: bool,
     },
+    /// Dégâts subis par un bloc que des zombies attaquent (sur 255 ; 0 = réparé ou cassé).
+    BlockDamage {
+        pos: IVec3,
+        damage: u8,
+    },
     /// Récoltes restantes d'un bloc de filon, après une récolte.
     Deposit {
         pos: IVec3,
@@ -246,11 +259,12 @@ mod tests {
 
     #[test]
     fn zombie_state_is_compact_and_precise() {
-        let state = ZombieState::new(7, Vec3::new(512.3, 40.0, 100.9), 1.5, ZombieKind::Runner, 0);
+        let state = ZombieState::new(7, Vec3::new(512.3, 40.0, 100.9), 1.5, ZombieKind::Runner, 0, 12.5);
         assert!(state.position().distance(Vec3::new(512.3, 40.0, 100.9)) < 0.05);
         assert!((state.yaw() - 1.5).abs() < 0.03);
         assert_eq!(state.kind(), ZombieKind::Runner);
-        assert!(encode(&state).len() <= 14);
+        assert!((state.health_fraction() - 0.5).abs() < 0.01);
+        assert!(encode(&state).len() <= 15);
     }
 
     #[test]

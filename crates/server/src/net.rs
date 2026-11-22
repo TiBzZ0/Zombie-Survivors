@@ -11,7 +11,7 @@ use bevy_renet::netcode::{
 use bevy_renet::renet::{ClientId, ConnectionConfig, DefaultChannel, ServerEvent};
 use bevy_renet::{RenetServer, RenetServerEvent, RenetServerPlugin};
 use shared::block::{Block, DEPOSIT_HARVESTS};
-use shared::crafting::RECIPES;
+use shared::crafting::{RECIPES, station_near};
 use shared::item::{Inventory, Item, break_time, drop_for};
 use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid};
 use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMessage, decode, encode};
@@ -434,8 +434,10 @@ fn handle_reliable(
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
             };
+            let feet = player.state.position.floor().as_ivec3();
             if let Some(recipe) = RECIPES.get(recipe as usize)
                 && player.is_alive()
+                && recipe.station.is_none_or(|s| station_near(feet, s, |p| world.block(p)))
             {
                 recipe.craft(&mut player.inventory);
             }
