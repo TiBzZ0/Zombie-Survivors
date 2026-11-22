@@ -103,6 +103,25 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
                 0.72 + 0.08 * n
             })
         }
+        Block::MachineGun | Block::Cannon => {
+            // Plaques de métal sombre, canon au centre.
+            let barrel = (6..10).contains(&x) && (5..11).contains(&y);
+            let seam = y.is_multiple_of(8) || x.is_multiple_of(8);
+            if barrel {
+                gray(if block == Block::Cannon { 0.25 } else { 0.4 })
+            } else {
+                gray(if seam { 0.55 } else { 0.75 + 0.1 * n })
+            }
+        }
+        Block::Catapult => {
+            // Charpente en bois croisée sur un fond de planches.
+            let beam = (x + y) % 16 < 2 || (x + 16 - y) % 16 < 2;
+            let mut v = 0.85 + 0.1 * hash(x / 4, y, salt);
+            if beam {
+                v = 0.6;
+            }
+            gray(v)
+        }
         Block::BarbedWire => {
             // Fils tendus avec des pointes.
             let wire = y % 5 == 2 || (x + y).is_multiple_of(7);
@@ -154,7 +173,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 19] = [
+const ALL_BLOCKS: [Block; 22] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -174,6 +193,9 @@ const ALL_BLOCKS: [Block; 19] = [
     Block::BarbedWire,
     Block::Workbench,
     Block::Forge,
+    Block::MachineGun,
+    Block::Cannon,
+    Block::Catapult,
 ];
 
 #[cfg(test)]

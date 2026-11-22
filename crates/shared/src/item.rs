@@ -38,6 +38,8 @@ pub enum Item {
     /// Arbalète : ses carreaux transpercent plusieurs zombies alignés.
     Crossbow,
     Bolt,
+    /// Boulet de canon.
+    CannonBall,
 }
 
 /// Caractéristiques d'un explosif qu'on lance.
@@ -132,6 +134,7 @@ impl Item {
             Item::Dynamite => "Dynamite".into(),
             Item::Crossbow => "Arbalète".into(),
             Item::Bolt => "Carreau".into(),
+            Item::CannonBall => "Boulet".into(),
         }
     }
 

@@ -8,7 +8,9 @@ use crate::AppState;
 use crate::net::{ClientWorld, NetEvent};
 use crate::survivors::SurvivorView;
 use crate::zombies::ZombieView;
-use shared::physics::step_projectile;
+use shared::block::Block;
+use shared::item::Item;
+use shared::physics::{PROJECTILE_GRAVITY, step_projectile};
 
 pub struct EffectsPlugin;
 
@@ -55,7 +57,7 @@ enum Blast {
         pos: Vec3,
         vel: Vec3,
         fuse: f32,
-        dynamite: bool,
+        item: Item,
     },
     Boom {
         pos: Vec3,
@@ -88,7 +90,7 @@ fn collect_shots(
                 pos: *origin,
                 vel: *velocity,
                 fuse: *fuse,
-                dynamite: *item == shared::item::Item::Dynamite,
+                item: *item,
             }),
             NetEvent::Explosion { pos, radius } => {
                 // L'explosion remplace l'explosif le plus proche encore affiché.
@@ -220,31 +222,50 @@ fn draw_tracers(time: Res<Time>, mut tracers: ResMut<Tracers>, mut gizmos: Gizmo
     });
 }
 
+/// Gravité d'un projectile d'arme fixe (qui explose à l'impact), d'après sa munition.
+fn shell_gravity(item: Item) -> Option<f32> {
+    [Block::Cannon, Block::Catapult]
+        .into_iter()
+        .filter_map(Block::emplacement)
+        .find(|g| g.ammo == item)
+        .map(|g| g.gravity)
+}
+
 fn draw_thrown(time: Res<Time>, world: Res<ClientWorld>, mut thrown: ResMut<Thrown>, mut gizmos: Gizmos) {
     let dt = time.delta_secs().min(0.05);
     let solid = |p: IVec3| world.is_solid(p);
     thrown.0.retain_mut(|blast| match blast {
-        Blast::Flying {
-            pos,
-            vel,
-            fuse,
-            dynamite,
-        } => {
-            (*pos, *vel) = step_projectile(*pos, *vel, dt, &solid);
-            *fuse -= dt;
-            // La mèche clignote de plus en plus vite.
-            let blink = ((*fuse * 8.0).sin() > 0.0) as u8 as f32;
-            let (body, size) = if *dynamite {
-                (Color::srgb(0.75, 0.15, 0.1), 0.18)
+        Blast::Flying { pos, vel, fuse, item } => {
+            // Boulet et pierre volent droit jusqu'à l'impact ; grenade et dynamite roulent.
+            let shell = shell_gravity(*item);
+            if let Some(gravity) = shell {
+                vel.y -= PROJECTILE_GRAVITY * gravity * dt;
+                let next = *pos + *vel * dt;
+                if solid(next.floor().as_ivec3()) {
+                    *vel = Vec3::ZERO;
+                } else {
+                    *pos = next;
+                }
             } else {
-                (Color::srgb(0.25, 0.35, 0.2), 0.14)
+                (*pos, *vel) = step_projectile(*pos, *vel, dt, &solid);
+            }
+            *fuse -= dt;
+            let (body, size) = match item {
+                Item::Dynamite => (Color::srgb(0.75, 0.15, 0.1), 0.18),
+                Item::CannonBall => (Color::srgb(0.12, 0.12, 0.14), 0.22),
+                Item::Block(_) => (Color::srgb(0.55, 0.55, 0.55), 0.3),
+                _ => (Color::srgb(0.25, 0.35, 0.2), 0.14),
             };
             gizmos.sphere(Isometry3d::from_translation(*pos), size, body);
-            gizmos.sphere(
-                Isometry3d::from_translation(*pos + Vec3::Y * size),
-                0.04,
-                Color::srgba(1.0, 0.8, 0.2, blink),
-            );
+            if shell.is_none() {
+                // La mèche clignote.
+                let blink = ((*fuse * 8.0).sin() > 0.0) as u8 as f32;
+                gizmos.sphere(
+                    Isometry3d::from_translation(*pos + Vec3::Y * size),
+                    0.04,
+                    Color::srgba(1.0, 0.8, 0.2, blink),
+                );
+            }
             // Filet de sécurité si le message d'explosion se perd.
             *fuse > -1.0
         }

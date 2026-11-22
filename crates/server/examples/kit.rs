@@ -37,6 +37,8 @@ fn main() {
         (Item::Bolt, 24),
         (Item::Grenade, 6),
         (Item::Dynamite, 4),
+        (Item::CannonBall, 12),
+        (Item::Block(Block::Stone), 32),
         (Item::Helmet(Tier::Iron), 1),
         (Item::BodyArmor(Tier::Wood), 1),
         (Item::Ration, 5),
@@ -72,6 +74,13 @@ fn main() {
         .collect();
     let turret = block_at(3.0, -7.0);
     edits.push((turret, Block::Turret));
+    // Les trois armes fixes, à portée de main sur la gauche.
+    for (i, gun) in [Block::MachineGun, Block::Cannon, Block::Catapult]
+        .into_iter()
+        .enumerate()
+    {
+        edits.push((block_at(-2.0, -1.0 - 2.0 * i as f32), gun));
+    }
     let mut ammo = Inventory::default();
     ammo.add(Item::Arrow, 20);
     let save = SaveFile {

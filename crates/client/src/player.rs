@@ -98,6 +98,8 @@ pub struct LocalPlayer {
     pub survivor_hint: Option<String>,
     /// Garde levée (arme de mêlée en main, clic droit maintenu).
     pub guarding: bool,
+    /// Arme fixe pilotée (mitrailleuse, canon, catapulte).
+    pub mounted: Option<IVec3>,
     /// Intensité de l'effet « paré ! » (0 à 1).
     pub parry_flash: f32,
     cooldown: f32,
@@ -333,8 +335,14 @@ fn move_player(
     } else {
         WALK_SPEED
     };
-    // Garde levée : on avance à petits pas.
-    let speed = if player.guarding { WALK_SPEED * 0.5 } else { speed };
+    // Garde levée : on avance à petits pas ; aux commandes d'une arme fixe, on ne bouge plus.
+    let speed = if player.mounted.is_some() {
+        0.0
+    } else if player.guarding {
+        WALK_SPEED * 0.5
+    } else {
+        speed
+    };
     let wish = Quat::from_rotation_y(player.yaw) * wish.normalize_or_zero() * speed;
 
     let dt = time.delta_secs().min(0.05);
@@ -388,11 +396,36 @@ fn interact(
         .map(|(id, _)| id);
     player.cooldown -= dt;
     player.needs_pickaxe = false;
+    // Arme fixe pilotée : le clic gauche tire, le clic droit fait descendre.
+    if let Some(pos) = player.mounted {
+        let gun = world.block(pos).emplacement();
+        let close = emplacement_close(&player, pos);
+        let leave = cursor_locked(&cursor) && mouse.just_pressed(MouseButton::Right);
+        match gun {
+            Some(gun) if close && player.dead.is_none() && !leave => {
+                player.mining = None;
+                let fire = cursor_locked(&cursor) && mouse.pressed(MouseButton::Left) && player.cooldown <= 0.0;
+                if fire && player.inventory.remove(gun.ammo, 1) {
+                    let direction = player.look_direction();
+                    send_reliable(&mut client, &ClientMessage::FireEmplacement { pos, direction });
+                    player.cooldown = gun.cooldown;
+                }
+                return;
+            }
+            _ => {
+                player.mounted = None;
+                if leave {
+                    player.cooldown = 0.35;
+                    return;
+                }
+            }
+        }
+    }
     // Garde : clic droit maintenu avec une arme de mêlée, sauf pour parler, ouvrir une porte ou un coffre.
     let interactable = player.aimed_survivor.is_some()
         || player.target.is_some_and(|h| {
             let b = world.block(h.block);
-            b.is_door() || b.is_storage()
+            b.is_door() || b.is_storage() || b.emplacement().is_some()
         });
     let guard = cursor_locked(&cursor)
         && player.dead.is_none()
@@ -482,6 +515,13 @@ fn interact(
             player.cooldown = 0.35;
             return;
         }
+        if block.emplacement().is_some() && mouse.just_pressed(MouseButton::Right) {
+            if emplacement_close(&player, hit.block) {
+                player.mounted = Some(hit.block);
+                player.cooldown = 0.35;
+            }
+            return;
+        }
         if block.is_storage() && mouse.just_pressed(MouseButton::Right) {
             send_reliable(&mut client, &ClientMessage::OpenChest { pos: hit.block });
             player.crafting_open = false;
@@ -567,6 +607,11 @@ fn send_position(mut player: ResMut<LocalPlayer>, mut client: ResMut<RenetClient
     let mut last = player.last_sent;
     send_state(&mut client, state, &time, &mut last);
     player.last_sent = last;
+}
+
+/// Le joueur est assez près de l'arme fixe pour la piloter.
+pub fn emplacement_close(player: &LocalPlayer, pos: IVec3) -> bool {
+    (pos.as_vec3() + Vec3::splat(0.5)).distance(player.position + Vec3::Y) <= shared::block::EMPLACEMENT_REACH
 }
 
 /// Zombie visé (intersection rayon / boîte) à portée de mêlée, avec sa distance.

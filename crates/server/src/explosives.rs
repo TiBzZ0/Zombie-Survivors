@@ -4,9 +4,9 @@
 use bevy::prelude::*;
 use bevy_renet::RenetServer;
 use bevy_renet::renet::ClientId;
-use shared::block::Block;
-use shared::item::Item;
-use shared::physics::step_projectile;
+use shared::block::{Block, Emplacement};
+use shared::item::{Item, Throwable};
+use shared::physics::{PROJECTILE_GRAVITY, step_projectile};
 use shared::protocol::ServerMessage;
 
 use crate::net::{Lobby, WorldVersion, broadcast};
@@ -40,18 +40,51 @@ pub struct Projectile {
     pub position: Vec3,
     pub velocity: Vec3,
     pub fuse: f32,
+    pub blast: Throwable,
+    /// Explose dès qu'il touche un bloc ou un zombie (boulet, pierre de catapulte).
+    pub impact: bool,
+    /// Part de la gravité subie (projectiles à impact seulement).
+    pub gravity: f32,
 }
 
 impl Projectile {
     pub fn thrown(owner: ClientId, item: Item, eye: Vec3, dir: Vec3) -> Self {
-        let fuse = item.throwable().map_or(2.0, |t| t.fuse);
+        let blast = item.throwable().unwrap_or(Throwable {
+            fuse: 2.0,
+            radius: 3.0,
+            damage: 50.0,
+            blast_blocks: 0.0,
+        });
         Self {
             owner: Some(owner),
             item,
             position: eye + dir * 0.5,
             // Un peu vers le haut, pour lancer en cloche.
             velocity: (dir + Vec3::Y * 0.25).normalize_or_zero() * THROW_SPEED,
-            fuse,
+            fuse: blast.fuse,
+            blast,
+            impact: false,
+            gravity: 1.0,
+        }
+    }
+
+    /// Projectile tiré par une arme fixe, qui explose à l'impact.
+    pub fn shell(owner: ClientId, gun: Emplacement, origin: Vec3, dir: Vec3) -> Self {
+        Self {
+            owner: Some(owner),
+            item: gun.ammo,
+            position: origin,
+            velocity: dir * gun.speed,
+            // Au bout de ce temps, il explose en l'air.
+            fuse: 8.0,
+            blast: Throwable {
+                fuse: 0.0,
+                radius: gun.radius,
+                damage: gun.damage,
+                blast_blocks: 0.0,
+            },
+            impact: true,
+            gravity: gun.gravity,
         }
     }
 
@@ -84,8 +117,29 @@ fn update_projectiles(
 ) {
     let dt = time.delta_secs();
     let mut exploded = Vec::new();
+    let targets: Vec<Vec3> = zombies
+        .iter()
+        .map(|(z, b)| b.position + Vec3::Y * z.kind.stats().size.height * 0.5)
+        .collect();
     projectiles.0.retain_mut(|p| {
-        (p.position, p.velocity) = step_projectile(p.position, p.velocity, dt, &|b| world.is_solid(b));
+        if p.impact {
+            p.velocity.y -= PROJECTILE_GRAVITY * p.gravity * dt;
+            let next = p.position + p.velocity * dt;
+            // Un zombie touché de plein fouet : l'explosion a lieu sur lui.
+            let hit_zombie = targets
+                .iter()
+                .find(|t| distance_to_segment(**t, p.position, next) < 1.0);
+            if let Some(target) = hit_zombie {
+                p.position = *target;
+                p.fuse = 0.0;
+            } else if world.is_solid(next.floor().as_ivec3()) {
+                p.fuse = 0.0;
+            } else {
+                p.position = next;
+            }
+        } else {
+            (p.position, p.velocity) = step_projectile(p.position, p.velocity, dt, &|b| world.is_solid(b));
+        }
         p.fuse -= dt;
         if p.fuse <= 0.0 {
             exploded.push(p.clone());
@@ -93,7 +147,7 @@ fn update_projectiles(
         p.fuse > 0.0 && p.position.y > -10.0
     });
     for p in exploded {
-        let Some(blast) = p.item.throwable() else { continue };
+        let blast = p.blast;
         let falloff = |d: f32| blast.damage * (1.0 - 0.5 * d / blast.radius);
         for (mut z, body) in &mut zombies {
             let center = body.position + Vec3::Y * z.kind.stats().size.height * 0.5;
@@ -158,6 +212,17 @@ fn update_projectiles(
     }
 }
 
+/// Distance d'un point au segment [a, b].
+fn distance_to_segment(point: Vec3, a: Vec3, b: Vec3) -> f32 {
+    let ab = b - a;
+    let k = if ab.length_squared() > 0.0 {
+        ((point - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    point.distance(a + ab * k)
+}
+
 /// Blocs que la dynamite épargne : le vide, les murs renforcés, les coffres et tourelles (et leur contenu).
 fn resists_blast(block: Block) -> bool {
     block == Block::Air || block == Block::ReinforcedWall || block.is_storage()
@@ -194,6 +259,9 @@ mod tests {
                 position: center.as_vec3() + Vec3::splat(0.5),
                 velocity: Vec3::ZERO,
                 fuse: 0.0,
+                blast: Item::Dynamite.throwable().unwrap(),
+                impact: false,
+                gravity: 1.0,
             }]));
         let zombie = |id: u32, offset: f32| {
             (
@@ -234,5 +302,56 @@ mod tests {
         health.sort_by_key(|h| h.0);
         assert!(health[0].1 <= 0.0, "le zombie au centre est tué : {health:?}");
         assert_eq!(health[1].1, 100.0);
+    }
+
+    #[test]
+    fn cannon_shell_explodes_on_the_zombie_it_hits() {
+        let world = GameWorld(WorldState::new(WorldConfig::default()));
+        let y = world.generator().surface_height(40, 40) as f32 + 12.0;
+        let mut app = App::new();
+        app.insert_resource(world)
+            .init_resource::<WorldVersion>()
+            .init_resource::<BlockDamage>()
+            .init_resource::<Deposits>()
+            .init_resource::<Lobby>()
+            .init_resource::<Time>()
+            .insert_resource(Projectiles(vec![Projectile::shell(
+                1,
+                Block::Cannon.emplacement().unwrap(),
+                Vec3::new(30.5, y + 1.0, 40.5),
+                Vec3::X,
+            )]));
+        app.world_mut().spawn((
+            Zombie {
+                id: 7,
+                kind: ZombieKind::Walker,
+                health: 100.0,
+                attack_cooldown: 0.0,
+                attacking: 0.0,
+                hurt_timer: 0.0,
+                knockback: Vec3::ZERO,
+                last_attacker: None,
+            },
+            ZombieBody {
+                position: Vec3::new(42.5, y, 40.5),
+                velocity: Vec3::ZERO,
+                yaw: 0.0,
+                on_ground: true,
+                hit_wall: false,
+            },
+        ));
+        for _ in 0..30 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(33));
+            app.world_mut().run_system_once(update_projectiles).unwrap();
+        }
+        assert!(
+            app.world().resource::<Projectiles>().0.is_empty(),
+            "le boulet a explosé"
+        );
+        let z = app.world_mut().query::<&Zombie>().single(app.world()).unwrap();
+        assert!(z.health < 0.0, "touché de plein fouet : {}", z.health);
+        assert_eq!(z.last_attacker, Some(1));
     }
 }
