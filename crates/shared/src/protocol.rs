@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0010;
+pub const PROTOCOL_ID: u64 = 0x5A53_0011;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -141,6 +141,8 @@ pub struct SurvivorState {
     pub health: u8,
     /// Bits d'état : 1 = attaque, 2 = vient d'être touché, 4 = travaille.
     pub flags: u8,
+    /// Moral, de 0 à 100.
+    pub morale: u8,
 }
 
 impl SurvivorState {
@@ -150,7 +152,7 @@ impl SurvivorState {
     /// Le survivant a faim : il ne travaille plus et perd de la vie.
     pub const HUNGRY: u8 = 8;
 
-    pub fn new(id: u32, position: Vec3, yaw: f32, health: f32, flags: u8) -> Self {
+    pub fn new(id: u32, position: Vec3, yaw: f32, health: f32, flags: u8, morale: f32) -> Self {
         let z = ZombieState::new(id, position, yaw, ZombieKind::Walker, 0, 0.0);
         Self {
             id,
@@ -160,6 +162,7 @@ impl SurvivorState {
             yaw: z.yaw,
             health: (health.clamp(0.0, 1.0) * 255.0).ceil() as u8,
             flags,
+            morale: morale.clamp(0.0, 100.0).round() as u8,
         }
     }
 
