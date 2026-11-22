@@ -1,11 +1,13 @@
 //! Outil de test : crée une sauvegarde où un joueur possède un lot d'objets.
 //! `cargo run -p server --example kit -- <dossier> <pseudo>`
 
-use server::save::{SAVE_VERSION, SaveFile, SavedPlayer, write};
+use bevy::math::Vec3;
+use server::save::{SAVE_VERSION, SaveFile, SavedPlayer, SavedSurvivor, write};
 use shared::block::Block;
 use shared::config::WorldConfig;
 use shared::daytime::GameTime;
 use shared::item::{Inventory, Item, Tier};
+use shared::survivor::{Order, SurvivorStats};
 use shared::world::WorldState;
 
 fn main() {
@@ -30,6 +32,26 @@ fn main() {
     ] {
         inventory.add(item, n);
     }
+    // Deux survivants devant le joueur (qui regarde vers -Z) : un à recruter, un déjà recruté.
+    let spawn = server::world::find_spawn(&world);
+    let ground = |dx: f32, dz: f32| {
+        let (x, z) = ((spawn.x + dx).floor(), (spawn.z + dz).floor());
+        let y = world.generator().surface_height(x as i32, z as i32) as f32;
+        Vec3::new(x + 0.5, y, z + 0.5)
+    };
+    let survivor = |survivor_name: &str, at: Vec3, leader: Option<String>, order: Order| SavedSurvivor {
+        name: survivor_name.into(),
+        stats: SurvivorStats::from_seed(survivor_name.len() as u32 * 7919),
+        health: 70.0,
+        position: at,
+        post: at,
+        leader,
+        order,
+    };
+    let survivors = vec![
+        survivor("Marie", ground(0.0, -4.0), None, Order::Idle),
+        survivor("Hugo", ground(2.5, -5.0), Some(name.clone()), Order::Guard),
+    ];
     let save = SaveFile {
         version: SAVE_VERSION,
         world: WorldConfig::default(),
@@ -38,7 +60,7 @@ fn main() {
         players: vec![(
             name,
             SavedPlayer {
-                position: server::world::find_spawn(&world),
+                position: spawn,
                 health: 100.0,
                 hunger: 100.0,
                 inventory,
@@ -46,6 +68,7 @@ fn main() {
         )],
         deposits: Vec::new(),
         chests: Vec::new(),
+        survivors,
     };
     write(std::path::Path::new(&dir), &save).expect("écriture de la sauvegarde");
     println!("Sauvegarde écrite dans {dir}");

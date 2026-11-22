@@ -19,6 +19,7 @@ use shared::zombie::{ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_REACH, ZombieKind};
 
 use crate::daynight::Clock;
 use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, WorldVersion, send_vitals};
+use crate::survivors::Survivor;
 use crate::world::{Chests, GameWorld, SpawnPoint};
 
 /// Rayon exploré par le champ de flux autour des joueurs, en blocs.
@@ -53,10 +54,10 @@ impl Plugin for ZombiePlugin {
                 (
                     update_flow_field,
                     spawn_waves,
-                    zombie_ai,
+                    zombie_ai.in_set(ZombieSet::Ai),
                     separate_zombies,
                     sun_and_cleanup,
-                    kill_dead_zombies,
+                    kill_dead_zombies.in_set(ZombieSet::Deaths),
                     player_survival,
                     broadcast_zombies,
                 )
@@ -65,6 +66,13 @@ impl Plugin for ZombiePlugin {
             .add_systems(FixedLast, end_tick_timer)
             .add_systems(Update, report_tick_stats);
     }
+}
+
+/// Étapes de la simulation des zombies, pour ordonner les autres systèmes autour.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ZombieSet {
+    Ai,
+    Deaths,
 }
 
 /// Un zombie. Sa position est dans `ZombieBody`.
@@ -106,7 +114,7 @@ struct Flow {
 /// Dégâts accumulés sur les blocs que les zombies frappent (avec le type du bloc :
 /// un bloc remplacé repart à zéro).
 #[derive(Resource, Default)]
-struct BlockDamage(HashMap<IVec3, (Block, f32)>);
+pub(crate) struct BlockDamage(pub HashMap<IVec3, (Block, f32)>);
 
 #[derive(Resource, Default)]
 struct Waves {
@@ -184,7 +192,7 @@ fn spawn_zombie(commands: &mut Commands, ids: &mut NextZombieId, kind: ZombieKin
 }
 
 /// Cherche une case libre sur le sol à une distance donnée d'un point.
-fn find_spawn_spot(world: &GameWorld, around: Vec3, min: f32, max: f32) -> Option<Vec3> {
+pub(crate) fn find_spawn_spot(world: &GameWorld, around: Vec3, min: f32, max: f32) -> Option<Vec3> {
     for _ in 0..12 {
         let angle = fastrand::f32() * std::f32::consts::TAU;
         let dist = min + fastrand::f32() * (max - min);
@@ -250,6 +258,7 @@ fn update_flow_field(
     world: Res<GameWorld>,
     mut stats: ResMut<TickStats>,
     zombies: Query<(), With<Zombie>>,
+    survivors: Query<&Survivor>,
 ) {
     flow.timer -= time.delta_secs();
     let world_changed = version.0 != flow.version && flow.timer < FLOW_INTERVAL - 0.25;
@@ -259,11 +268,14 @@ fn update_flow_field(
     // Recalcule à intervalle fixe (les joueurs bougent), et vite si des blocs ont changé.
     flow.timer = FLOW_INTERVAL;
     flow.version = version.0;
+    // Les survivants postés dans une base attirent aussi la horde.
     let targets: Vec<IVec3> = lobby
         .players
         .values()
         .filter(|p| p.is_alive())
-        .map(|p| block_containing(p.state.position + Vec3::Y * 0.1))
+        .map(|p| p.state.position)
+        .chain(survivors.iter().filter(|s| s.is_posted()).map(|s| s.position))
+        .map(|p| block_containing(p + Vec3::Y * 0.1))
         .collect();
     if targets.is_empty() {
         flow.field = FlowField::default();
@@ -348,6 +360,7 @@ fn zombie_ai(
     mut server: Option<ResMut<RenetServer>>,
     mut zombies: Query<(&mut Zombie, &mut ZombieBody)>,
     mut chests: ResMut<Chests>,
+    mut survivors: Query<(Entity, &mut Survivor)>,
 ) {
     let dt = time.delta_secs();
     let players: Vec<(ClientId, Vec3)> = lobby
@@ -356,6 +369,8 @@ fn zombie_ai(
         .filter(|(_, p)| p.is_alive())
         .map(|(id, p)| (*id, p.state.position))
         .collect();
+    let survivor_spots: Vec<(Entity, Vec3)> = survivors.iter().map(|(e, s)| (e, s.position)).collect();
+    let mut survivor_hits: Vec<(Entity, f32)> = Vec::new();
 
     for (mut zombie, mut body) in &mut zombies {
         let stats = zombie.kind.stats();
@@ -377,7 +392,26 @@ fn zombie_ai(
 
         let mut wish = Vec3::ZERO;
         let mut face: Option<Vec3> = None;
-        if let Some((player_id, player_pos, dist)) = nearest {
+        // Un survivant proche, plus proche que tout joueur, est pris pour cible.
+        let survivor = survivor_spots
+            .iter()
+            .map(|(e, p)| (*e, *p, p.distance(body.position)))
+            .filter(|(_, _, d)| *d < SURVIVOR_AGGRO)
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .filter(|(_, _, d)| nearest.is_none_or(|n| *d < n.2));
+        if let Some((entity, target, dist)) = survivor {
+            let vertical_ok = (target.y - body.position.y).abs() < 1.6;
+            if dist < ZOMBIE_REACH + stats.size.half_width && vertical_ok {
+                face = Some(target);
+                if zombie.attack_cooldown <= 0.0 {
+                    zombie.attack_cooldown = ZOMBIE_ATTACK_COOLDOWN;
+                    zombie.attacking = 0.4;
+                    survivor_hits.push((entity, stats.damage));
+                }
+            } else {
+                wish = Vec3::new(target.x - body.position.x, 0.0, target.z - body.position.z);
+            }
+        } else if let Some((player_id, player_pos, dist)) = nearest {
             let feet = block_containing(body.position + Vec3::Y * 0.1);
             let vertical_ok = (player_pos.y - body.position.y).abs() < 1.6;
             if dist < ZOMBIE_REACH + stats.size.half_width && vertical_ok {
@@ -483,7 +517,15 @@ fn zombie_ai(
         body.on_ground = result.on_ground;
         body.hit_wall = result.hit_wall;
     }
+    for (entity, amount) in survivor_hits {
+        if let Ok((_, mut survivor)) = survivors.get_mut(entity) {
+            survivor.hurt(amount);
+        }
+    }
 }
+
+/// Distance à laquelle un zombie s'en prend à un survivant plutôt qu'au joueur le plus proche.
+const SURVIVOR_AGGRO: f32 = 12.0;
 
 /// Dégâts par seconde des piques aux zombies qui les touchent.
 const SPIKE_DPS: f32 = 12.0;

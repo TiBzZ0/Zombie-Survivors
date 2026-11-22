@@ -445,6 +445,7 @@ fn bow_shoots_and_uses_arrows() {
         )],
         deposits: Vec::new(),
         chests: Vec::new(),
+        survivors: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
 
@@ -520,6 +521,7 @@ fn doors_chests_and_chat() {
         )],
         deposits: Vec::new(),
         chests: Vec::new(),
+        survivors: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {
@@ -621,5 +623,160 @@ fn doors_chests_and_chat() {
             .is_some();
         closed && back
     });
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[test]
+fn survivors_are_recruited_and_given_orders() {
+    use server::save::SavedSurvivor;
+    use shared::survivor::{Order, SurvivorStats};
+
+    let port = 21_000 + (std::process::id() % 1000) as u16;
+    let data_dir = std::env::temp_dir().join(format!("zs-test-survivants-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data_dir);
+
+    // Hal a une ration et deux pommes ; deux survivants attendent à côté de lui.
+    let world = WorldState::new(WorldConfig::default());
+    let spawn = server::world::find_spawn(&world);
+    let mut inventory = Inventory::default();
+    inventory.add(Item::Ration, 1);
+    inventory.add(Item::Apple, 2);
+    let wild = |name: &str| SavedSurvivor {
+        name: name.into(),
+        stats: SurvivorStats::from_seed(99),
+        health: 100.0,
+        position: spawn,
+        post: spawn,
+        leader: None,
+        order: Order::Idle,
+    };
+    let save = server::save::SaveFile {
+        version: server::save::SAVE_VERSION,
+        world: WorldConfig::default(),
+        time: GameTime::START,
+        edits: Vec::new(),
+        players: vec![(
+            "Hal".into(),
+            server::save::SavedPlayer {
+                position: spawn,
+                health: 100.0,
+                hunger: 100.0,
+                inventory,
+            },
+        )],
+        deposits: Vec::new(),
+        chests: Vec::new(),
+        survivors: vec![wild("Marie"), wild("Lucas")],
+    };
+    server::save::write(&data_dir, &save).unwrap();
+    let config = ServerConfig {
+        port,
+        data_dir: data_dir.clone(),
+        ..ServerConfig::default()
+    };
+    let server = spawn_local(config.clone()).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let mut hal = TestClient::connect(port, 1, "Hal");
+
+    // Hal apprend qui sont les survivants et les voit bouger.
+    pump_until(&mut [&mut hal], "survivants connus et visibles", |c| {
+        let named = c[0]
+            .received
+            .iter()
+            .filter(|m| matches!(m, ServerMessage::SurvivorInfo { leader: None, .. }))
+            .count();
+        let seen = c[0]
+            .find(|m| matches!(m, ServerMessage::Survivors(list) if list.len() == 2).then_some(()))
+            .is_some();
+        named == 2 && seen
+    });
+    let id_of = |hal: &TestClient, who: &str| {
+        hal.find(|m| match m {
+            ServerMessage::SurvivorInfo { id, name, .. } if name == who => Some(*id),
+            _ => None,
+        })
+        .unwrap()
+    };
+    let (marie, lucas) = (id_of(&hal, "Marie"), id_of(&hal, "Lucas"));
+
+    // La ration suffit à recruter Marie.
+    hal.received.clear();
+    hal.send(
+        &ClientMessage::TalkToSurvivor {
+            id: marie,
+            dismiss: false,
+        },
+        true,
+    );
+    pump_until(&mut [&mut hal], "Marie recrutée", |c| {
+        let joined = c[0]
+            .find(|m| match m {
+                ServerMessage::SurvivorInfo {
+                    id,
+                    leader: Some(leader),
+                    order: Order::Follow,
+                    ..
+                } if *id == marie && leader == "Hal" => Some(()),
+                _ => None,
+            })
+            .is_some();
+        let paid = c[0]
+            .find(|m| match m {
+                ServerMessage::Inventory(inv) if !inv.has(Item::Ration, 1) && inv.count(Item::Apple) == 2 => Some(()),
+                _ => None,
+            })
+            .is_some();
+        joined && paid
+    });
+
+    // Deux pommes ne suffisent pas pour Lucas.
+    hal.received.clear();
+    hal.send(
+        &ClientMessage::TalkToSurvivor {
+            id: lucas,
+            dismiss: false,
+        },
+        true,
+    );
+    pump_until(&mut [&mut hal], "Lucas refuse", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::Chat { from, text } if from == "Lucas" && text.contains("faim") => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+
+    // Un deuxième clic poste Marie en garde.
+    hal.send(
+        &ClientMessage::TalkToSurvivor {
+            id: marie,
+            dismiss: false,
+        },
+        true,
+    );
+    pump_until(&mut [&mut hal], "Marie monte la garde", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::SurvivorInfo {
+                id,
+                order: Order::Guard,
+                ..
+            } if *id == marie => Some(()),
+            _ => None,
+        })
+        .is_some()
+    });
+
+    // À l'arrêt, seule Marie (recrutée) est sauvegardée, avec son ordre.
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(700) {
+        hal.pump();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    drop(server);
+    let saved = server::save::load(&data_dir).unwrap().unwrap();
+    assert_eq!(saved.survivors.len(), 1);
+    assert_eq!(saved.survivors[0].name, "Marie");
+    assert_eq!(saved.survivors[0].leader.as_deref(), Some("Hal"));
+    assert_eq!(saved.survivors[0].order, Order::Guard);
     let _ = std::fs::remove_dir_all(&data_dir);
 }

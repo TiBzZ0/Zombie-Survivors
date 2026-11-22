@@ -8,10 +8,11 @@ use crate::block::Block;
 use crate::config::WorldConfig;
 use crate::daytime::GameTime;
 use crate::item::{Inventory, Item};
+use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0006;
+pub const PROTOCOL_ID: u64 = 0x5A53_0007;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -94,6 +95,56 @@ pub enum ClientMessage {
     Eat {
         item: Item,
     },
+    /// Parle à un survivant : le recrute, change son ordre, ou le renvoie (`dismiss`).
+    TalkToSurvivor {
+        id: u32,
+        dismiss: bool,
+    },
+}
+
+/// Position compacte d'un survivant.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SurvivorState {
+    pub id: u32,
+    pub x: u16,
+    pub y: u16,
+    pub z: u16,
+    pub yaw: u8,
+    /// Vie restante sur 255.
+    pub health: u8,
+    /// Bits d'état : 1 = attaque, 2 = vient d'être touché, 4 = travaille.
+    pub flags: u8,
+}
+
+impl SurvivorState {
+    pub const ATTACKING: u8 = 1;
+    pub const HURT: u8 = 2;
+    pub const WORKING: u8 = 4;
+
+    pub fn new(id: u32, position: Vec3, yaw: f32, health: f32, flags: u8) -> Self {
+        let z = ZombieState::new(id, position, yaw, ZombieKind::Walker, 0, 0.0);
+        Self {
+            id,
+            x: z.x,
+            y: z.y,
+            z: z.z,
+            yaw: z.yaw,
+            health: (health.clamp(0.0, 1.0) * 255.0).ceil() as u8,
+            flags,
+        }
+    }
+
+    pub fn position(&self) -> Vec3 {
+        Vec3::new(self.x as f32, self.y as f32, self.z as f32) / 32.0
+    }
+
+    pub fn yaw(&self) -> f32 {
+        self.yaw as f32 / 256.0 * std::f32::consts::TAU
+    }
+
+    pub fn health_fraction(&self) -> f32 {
+        self.health as f32 / 255.0
+    }
 }
 
 /// Position compacte d'un zombie (12 octets environ une fois sérialisée).
@@ -156,6 +207,8 @@ pub enum ServerMessage {
     /// Réponse à `Hello` : paramètres du monde et point d'apparition.
     Welcome {
         your_id: PlayerId,
+        /// Pseudo retenu par le serveur (nettoyé, éventuellement modifié).
+        your_name: String,
         world: WorldConfig,
         spawn: Vec3,
     },
@@ -223,6 +276,16 @@ pub enum ServerMessage {
     /// Le joueur est mort ; il peut demander à réapparaître.
     Died {
         cause: String,
+    },
+    /// Survivants proches du joueur (canal non fiable). Un survivant absent est mort ou trop loin.
+    Survivors(Vec<SurvivorState>),
+    /// Identité d'un survivant, envoyée à l'arrivée et à chaque changement de chef ou d'ordre.
+    SurvivorInfo {
+        id: u32,
+        name: String,
+        stats: SurvivorStats,
+        leader: Option<String>,
+        order: Order,
     },
     /// Un zombie est mort (pour l'effet visuel et le compteur).
     ZombieKilled {

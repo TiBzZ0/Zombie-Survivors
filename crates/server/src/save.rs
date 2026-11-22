@@ -12,6 +12,7 @@ use shared::block::Block;
 use shared::config::WorldConfig;
 use shared::daytime::GameTime;
 use shared::item::Inventory;
+use shared::survivor::{Order, SurvivorStats};
 
 use crate::daynight::Clock;
 use crate::net::{ConnectedPlayer, Lobby, WorldVersion};
@@ -19,7 +20,7 @@ use crate::world::{Chests, Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
 
 /// Change si le format du fichier change de façon incompatible.
-pub const SAVE_VERSION: u32 = 3;
+pub const SAVE_VERSION: u32 = 4;
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";
@@ -54,6 +55,23 @@ impl SavedPlayer {
     }
 }
 
+/// Un survivant recruté, gardé d'une partie à l'autre.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedSurvivor {
+    pub name: String,
+    pub stats: SurvivorStats,
+    pub health: f32,
+    pub position: Vec3,
+    /// Endroit gardé, récolté ou réparé.
+    pub post: Vec3,
+    pub leader: Option<String>,
+    pub order: Order,
+}
+
+/// Survivants recrutés, tenus à jour par la simulation pour la sauvegarde.
+#[derive(Resource, Default, Debug)]
+pub struct SavedSurvivors(pub Vec<SavedSurvivor>);
+
 /// Joueurs connus mais absents, par pseudo.
 #[derive(Resource, Default, Debug)]
 pub struct SavedPlayers(pub HashMap<String, SavedPlayer>);
@@ -70,6 +88,8 @@ pub struct SaveFile {
     pub deposits: Vec<(IVec3, u8)>,
     /// Contenu des coffres (depuis la version 3).
     pub chests: Vec<(IVec3, Inventory)>,
+    /// Survivants recrutés (depuis la version 4).
+    pub survivors: Vec<SavedSurvivor>,
 }
 
 pub fn save_path(data_dir: &Path) -> PathBuf {
@@ -99,7 +119,12 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
     } else {
         (Vec::new(), rest)
     };
-    let (chests, _) = if version >= 3 {
+    let (chests, rest) = if version >= 3 {
+        postcard::take_from_bytes(rest).map_err(invalid)?
+    } else {
+        (Vec::new(), rest)
+    };
+    let (survivors, _) = if version >= 4 {
         postcard::take_from_bytes(rest).map_err(invalid)?
     } else {
         (Vec::new(), rest)
@@ -118,6 +143,7 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
         players,
         deposits,
         chests,
+        survivors,
     };
     Ok(Some(save))
 }
@@ -139,6 +165,7 @@ fn snapshot(
     saved: &SavedPlayers,
     deposits: &Deposits,
     chests: &Chests,
+    survivors: &SavedSurvivors,
 ) -> SaveFile {
     let mut players = saved.0.clone();
     for player in lobby.players.values().filter(|p| p.is_ready()) {
@@ -160,6 +187,7 @@ fn snapshot(
         players,
         deposits,
         chests,
+        survivors: survivors.0.clone(),
     }
 }
 
@@ -171,8 +199,9 @@ fn save_now(
     saved: &SavedPlayers,
     deposits: &Deposits,
     chests: &Chests,
+    survivors: &SavedSurvivors,
 ) {
-    let save = snapshot(world, clock, lobby, saved, deposits, chests);
+    let save = snapshot(world, clock, lobby, saved, deposits, chests, survivors);
     match write(&config.data_dir, &save) {
         Ok(()) => debug!(
             "Partie sauvegardée : {} blocs modifiés, {} joueurs",
@@ -196,6 +225,7 @@ fn autosave(
     version: Res<WorldVersion>,
     deposits: Res<Deposits>,
     chests: Res<Chests>,
+    survivors: Res<SavedSurvivors>,
     mut since: Local<f32>,
     mut last_version: Local<u64>,
 ) {
@@ -210,7 +240,7 @@ fn autosave(
         return;
     }
     *last_version = version.0;
-    save_now(&config, &world, &clock, &lobby, &saved, &deposits, &chests);
+    save_now(&config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors);
 }
 
 fn save_on_shutdown(
@@ -222,11 +252,12 @@ fn save_on_shutdown(
     saved: Res<SavedPlayers>,
     deposits: Res<Deposits>,
     chests: Res<Chests>,
+    survivors: Res<SavedSurvivors>,
     mut done: Local<bool>,
 ) {
     if flag.0.load(Ordering::Relaxed) && !*done {
         *done = true;
-        save_now(&config, &world, &clock, &lobby, &saved, &deposits, &chests);
+        save_now(&config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors);
         info!("Partie sauvegardée dans {}", save_path(&config.data_dir).display());
     }
 }
@@ -263,6 +294,15 @@ mod tests {
             )],
             deposits: vec![(IVec3::new(4, 5, 6), 7)],
             chests: vec![(IVec3::new(8, 9, 10), Inventory::default())],
+            survivors: vec![SavedSurvivor {
+                name: "Marie".into(),
+                stats: SurvivorStats::from_seed(42),
+                health: 80.0,
+                position: Vec3::new(1.0, 30.0, 2.0),
+                post: Vec3::new(1.0, 30.0, 2.0),
+                leader: Some("Alice".into()),
+                order: Order::Guard,
+            }],
         };
         write(&dir, &save).unwrap();
         assert_eq!(load(&dir).unwrap(), Some(save));
@@ -281,7 +321,7 @@ mod tests {
         std::fs::write(save_path(&dir), bytes).unwrap();
         let upgraded = load(&dir).unwrap().unwrap();
         assert_eq!(upgraded.edits, old.edits);
-        assert!(upgraded.deposits.is_empty() && upgraded.chests.is_empty());
+        assert!(upgraded.deposits.is_empty() && upgraded.chests.is_empty() && upgraded.survivors.is_empty());
         std::fs::write(save_path(&dir), b"abime").unwrap();
         assert!(load(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);

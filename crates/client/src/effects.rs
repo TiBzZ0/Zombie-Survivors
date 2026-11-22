@@ -6,6 +6,7 @@ use bevy::prelude::*;
 
 use crate::AppState;
 use crate::net::NetEvent;
+use crate::survivors::SurvivorView;
 use crate::zombies::ZombieView;
 
 pub struct EffectsPlugin;
@@ -48,6 +49,9 @@ fn collect_shots(mut events: MessageReader<NetEvent>, mut tracers: ResMut<Tracer
                 rifle: *rifle,
                 age: 0.0,
             }),
+            NetEvent::BlockDamage { pos, damage: 0 } => {
+                cracks.0.remove(pos);
+            }
             NetEvent::BlockDamage { pos, damage } => {
                 cracks.0.insert(*pos, *damage);
             }
@@ -93,20 +97,37 @@ fn draw_cracks(cracks: Res<Cracks>, mut gizmos: Gizmos) {
 fn draw_zombie_health(
     camera: Single<&Transform, With<Camera3d>>,
     zombies: Query<(&ZombieView, &Transform)>,
+    survivors: Query<(&SurvivorView, &Transform)>,
     mut gizmos: Gizmos,
 ) {
     let right = camera.right().as_vec3();
-    for (view, transform) in &zombies {
-        if view.health >= 1.0 || view.health <= 0.0 {
+    let bars = zombies
+        .iter()
+        .map(|(v, t)| {
+            (
+                v.health,
+                t.translation + Vec3::Y * (v.kind.stats().size.height + 0.3),
+                false,
+            )
+        })
+        .chain(survivors.iter().map(|(v, t)| {
+            let height = shared::survivor::SURVIVOR_SIZE.height;
+            (v.health, t.translation + Vec3::Y * (height + 0.2), true)
+        }));
+    for (health, top, friend) in bars {
+        if health >= 1.0 || health <= 0.0 {
             continue;
         }
-        let height = view.kind.stats().size.height;
-        let top = transform.translation + Vec3::Y * (height + 0.3);
         let half = 0.4;
         let left = top - right * half;
-        let filled = left + right * (2.0 * half * view.health);
+        let filled = left + right * (2.0 * half * health);
+        let color = if friend {
+            Color::srgb(0.3, 0.6, 1.0)
+        } else {
+            Color::srgb(0.2, 0.9, 0.2)
+        };
         gizmos.line(left, top + right * half, Color::srgb(0.25, 0.05, 0.05));
-        gizmos.line(left, filled, Color::srgb(0.2, 0.9, 0.2));
+        gizmos.line(left, filled, color);
     }
 }
 

@@ -17,6 +17,7 @@ pub mod config;
 pub mod daynight;
 pub mod net;
 pub mod save;
+pub mod survivors;
 pub mod world;
 pub mod zombies;
 
@@ -39,6 +40,7 @@ impl Plugin for ServerPlugin {
                 daynight::DayNightPlugin,
                 zombies::ZombiePlugin,
                 save::SavePlugin,
+                survivors::SurvivorPlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)

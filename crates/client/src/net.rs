@@ -46,6 +46,7 @@ pub struct ClientWorld(pub WorldState);
 #[derive(Resource, Debug, Clone)]
 pub struct Session {
     pub my_id: PlayerId,
+    pub my_name: String,
     pub spawn: Vec3,
 }
 
@@ -98,6 +99,14 @@ pub enum NetEvent {
     },
     Died(String),
     ZombieKilled(u32),
+    Survivors(Vec<shared::protocol::SurvivorState>),
+    SurvivorInfo {
+        id: u32,
+        name: String,
+        stats: shared::survivor::SurvivorStats,
+        leader: Option<String>,
+        order: shared::survivor::Order,
+    },
 }
 
 fn fail(commands: &mut Commands, next: &mut NextState<AppState>, message: String) {
@@ -238,10 +247,19 @@ fn receive_messages(
             None => world.as_deref_mut().map(|w| &mut w.0),
         };
         match message {
-            ServerMessage::Welcome { your_id, world, spawn } => {
-                info!("Connecté en tant que joueur {your_id}");
+            ServerMessage::Welcome {
+                your_id,
+                your_name,
+                world,
+                spawn,
+            } => {
+                info!("Connecté en tant que joueur {your_id} ({your_name})");
                 fresh_world = Some(WorldState::new(world));
-                commands.insert_resource(Session { my_id: your_id, spawn });
+                commands.insert_resource(Session {
+                    my_id: your_id,
+                    my_name: your_name,
+                    spawn,
+                });
                 commands.remove_resource::<ConnectStarted>();
                 if *state.get() == AppState::Connecting {
                     next.set(AppState::Playing);
@@ -306,7 +324,22 @@ fn receive_messages(
             ServerMessage::ZombieKilled { id, .. } => {
                 events.write(NetEvent::ZombieKilled(id));
             }
-            ServerMessage::Players(_) | ServerMessage::Zombies(_) => {}
+            ServerMessage::SurvivorInfo {
+                id,
+                name,
+                stats,
+                leader,
+                order,
+            } => {
+                events.write(NetEvent::SurvivorInfo {
+                    id,
+                    name,
+                    stats,
+                    leader,
+                    order,
+                });
+            }
+            ServerMessage::Players(_) | ServerMessage::Zombies(_) | ServerMessage::Survivors(_) => {}
         }
     }
     if let Some(world) = fresh_world {
@@ -319,6 +352,9 @@ fn receive_messages(
             }
             Some(ServerMessage::Zombies(zombies)) => {
                 events.write(NetEvent::Zombies(zombies));
+            }
+            Some(ServerMessage::Survivors(survivors)) => {
+                events.write(NetEvent::Survivors(survivors));
             }
             _ => {}
         }

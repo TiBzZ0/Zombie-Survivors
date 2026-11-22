@@ -19,6 +19,7 @@ use shared::raycast::{ray_aabb, raycast};
 
 use crate::ServerConfig;
 use crate::save::{SavedPlayer, SavedPlayers};
+use crate::survivors::SurvivorTalk;
 use crate::world::{Chests, Deposits, GameWorld, SpawnPoint};
 use crate::zombies::{Zombie, ZombieBody};
 
@@ -116,7 +117,7 @@ pub fn send_vitals(server: &mut RenetServer, client: ClientId, player: &Connecte
     );
 }
 
-fn send_inventory(server: &mut RenetServer, client: ClientId, player: &ConnectedPlayer) {
+pub(crate) fn send_inventory(server: &mut RenetServer, client: ClientId, player: &ConnectedPlayer) {
     send(server, client, &ServerMessage::Inventory(player.inventory.clone()));
 }
 
@@ -170,11 +171,11 @@ fn open_socket(mut commands: Commands, config: Res<ServerConfig>) {
     }
 }
 
-fn send(server: &mut RenetServer, client: ClientId, message: &ServerMessage) {
+pub(crate) fn send(server: &mut RenetServer, client: ClientId, message: &ServerMessage) {
     server.send_message(client, DefaultChannel::ReliableOrdered, encode(message));
 }
 
-fn broadcast(server: &mut RenetServer, message: &ServerMessage) {
+pub(crate) fn broadcast(server: &mut RenetServer, message: &ServerMessage) {
     server.broadcast_message(DefaultChannel::ReliableOrdered, encode(message));
 }
 
@@ -212,6 +213,7 @@ fn receive_messages(
     mut saved: ResMut<SavedPlayers>,
     mut deposits: ResMut<Deposits>,
     mut chests: ResMut<Chests>,
+    mut talk: ResMut<SurvivorTalk>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -230,6 +232,7 @@ fn receive_messages(
                 saved: &mut saved,
                 deposits: &mut deposits,
                 chests: &mut chests,
+                talk: &mut talk,
             };
             handle_reliable(client, message, &mut ctx, &mut zombies);
         }
@@ -251,6 +254,7 @@ struct Context<'a> {
     saved: &'a mut SavedPlayers,
     deposits: &'a mut Deposits,
     chests: &'a mut Chests,
+    talk: &'a mut SurvivorTalk,
 }
 
 fn handle_reliable(
@@ -269,6 +273,7 @@ fn handle_reliable(
         saved,
         deposits,
         chests,
+        talk,
     } = ctx;
     let (spawn, now) = (*spawn, *now);
     let ready = lobby.players.get(&client).is_some_and(ConnectedPlayer::is_ready);
@@ -285,6 +290,7 @@ fn handle_reliable(
                 client,
                 &ServerMessage::Welcome {
                     your_id: client,
+                    your_name: name.clone(),
                     world: world.config().clone(),
                     spawn: start,
                 },
@@ -540,6 +546,9 @@ fn handle_reliable(
                 );
             }
         }
+        ClientMessage::TalkToSurvivor { id, dismiss } => {
+            talk.0.push((client, id, dismiss));
+        }
         ClientMessage::Eat { item } => {
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
@@ -650,7 +659,7 @@ fn handle_reliable(
 }
 
 /// Envoie le contenu d'un coffre à tous les joueurs qui l'ont ouvert.
-fn send_chest_to_viewers(server: &mut RenetServer, lobby: &Lobby, chests: &Chests, pos: IVec3) {
+pub(crate) fn send_chest_to_viewers(server: &mut RenetServer, lobby: &Lobby, chests: &Chests, pos: IVec3) {
     let contents = chests.0.get(&pos).cloned().unwrap_or_default();
     for (id, player) in &lobby.players {
         if player.open_chest == Some(pos) {
