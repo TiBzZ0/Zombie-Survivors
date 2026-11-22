@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0007;
+pub const PROTOCOL_ID: u64 = 0x5A53_0008;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -95,10 +95,12 @@ pub enum ClientMessage {
     Eat {
         item: Item,
     },
-    /// Parle à un survivant : le recrute, change son ordre, ou le renvoie (`dismiss`).
+    /// Parle à un survivant : le recrute, change son ordre, le renvoie (`dismiss`)
+    /// ou lui donne l'arme tenue en main (`give`).
     TalkToSurvivor {
         id: u32,
         dismiss: bool,
+        give: bool,
     },
 }
 
@@ -286,6 +288,8 @@ pub enum ServerMessage {
         stats: SurvivorStats,
         leader: Option<String>,
         order: Order,
+        /// Arme confiée par son chef.
+        weapon: Option<Item>,
     },
     /// Un zombie est mort (pour l'effet visuel et le compteur).
     ZombieKilled {

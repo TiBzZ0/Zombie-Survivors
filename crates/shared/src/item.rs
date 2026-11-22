@@ -96,6 +96,11 @@ impl Item {
         }
     }
 
+    /// Arme qu'on peut confier à un survivant.
+    pub const fn is_weapon(self) -> bool {
+        matches!(self, Item::Sword(_) | Item::Bow | Item::Rifle)
+    }
+
     pub const fn is_tool(self) -> bool {
         matches!(self, Item::Sword(_) | Item::Pickaxe(_) | Item::Bow | Item::Rifle)
     }

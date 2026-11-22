@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use shared::block::Block;
 use shared::config::WorldConfig;
 use shared::daytime::GameTime;
-use shared::item::Inventory;
+use shared::item::{Inventory, Item};
 use shared::survivor::{Order, SurvivorStats};
 
 use crate::daynight::Clock;
@@ -20,7 +20,7 @@ use crate::world::{Chests, Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
 
 /// Change si le format du fichier change de façon incompatible.
-pub const SAVE_VERSION: u32 = 4;
+pub const SAVE_VERSION: u32 = 5;
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";
@@ -66,6 +66,35 @@ pub struct SavedSurvivor {
     pub post: Vec3,
     pub leader: Option<String>,
     pub order: Order,
+    /// Arme confiée (depuis la version 5).
+    pub weapon: Option<Item>,
+}
+
+/// Survivant tel qu'enregistré en version 4, avant les armes.
+#[derive(Deserialize)]
+struct SavedSurvivorV4 {
+    name: String,
+    stats: SurvivorStats,
+    health: f32,
+    position: Vec3,
+    post: Vec3,
+    leader: Option<String>,
+    order: Order,
+}
+
+impl From<SavedSurvivorV4> for SavedSurvivor {
+    fn from(s: SavedSurvivorV4) -> Self {
+        Self {
+            name: s.name,
+            stats: s.stats,
+            health: s.health,
+            position: s.position,
+            post: s.post,
+            leader: s.leader,
+            order: s.order,
+            weapon: None,
+        }
+    }
 }
 
 /// Survivants recrutés, tenus à jour par la simulation pour la sauvegarde.
@@ -124,10 +153,13 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
     } else {
         (Vec::new(), rest)
     };
-    let (survivors, _) = if version >= 4 {
-        postcard::take_from_bytes(rest).map_err(invalid)?
+    let survivors: Vec<SavedSurvivor> = if version >= 5 {
+        postcard::take_from_bytes(rest).map_err(invalid)?.0
+    } else if version == 4 {
+        let (old, _) = postcard::take_from_bytes::<Vec<SavedSurvivorV4>>(rest).map_err(invalid)?;
+        old.into_iter().map(Into::into).collect()
     } else {
-        (Vec::new(), rest)
+        Vec::new()
     };
     if version > SAVE_VERSION {
         return Err(io::Error::new(
@@ -302,6 +334,7 @@ mod tests {
                 post: Vec3::new(1.0, 30.0, 2.0),
                 leader: Some("Alice".into()),
                 order: Order::Guard,
+                weapon: Some(Item::Bow),
             }],
         };
         write(&dir, &save).unwrap();
@@ -322,6 +355,45 @@ mod tests {
         let upgraded = load(&dir).unwrap().unwrap();
         assert_eq!(upgraded.edits, old.edits);
         assert!(upgraded.deposits.is_empty() && upgraded.chests.is_empty() && upgraded.survivors.is_empty());
+
+        // Une sauvegarde de la version 4 garde ses survivants, sans arme.
+        #[derive(Serialize)]
+        struct V4<'a>(
+            u32,
+            &'a WorldConfig,
+            GameTime,
+            &'a [(IVec3, Block)],
+            &'a [(String, SavedPlayer)],
+            &'a [(IVec3, u8)],
+            &'a [(IVec3, Inventory)],
+            Vec<(&'a str, SurvivorStats, f32, Vec3, Vec3, Option<String>, Order)>,
+        );
+        let v4_survivors = vec![(
+            "Marie",
+            SurvivorStats::from_seed(42),
+            80.0,
+            Vec3::ONE,
+            Vec3::ONE,
+            None,
+            Order::Gather,
+        )];
+        let bytes = postcard::to_allocvec(&V4(
+            4,
+            &old.world,
+            old.time,
+            &old.edits,
+            &old.players,
+            &[],
+            &[],
+            v4_survivors,
+        ))
+        .unwrap();
+        std::fs::write(save_path(&dir), bytes).unwrap();
+        let upgraded = load(&dir).unwrap().unwrap();
+        assert_eq!(upgraded.survivors.len(), 1);
+        assert_eq!(upgraded.survivors[0].order, Order::Gather);
+        assert_eq!(upgraded.survivors[0].weapon, None);
+
         std::fs::write(save_path(&dir), b"abime").unwrap();
         assert!(load(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);

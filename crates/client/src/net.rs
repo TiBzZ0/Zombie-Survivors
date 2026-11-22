@@ -106,6 +106,7 @@ pub enum NetEvent {
         stats: shared::survivor::SurvivorStats,
         leader: Option<String>,
         order: shared::survivor::Order,
+        weapon: Option<shared::item::Item>,
     },
 }
 
@@ -330,6 +331,7 @@ fn receive_messages(
                 stats,
                 leader,
                 order,
+                weapon,
             } => {
                 events.write(NetEvent::SurvivorInfo {
                     id,
@@ -337,6 +339,7 @@ fn receive_messages(
                     stats,
                     leader,
                     order,
+                    weapon,
                 });
             }
             ServerMessage::Players(_) | ServerMessage::Zombies(_) | ServerMessage::Survivors(_) => {}

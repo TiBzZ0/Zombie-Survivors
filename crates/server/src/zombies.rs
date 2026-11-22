@@ -385,6 +385,24 @@ fn zombie_ai(
             zombie.hurt_timer = zombie.hurt_timer.max(0.1);
         }
 
+        // Dans les barbelés : le zombie se blesse, ralentit et use le fil.
+        let feet_block = block_containing(body.position + Vec3::Y * 0.1);
+        let in_wire = world.block(feet_block) == Block::BarbedWire;
+        if in_wire {
+            zombie.health -= WIRE_DPS * dt;
+            zombie.hurt_timer = zombie.hurt_timer.max(0.1);
+            damage_block(
+                feet_block,
+                WIRE_WEAR * dt,
+                &mut damage,
+                &mut world,
+                &mut version,
+                server.as_deref_mut(),
+                &mut lobby,
+                &mut chests,
+            );
+        }
+
         let nearest = players
             .iter()
             .map(|(id, p)| (*id, *p, p.distance(body.position)))
@@ -445,46 +463,16 @@ fn zombie_ai(
                         zombie.health -= SPIKE_DPS * dt;
                         zombie.hurt_timer = zombie.hurt_timer.max(0.1);
                     }
-                    let hp = wall_block.max_health() as f32;
-                    let entry = damage.0.entry(block_pos).or_insert((wall_block, 0.0));
-                    if entry.0 != wall_block {
-                        *entry = (wall_block, 0.0);
-                    }
-                    let dealt = &mut entry.1;
-                    let step_before = (*dealt / hp * 8.0) as u32;
-                    *dealt += stats.block_dps * dt;
-                    // Les fissures s'affichent par huitièmes, pour ne pas inonder le réseau.
-                    if *dealt < hp
-                        && (*dealt / hp * 8.0) as u32 != step_before
-                        && let Some(server) = server.as_deref_mut()
-                    {
-                        server.broadcast_message(
-                            DefaultChannel::ReliableOrdered,
-                            encode(&ServerMessage::BlockDamage {
-                                pos: block_pos,
-                                damage: (*dealt / hp * 255.0) as u8,
-                            }),
-                        );
-                    }
-                    if *dealt >= hp {
-                        damage.0.remove(&block_pos);
-                        if world.set_block(block_pos, Block::Air) {
-                            version.0 += 1;
-                            if let Some(server) = server.as_deref_mut() {
-                                if wall_block == Block::Chest {
-                                    // Le coffre est détruit avec son contenu.
-                                    crate::net::chest_destroyed(server, &mut lobby, &mut chests, block_pos, None);
-                                }
-                                server.broadcast_message(
-                                    DefaultChannel::ReliableOrdered,
-                                    encode(&ServerMessage::BlockChanged {
-                                        pos: block_pos,
-                                        block: Block::Air,
-                                    }),
-                                );
-                            }
-                        }
-                    }
+                    damage_block(
+                        block_pos,
+                        stats.block_dps * dt,
+                        &mut damage,
+                        &mut world,
+                        &mut version,
+                        server.as_deref_mut(),
+                        &mut lobby,
+                        &mut chests,
+                    );
                 } else {
                     let target = node.next.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
                     wish = Vec3::new(target.x - body.position.x, 0.0, target.z - body.position.z);
@@ -498,7 +486,8 @@ fn zombie_ai(
             }
         }
 
-        let wish = wish.normalize_or_zero() * stats.speed;
+        let slow = if in_wire { WIRE_SLOW } else { 1.0 };
+        let wish = wish.normalize_or_zero() * stats.speed * slow;
         if let Some(target) = face {
             body.yaw = (body.position.x - target.x).atan2(body.position.z - target.z);
         } else if wish != Vec3::ZERO {
@@ -529,6 +518,70 @@ const SURVIVOR_AGGRO: f32 = 12.0;
 
 /// Dégâts par seconde des piques aux zombies qui les touchent.
 const SPIKE_DPS: f32 = 12.0;
+/// Dégâts par seconde des barbelés, usure du fil et ralentissement.
+const WIRE_DPS: f32 = 8.0;
+const WIRE_WEAR: f32 = 6.0;
+const WIRE_SLOW: f32 = 0.35;
+
+/// Inflige `amount` points de dégâts à un bloc ; renvoie vrai s'il est détruit.
+/// Les fissures sont diffusées par huitièmes, pour ne pas inonder le réseau.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn damage_block(
+    pos: IVec3,
+    amount: f32,
+    damage: &mut BlockDamage,
+    world: &mut GameWorld,
+    version: &mut WorldVersion,
+    mut server: Option<&mut RenetServer>,
+    lobby: &mut Lobby,
+    chests: &mut Chests,
+) -> bool {
+    let block = world.block(pos);
+    if block == Block::Air {
+        damage.0.remove(&pos);
+        return false;
+    }
+    let hp = block.max_health() as f32;
+    let entry = damage.0.entry(pos).or_insert((block, 0.0));
+    if entry.0 != block {
+        *entry = (block, 0.0);
+    }
+    let dealt = &mut entry.1;
+    let step_before = (*dealt / hp * 8.0) as u32;
+    *dealt += amount;
+    if *dealt < hp {
+        if (*dealt / hp * 8.0) as u32 != step_before
+            && let Some(server) = server.as_deref_mut()
+        {
+            server.broadcast_message(
+                DefaultChannel::ReliableOrdered,
+                encode(&ServerMessage::BlockDamage {
+                    pos,
+                    damage: (*dealt / hp * 255.0) as u8,
+                }),
+            );
+        }
+        return false;
+    }
+    damage.0.remove(&pos);
+    if !world.set_block(pos, Block::Air) {
+        return false;
+    }
+    version.0 += 1;
+    if let Some(server) = server {
+        if block.is_storage() {
+            // Le coffre (ou la tourelle) est détruit avec son contenu.
+            crate::net::chest_destroyed(server, lobby, chests, pos, None);
+        }
+        server.broadcast_message(
+            DefaultChannel::ReliableOrdered,
+            encode(&ServerMessage::BlockChanged { pos, block: Block::Air }),
+        );
+    } else if block.is_storage() {
+        chests.0.remove(&pos);
+    }
+    true
+}
 
 /// Retire de la vie à un joueur et annonce sa mort si besoin.
 pub fn hurt_player(

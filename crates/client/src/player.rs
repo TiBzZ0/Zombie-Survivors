@@ -429,8 +429,10 @@ fn interact(
     if let Some(id) = player.aimed_survivor
         && mouse.just_pressed(MouseButton::Right)
     {
+        // Maj : renvoyer ; Ctrl : confier l'arme tenue.
         let dismiss = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-        send_reliable(&mut client, &ClientMessage::TalkToSurvivor { id, dismiss });
+        let give = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        send_reliable(&mut client, &ClientMessage::TalkToSurvivor { id, dismiss, give });
         player.cooldown = 0.35;
         return;
     }
@@ -441,7 +443,7 @@ fn interact(
             player.cooldown = 0.35;
             return;
         }
-        if block == Block::Chest && mouse.just_pressed(MouseButton::Right) {
+        if block.is_storage() && mouse.just_pressed(MouseButton::Right) {
             send_reliable(&mut client, &ClientMessage::OpenChest { pos: hit.block });
             player.crafting_open = false;
             player.cooldown = 0.35;
@@ -456,8 +458,8 @@ fn interact(
         Some(Item::Block(block)) => {
             let Some(hit) = player.target else { return };
             let pos = hit.block + hit.normal;
-            let blocks_me = overlaps_solid(player.position, PLAYER_SIZE, &|b| b == pos);
-            if !blocks_me && world.in_bounds(pos) && !world.is_solid(pos) {
+            let blocks_me = block.is_solid() && overlaps_solid(player.position, PLAYER_SIZE, &|b| b == pos);
+            if !blocks_me && world.in_bounds(pos) && world.block(pos) == Block::Air {
                 // Appliqué tout de suite pour la réactivité ; le serveur corrige s'il refuse.
                 world.set_block(pos, block);
                 player.inventory.remove(Item::Block(block), 1);

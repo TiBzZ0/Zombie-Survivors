@@ -154,6 +154,18 @@ pub const RECIPES: &[Recipe] = &[
         inputs: &[(b(Block::Leaves), 4), (Item::Stick, 1)],
         station: None,
     },
+    Recipe {
+        output: b(Block::BarbedWire),
+        count: 4,
+        inputs: &[(Item::IronIngot, 1), (Item::Stick, 2)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: b(Block::Turret),
+        count: 1,
+        inputs: &[(Item::IronIngot, 3), (b(Block::Planks), 4), (Item::Bow, 1)],
+        station: Some(Block::Forge),
+    },
 ];
 
 impl Recipe {

@@ -9,8 +9,6 @@ use crate::physics::{BodySize, PLAYER_SIZE};
 pub const SURVIVOR_SIZE: BodySize = PLAYER_SIZE;
 /// Vitesse de marche d'un survivant, en m/s.
 pub const SURVIVOR_SPEED: f32 = 3.8;
-/// Nombre maximal de survivants qu'un joueur peut mener.
-pub const MAX_FOLLOWERS: usize = 4;
 /// Distance maximale pour parler à un survivant.
 pub const TALK_RANGE: f32 = 4.0;
 /// Ce qu'il faut donner pour recruter : une ration, ou à défaut des pommes.

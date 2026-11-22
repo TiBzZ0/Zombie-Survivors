@@ -37,8 +37,9 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | Souris | Regarder (clic dans la fenêtre pour capturer la souris, Échap pour la libérer) |
 | Clic gauche (maintenu) | Frapper un zombie, ou miner le bloc visé |
 | Clic gauche, arc ou fusil en main | Tirer |
-| Clic droit | Parler à un survivant, ouvrir une porte ou un coffre, sinon poser le bloc en main ou manger |
+| Clic droit | Parler à un survivant, ouvrir une porte, un coffre ou une tourelle, sinon poser le bloc en main ou manger |
 | Maj + clic droit | Renvoyer un de vos survivants |
+| Ctrl + clic droit | Confier l'arme tenue à un de vos survivants (l'ancienne vous revient) |
 | F11 | Plein écran |
 | `T` | Écrire dans la discussion (Entrée pour envoyer) |
 | `1` à `9`, molette | Choisir l'objet en main |
@@ -56,8 +57,8 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - Arc et flèches, puis fusil et cartouches, pour tenir les zombies à distance.
 - Portes (deux blocs empilés s'ouvrent ensemble) et coffres partagés pour la base. Un coffre cassé par un joueur lui rend son contenu ; cassé par un zombie, le contenu est perdu.
 - Des **ruines** (maisons écroulées) parsèment la carte : leur coffre contient de la nourriture, des munitions, parfois une arme. Chaque coffre ne se pille qu'une fois.
-- Des **survivants** (losange jaune au-dessus de la tête) errent le jour, souvent près des ruines. Donne-leur une ration ou 3 pommes pour les recruter (4 au plus par joueur). Chacun a sa force (dégâts), son endurance (vie) et son habileté (vitesse de travail). Clic droit sur un de tes survivants (losange vert) pour changer son ordre : **suivre**, **garder** l'endroit, **récolter** (bois, pierre, pommes, charbon, rangés dans le coffre le plus proche de son poste, sinon dans ton inventaire ; le jour seulement) ou **réparer** les blocs abîmés autour de lui. Ils se battent contre les zombies proches, mais les zombies s'en prennent aussi à eux.
-- La nuit, les zombies sortent et cassent les murs pour t'atteindre. Toutes les 7 nuits arrive une grande horde. Les murs renforcés tiennent longtemps, les piques blessent les zombies qui les frappent ou marchent dessus.
+- Des **survivants** (losange jaune au-dessus de la tête) errent le jour, souvent près des ruines. Donne-leur une ration ou 3 pommes pour les recruter (autant que tu veux). Chacun a sa force (dégâts), son endurance (vie) et son habileté (vitesse de travail). Clic droit sur un de tes survivants (losange vert) pour changer son ordre : **suivre**, **garder** l'endroit, **récolter** (bois, pierre, pommes, charbon, rangés dans le coffre le plus proche de son poste, sinon dans ton inventaire ; le jour seulement) ou **réparer** les blocs abîmés autour de lui. Ils se battent contre les zombies proches, mais les zombies s'en prennent aussi à eux. Confie-leur une épée, un arc ou un fusil : armés d'une arme à distance, ils tirent avec les munitions de ton sac quand ils te suivent, ou avec celles du coffre près de leur poste.
+- La nuit, les zombies sortent et cassent les murs pour t'atteindre. Toutes les 7 nuits arrive une grande horde. Les murs renforcés tiennent longtemps, les piques blessent les zombies qui les frappent ou marchent dessus. Les **barbelés** (établi : 1 lingot de fer et 2 bâtons pour 4) se traversent, mais ralentissent fortement les zombies et les blessent, en s'usant peu à peu. La **tourelle** (forge : 3 lingots de fer, 4 planches et un arc) s'ouvre comme un coffre : range-y des cartouches (55 dégâts, 24 m) ou des flèches (30 dégâts, 18 m) et elle tire seule sur le zombie visible le plus proche.
 
 Le menu règle la sensibilité de la souris, le volume et le plein écran (enregistrés dans `reglages.txt`, à côté de la sauvegarde locale).
 

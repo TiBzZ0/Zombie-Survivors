@@ -5,11 +5,12 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button, observe};
 use bevy_renet::RenetClient;
+use shared::block::Block;
 use shared::item::{Inventory, Item};
 use shared::protocol::ClientMessage;
 
 use crate::AppState;
-use crate::net::send_reliable;
+use crate::net::{ClientWorld, send_reliable};
 use crate::player::LocalPlayer;
 
 /// Nombre de cases affichées de chaque côté.
@@ -27,6 +28,10 @@ impl Plugin for ChestPlugin {
 
 #[derive(Component)]
 struct ChestPanel;
+
+/// Titre de la colonne du stockage : coffre ou tourelle.
+#[derive(Component)]
+struct StorageTitle;
 
 /// Case : côté coffre (`true`) ou inventaire, et rang dans la liste triée.
 #[derive(Component, Clone, Copy)]
@@ -129,7 +134,10 @@ fn spawn_panel(mut commands: Commands) {
                 ChildOf(columns),
             ))
             .id();
-        commands.spawn((label(title, 22.0), ChildOf(column)));
+        let title = commands.spawn((label(title, 22.0), ChildOf(column))).id();
+        if in_chest {
+            commands.entity(title).insert(StorageTitle);
+        }
         let grid = commands
             .spawn((
                 Node {
@@ -183,13 +191,23 @@ fn update_panel(
     player: Res<LocalPlayer>,
     mut panel: Single<&mut Visibility, (With<ChestPanel>, Without<Slot>)>,
     mut slots: Query<(&Slot, &Hovered, &mut BackgroundColor, &mut Visibility), Without<ChestPanel>>,
-    mut labels: Query<(&SlotLabel, &mut Text)>,
+    mut labels: Query<(&SlotLabel, &mut Text), Without<StorageTitle>>,
+    mut title: Single<&mut Text, With<StorageTitle>>,
+    world: Res<ClientWorld>,
 ) {
-    let Some((_, chest)) = &player.chest else {
+    let Some((pos, chest)) = &player.chest else {
         **panel = Visibility::Hidden;
         return;
     };
     **panel = Visibility::Visible;
+    let heading = if world.block(*pos) == Block::Turret {
+        "TOURELLE (flèches ou cartouches)"
+    } else {
+        "COFFRE"
+    };
+    if title.0 != heading {
+        title.0 = heading.into();
+    }
     let source = |slot: &Slot| if slot.in_chest { chest } else { &player.inventory };
     for (slot, hovered, mut color, mut visibility) in &mut slots {
         let used = nth(source(slot), slot.index).is_some();

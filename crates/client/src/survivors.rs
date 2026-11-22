@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use shared::item::Item;
 use shared::protocol::SurvivorState;
 use shared::raycast::ray_aabb;
 use shared::survivor::{Order, SURVIVOR_SIZE, SurvivorStats};
@@ -41,6 +42,7 @@ pub struct SurvivorInfo {
     pub stats: SurvivorStats,
     pub leader: Option<String>,
     pub order: Order,
+    pub weapon: Option<Item>,
 }
 
 /// Survivants affichés et identités connues, par identifiant serveur.
@@ -200,6 +202,7 @@ fn receive_survivors(
                 stats,
                 leader,
                 order,
+                weapon,
             } => {
                 registry.infos.insert(
                     *id,
@@ -208,6 +211,7 @@ fn receive_survivors(
                         stats: *stats,
                         leader: leader.clone(),
                         order: *order,
+                        weapon: *weapon,
                     },
                 );
             }
@@ -321,6 +325,7 @@ fn update_hint(registry: Res<SurvivorRegistry>, session: Option<Res<Session>>, m
         .and_then(|id| registry.infos.get(&id))
         .map(|info| {
             let me = session.as_ref().map(|s| s.my_name.as_str());
+            let armed = info.weapon.map_or(String::new(), |w| format!(", {}", w.name()));
             match &info.leader {
                 None => format!(
                     "{} ({})\nClic droit : recruter contre 1 ration ou 3 pommes",
@@ -328,13 +333,13 @@ fn update_hint(registry: Res<SurvivorRegistry>, session: Option<Res<Session>>, m
                     info.stats.describe()
                 ),
                 Some(leader) if Some(leader.as_str()) == me => format!(
-                    "{} {} ({})\nClic droit : ordre suivant ({}) · Maj + clic droit : renvoyer",
+                    "{} {} ({}{armed})\nClic droit : ordre suivant ({}) · Ctrl : confier l'arme tenue · Maj : renvoyer",
                     info.name,
                     info.order.label(),
                     info.stats.describe(),
                     info.order.next().label()
                 ),
-                Some(leader) => format!("{}, survivant de {leader} ({})", info.name, info.order.label()),
+                Some(leader) => format!("{}, survivant de {leader} ({}{armed})", info.name, info.order.label()),
             }
         });
     if player.survivor_hint != hint {

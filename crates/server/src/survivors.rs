@@ -10,9 +10,8 @@ use shared::block::Block;
 use shared::item::Item;
 use shared::physics::step_body;
 use shared::protocol::{ServerMessage, SurvivorState, encode};
-use shared::survivor::{
-    MAX_FOLLOWERS, Order, RECRUIT_COST, SURVIVOR_SIZE, SURVIVOR_SPEED, SurvivorStats, TALK_RANGE, name_from_seed,
-};
+use shared::raycast::raycast;
+use shared::survivor::{Order, RECRUIT_COST, SURVIVOR_SIZE, SURVIVOR_SPEED, SurvivorStats, TALK_RANGE, name_from_seed};
 use shared::worldgen::RUIN_CELL;
 
 use crate::daynight::Clock;
@@ -68,9 +67,19 @@ impl Plugin for SurvivorPlugin {
     }
 }
 
-/// Demandes des joueurs à un survivant : (joueur, survivant, renvoi).
+/// Demande d'un joueur à un survivant.
+pub struct TalkRequest {
+    pub client: ClientId,
+    pub id: u32,
+    /// Renvoie le survivant.
+    pub dismiss: bool,
+    /// Lui donne l'arme tenue en main.
+    pub give: bool,
+}
+
+/// Demandes des joueurs aux survivants, traitées au tick suivant.
 #[derive(Resource, Default)]
-pub struct SurvivorTalk(pub Vec<(ClientId, u32, bool)>);
+pub struct SurvivorTalk(pub Vec<TalkRequest>);
 
 #[derive(Resource, Default)]
 struct NextSurvivorId(u32);
@@ -84,6 +93,8 @@ pub struct Survivor {
     pub health: f32,
     pub leader: Option<String>,
     pub order: Order,
+    /// Arme confiée par son chef.
+    pub weapon: Option<Item>,
     /// Endroit gardé, récolté ou réparé (son camp s'il n'a pas de chef).
     pub post: Vec3,
     pub position: Vec3,
@@ -111,6 +122,7 @@ impl Survivor {
             health: stats.max_health(),
             leader: None,
             order: Order::Idle,
+            weapon: None,
             post: position,
             position,
             velocity: Vec3::ZERO,
@@ -146,6 +158,7 @@ impl Survivor {
             stats: self.stats,
             leader: self.leader.clone(),
             order: self.order,
+            weapon: self.weapon,
         }
     }
 }
@@ -161,6 +174,7 @@ fn restore_survivors(mut commands: Commands, saved: Res<SavedSurvivors>, mut ids
         survivor.health = s.health.min(s.stats.max_health());
         survivor.leader = s.leader.clone();
         survivor.order = s.order;
+        survivor.weapon = s.weapon;
         survivor.post = s.post;
         commands.spawn(survivor);
     }
@@ -253,17 +267,19 @@ fn handle_talk(
     mut server: Option<ResMut<RenetServer>>,
     mut survivors: Query<&mut Survivor>,
 ) {
-    for (client, id, dismiss) in talk.0.drain(..) {
+    for TalkRequest {
+        client,
+        id,
+        dismiss,
+        give,
+    } in talk.0.drain(..)
+    {
         let Some(player) = lobby.players.get_mut(&client) else {
             continue;
         };
         if !player.is_alive() {
             continue;
         }
-        let followers = survivors
-            .iter()
-            .filter(|s| s.leader.as_ref() == Some(&player.name))
-            .count();
         let Some(mut s) = survivors.iter_mut().find(|s| s.id == id) else {
             continue;
         };
@@ -272,9 +288,6 @@ fn handle_talk(
         }
         let mut changed = false;
         let reply = match s.leader.clone() {
-            None if followers >= MAX_FOLLOWERS => {
-                format!("Tu as déjà {MAX_FOLLOWERS} survivants avec toi, je n'ai pas ma place.")
-            }
             None => match RECRUIT_COST.iter().find(|(item, n)| player.inventory.has(*item, *n)) {
                 Some((item, n)) => {
                     player.inventory.remove(*item, *n);
@@ -291,7 +304,38 @@ fn handle_talk(
                 }
                 None => "J'ai trop faim pour te suivre. Apporte-moi une ration ou 3 pommes.".into(),
             },
+            Some(leader) if leader == player.name && give => {
+                // Le chef confie l'arme qu'il tient ; l'ancienne lui revient.
+                match player.held_item().filter(|i| i.is_weapon()) {
+                    Some(weapon) if Some(weapon) != s.weapon => {
+                        player.inventory.remove(weapon, 1);
+                        if let Some(old) = s.weapon.replace(weapon) {
+                            player.inventory.add(old, 1);
+                        }
+                        if let Some(server) = server.as_deref_mut() {
+                            send_inventory(server, client, player);
+                        }
+                        changed = true;
+                        if weapon.ranged().is_some() {
+                            let ammo = weapon.ranged().map_or(String::new(), |r| r.ammo.name().to_lowercase());
+                            format!(
+                                "Merci ! Je prendrai les {ammo}s dans ton sac, ou dans le coffre près de mon poste."
+                            )
+                        } else {
+                            "Merci, ça va m'aider à les tenir à distance.".into()
+                        }
+                    }
+                    Some(_) => "J'ai déjà la même.".into(),
+                    None => "Tiens une épée, un arc ou un fusil en main pour me le donner.".into(),
+                }
+            }
             Some(leader) if leader == player.name => {
+                if dismiss && let Some(old) = s.weapon.take() {
+                    player.inventory.add(old, 1);
+                    if let Some(server) = server.as_deref_mut() {
+                        send_inventory(server, client, player);
+                    }
+                }
                 s.order = if dismiss { Order::Idle } else { s.order.next() };
                 if dismiss {
                     s.leader = None;
@@ -376,6 +420,9 @@ fn survivor_ai(
             Order::Follow => (s.position, DEFEND_RADIUS),
             _ => (s.post, DEFEND_RADIUS),
         };
+        let ranged = s.weapon.and_then(Item::ranged);
+        // Avec une arme à distance, il vise plus loin que sa zone.
+        let radius = if ranged.is_some() { radius + 8.0 } else { radius };
         let threat = zombies
             .iter()
             .filter(|(z, b)| z.health > 0.0 && b.position.distance(center) < radius)
@@ -385,15 +432,48 @@ fn survivor_ai(
         let mut goal: Option<Vec3> = None;
         let mut face: Option<Vec3> = None;
         let mut speed = SURVIVOR_SPEED;
-        if let Some((zombie_id, target, _)) = threat {
+        if let Some((zombie_id, target, dist)) = threat {
             let flat = Vec2::new(target.x - s.position.x, target.z - s.position.z);
-            if flat.length() < ATTACK_RANGE && (target.y - s.position.y).abs() < 1.6 {
+            let eye = s.position + Vec3::Y * 1.5;
+            let aim = target + Vec3::Y * 1.0;
+            // Tir si l'arme a des munitions à portée de main et que la cible est visible.
+            let shot = ranged
+                .filter(|w| dist <= w.range.min(SURVIVOR_RANGE) && clear_line(&world, eye, aim))
+                .and_then(|w| {
+                    ammo_source(s, w.ammo, leader.map(|(id, _)| id), &lobby, &chests, &world).map(|source| (w, source))
+                });
+            if let Some((weapon, source)) = shot {
+                face = Some(target);
+                if s.attack_cooldown <= 0.0 {
+                    s.attack_cooldown = weapon.cooldown * 2.0;
+                    s.attacking = 0.3;
+                    take_ammo(source, weapon.ammo, &mut lobby, &mut chests, server.as_deref_mut());
+                    if let Some((mut z, _)) = zombies.iter_mut().find(|(z, _)| z.id == zombie_id) {
+                        z.health -= weapon.damage;
+                        z.hurt_timer = 0.3;
+                    }
+                    if let Some(server) = server.as_deref_mut() {
+                        broadcast(
+                            server,
+                            &ServerMessage::Shot {
+                                from: 0,
+                                origin: eye,
+                                end: aim,
+                                rifle: weapon.ammo == Item::Ammo,
+                            },
+                        );
+                    }
+                }
+            } else if flat.length() < ATTACK_RANGE && (target.y - s.position.y).abs() < 1.6 {
                 face = Some(target);
                 if s.attack_cooldown <= 0.0 {
                     s.attack_cooldown = ATTACK_COOLDOWN;
                     s.attacking = 0.4;
+                    // Une épée ajoute ses dégâts à la force du survivant.
+                    let blade = s.weapon.filter(|w| w.ranged().is_none());
+                    let bonus = Item::melee_damage(blade) - Item::melee_damage(None);
                     if let Some((mut z, _)) = zombies.iter_mut().find(|(z, _)| z.id == zombie_id) {
-                        z.health -= s.stats.damage();
+                        z.health -= s.stats.damage() + bonus;
                         z.hurt_timer = 0.3;
                         let push = flat.normalize_or_zero() * 5.0;
                         z.knockback = Vec3::new(push.x, 2.5, push.y);
@@ -500,6 +580,75 @@ fn survivor_ai(
             }
         }
         step(s, goal, face, speed, dt, &world);
+    }
+}
+
+/// Portée maximale d'un survivant armé d'un arc ou d'un fusil.
+const SURVIVOR_RANGE: f32 = 24.0;
+
+/// Rien de solide entre deux points.
+pub(crate) fn clear_line(world: &GameWorld, from: Vec3, to: Vec3) -> bool {
+    let dir = (to - from).normalize_or_zero();
+    let dist = from.distance(to);
+    match raycast(from, dir, dist, |p| world.is_solid(p)) {
+        Some(hit) => (hit.block.as_vec3() + Vec3::splat(0.5)).distance(from) > dist - 0.3,
+        None => true,
+    }
+}
+
+/// D'où un survivant tire ses munitions.
+#[derive(Clone, Copy)]
+enum AmmoSource {
+    /// Le sac de son chef, s'il le suit.
+    Leader(ClientId),
+    /// Le coffre le plus proche de son poste.
+    Chest(IVec3),
+}
+
+fn ammo_source(
+    s: &Survivor,
+    ammo: Item,
+    leader: Option<ClientId>,
+    lobby: &Lobby,
+    chests: &Chests,
+    world: &GameWorld,
+) -> Option<AmmoSource> {
+    if s.order == Order::Follow
+        && let Some(id) = leader
+        && lobby.players.get(&id).is_some_and(|p| p.inventory.has(ammo, 1))
+    {
+        return Some(AmmoSource::Leader(id));
+    }
+    chests
+        .0
+        .iter()
+        .filter(|(pos, inv)| {
+            inv.has(ammo, 1)
+                && world.block(**pos) == Block::Chest
+                && (pos.as_vec3() + Vec3::splat(0.5)).distance(s.post) < WORK_RADIUS
+        })
+        .map(|(pos, _)| AmmoSource::Chest(*pos))
+        .next()
+}
+
+fn take_ammo(source: AmmoSource, ammo: Item, lobby: &mut Lobby, chests: &mut Chests, server: Option<&mut RenetServer>) {
+    match source {
+        AmmoSource::Leader(id) => {
+            if let Some(player) = lobby.players.get_mut(&id) {
+                player.inventory.remove(ammo, 1);
+                if let Some(server) = server {
+                    send_inventory(server, id, player);
+                }
+            }
+        }
+        AmmoSource::Chest(pos) => {
+            if let Some(inv) = chests.0.get_mut(&pos) {
+                inv.remove(ammo, 1);
+            }
+            if let Some(server) = server {
+                send_chest_to_viewers(server, lobby, chests, pos);
+            }
+        }
     }
 }
 
@@ -650,6 +799,7 @@ fn record_survivors(survivors: Query<&Survivor>, mut saved: ResMut<SavedSurvivor
             post: s.post,
             leader: s.leader.clone(),
             order: s.order,
+            weapon: s.weapon,
         })
         .collect();
     saved.0.sort_by(|a, b| a.name.cmp(&b.name));
