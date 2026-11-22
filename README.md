@@ -39,7 +39,8 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | Clic gauche, arc ou fusil en main | Tirer |
 | Clic droit | Parler à un survivant, ouvrir une porte, un coffre ou une tourelle, sinon poser le bloc en main ou manger |
 | Maj + clic droit | Renvoyer un de vos survivants |
-| Ctrl + clic droit | Confier l'arme tenue à un de vos survivants (l'ancienne vous revient) |
+| Ctrl + clic droit | Confier l'arme ou la pièce d'armure tenue à un de vos survivants (l'ancienne vous revient) |
+| Clic droit maintenu (arme de mêlée) | Lever la garde : les coups de face sont très réduits, et parés s'ils arrivent juste après |
 | F11 | Plein écran |
 | `T` | Écrire dans la discussion (Entrée pour envoyer) |
 | `1` à `9`, molette | Choisir l'objet en main |
@@ -50,6 +51,8 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 
 - Le jour, récolte : le bois des arbres, la pierre et le minerai de fer sous la surface. Les feuilles donnent parfois des pommes.
 - Fabrique des planches, des bâtons, puis des pioches et des épées (bois, pierre, fer). Le minerai de fer et les murs renforcés se cassent seulement à la pioche.
+- Au corps-à-corps, chaque arme a son style : l'**épée** est équilibrée, la **lance** frappe de plus loin et repousse fort, la **hache** tape dur (et coupe le bois bien plus vite), la **masse d'armes** (forge) est lente mais touche tous les zombies devant toi. Clic droit maintenu avec une arme de mêlée : tu lèves la garde, qui ne laisse passer qu'un tiers des coups de face ; levée juste avant le coup, elle le **pare** et étourdit le zombie.
+- **Armures** : casque et armure en bois, en pierre (établi) ou en fer (forge). Le meilleur casque et la meilleure armure de ton sac sont portés d'office et absorbent jusqu'à 45 % des dégâts.
 - Certaines recettes demandent un atelier posé à moins de 4 blocs : l'**établi** (6 planches) pour les outils en pierre, l'arc, les flèches, les portes et les coffres ; la **forge** (10 pierres et 2 charbons, à l'établi) pour fondre le fer, les outils en fer, les murs renforcés, les pics et le fusil.
 - Les blocs attaqués par les zombies se fissurent et rougissent avant de céder ; une barre de vie s'affiche au-dessus des zombies blessés.
 - La faim baisse avec le temps. Sans manger, la vie ne remonte plus, puis diminue. Trois pommes font une ration ; feuilles et bâton font un bandage.
@@ -57,7 +60,7 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - Arc et flèches, puis fusil et cartouches, pour tenir les zombies à distance.
 - Portes (deux blocs empilés s'ouvrent ensemble) et coffres partagés pour la base. Un coffre cassé par un joueur lui rend son contenu ; cassé par un zombie, le contenu est perdu.
 - Des **ruines** (maisons écroulées) parsèment la carte : leur coffre contient de la nourriture, des munitions, parfois une arme. Chaque coffre ne se pille qu'une fois.
-- Des **survivants** (losange jaune au-dessus de la tête) errent le jour, souvent près des ruines. Donne-leur une ration ou 3 pommes pour les recruter (autant que tu veux). Chacun a sa force (dégâts), son endurance (vie) et son habileté (vitesse de travail). Clic droit sur un de tes survivants (losange vert) pour changer son ordre : **suivre**, **garder** l'endroit, **récolter** (bois, pierre, pommes, charbon, rangés dans le coffre le plus proche de son poste, sinon dans ton inventaire ; le jour seulement) ou **réparer** les blocs abîmés autour de lui. Ils se battent contre les zombies proches, mais les zombies s'en prennent aussi à eux. Confie-leur une épée, un arc ou un fusil : armés d'une arme à distance, ils tirent avec les munitions de ton sac quand ils te suivent, ou avec celles du coffre près de leur poste.
+- Des **survivants** (losange jaune au-dessus de la tête) errent le jour, souvent près des ruines. Donne-leur une ration ou 3 pommes pour les recruter (autant que tu veux). Chacun a sa force (dégâts), son endurance (vie) et son habileté (vitesse de travail). Clic droit sur un de tes survivants (losange vert) pour changer son ordre : **suivre**, **garder** l'endroit, **récolter** (bois, pierre, pommes, charbon, rangés dans le coffre le plus proche de son poste, sinon dans ton inventaire ; le jour seulement) ou **réparer** les blocs abîmés autour de lui. Ils se battent contre les zombies proches, mais les zombies s'en prennent aussi à eux. Confie-leur une arme (épée, lance, hache, masse, arc, fusil) et des pièces d'armure : armés d'une arme à distance, ils tirent avec les munitions de ton sac quand ils te suivent, ou avec celles du coffre près de leur poste.
 - La nuit, les zombies sortent et cassent les murs pour t'atteindre. Toutes les 7 nuits arrive une grande horde. Les murs renforcés tiennent longtemps, les piques blessent les zombies qui les frappent ou marchent dessus. Les **barbelés** (établi : 1 lingot de fer et 2 bâtons pour 4) se traversent, mais ralentissent fortement les zombies et les blessent, en s'usant peu à peu. La **tourelle** (forge : 3 lingots de fer, 4 planches et un arc) s'ouvre comme un coffre : range-y des cartouches (55 dégâts, 24 m) ou des flèches (30 dégâts, 18 m) et elle tire seule sur le zombie visible le plus proche.
 
 Le menu règle la sensibilité de la souris, le volume et le plein écran (enregistrés dans `reglages.txt`, à côté de la sauvegarde locale).

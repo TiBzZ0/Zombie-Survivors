@@ -642,6 +642,7 @@ fn survivors_are_recruited_and_given_orders() {
     inventory.add(Item::Ration, 1);
     inventory.add(Item::Apple, 2);
     inventory.add(Item::Sword(shared::item::Tier::Iron), 1);
+    inventory.add(Item::Helmet(shared::item::Tier::Iron), 1);
     let wild = |name: &str| SavedSurvivor {
         name: name.into(),
         stats: SurvivorStats::from_seed(99),
@@ -651,6 +652,7 @@ fn survivors_are_recruited_and_given_orders() {
         leader: None,
         order: Order::Idle,
         weapon: None,
+        armor: [None; 2],
     };
     let save = server::save::SaveFile {
         version: server::save::SAVE_VERSION,
@@ -799,6 +801,30 @@ fn survivors_are_recruited_and_given_orders() {
         armed && given
     });
 
+    // Puis son casque.
+    let helmet = Item::Helmet(shared::item::Tier::Iron);
+    hal.received.clear();
+    hal.send(&ClientMessage::Hold { item: Some(helmet) }, true);
+    hal.send(
+        &ClientMessage::TalkToSurvivor {
+            id: marie,
+            dismiss: false,
+            give: true,
+        },
+        true,
+    );
+    pump_until(&mut [&mut hal], "Marie porte le casque", |c| {
+        c[0].find(|m| match m {
+            ServerMessage::SurvivorInfo { id, weapon, armor, .. }
+                if *id == marie && *weapon == Some(sword) && armor[0] == Some(helmet) =>
+            {
+                Some(())
+            }
+            _ => None,
+        })
+        .is_some()
+    });
+
     // À l'arrêt, seule Marie (recrutée) est sauvegardée, avec son ordre et son arme.
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(700) {
@@ -812,5 +838,6 @@ fn survivors_are_recruited_and_given_orders() {
     assert_eq!(saved.survivors[0].leader.as_deref(), Some("Hal"));
     assert_eq!(saved.survivors[0].order, Order::Guard);
     assert_eq!(saved.survivors[0].weapon, Some(sword));
+    assert_eq!(saved.survivors[0].armor, [Some(helmet), None]);
     let _ = std::fs::remove_dir_all(&data_dir);
 }

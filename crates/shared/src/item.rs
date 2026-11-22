@@ -23,6 +23,35 @@ pub enum Item {
     Arrow,
     Rifle,
     Ammo,
+    /// Lance : longue allonge, gros recul.
+    Spear(Tier),
+    /// Hache : frappe fort et coupe le bois vite.
+    Axe(Tier),
+    /// Masse d'armes : lente, mais balaie tous les zombies devant soi.
+    Mace,
+    Helmet(Tier),
+    BodyArmor(Tier),
+}
+
+/// Caractéristiques d'un coup au corps-à-corps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Melee {
+    pub damage: f32,
+    /// Allonge en mètres.
+    pub reach: f32,
+    /// Délai minimal entre deux coups, en secondes.
+    pub cooldown: f32,
+    /// Force du recul infligé.
+    pub knockback: f32,
+    /// Touche tous les zombies devant soi au lieu d'un seul.
+    pub sweep: bool,
+}
+
+/// Emplacement d'une pièce d'armure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArmorSlot {
+    Head,
+    Body,
 }
 
 /// Caractéristiques d'une arme à distance.
@@ -72,17 +101,68 @@ impl Item {
             Item::Arrow => "Flèche".into(),
             Item::Rifle => "Fusil".into(),
             Item::Ammo => "Cartouche".into(),
+            Item::Spear(t) => format!("Lance {}", t.label()),
+            Item::Axe(t) => format!("Hache {}", t.label()),
+            Item::Mace => "Masse d'armes".into(),
+            Item::Helmet(t) => format!("Casque {}", t.label()),
+            Item::BodyArmor(t) => format!("Armure {}", t.label()),
+        }
+    }
+
+    /// Coup porté avec cet objet en main (ou à mains nues).
+    pub const fn melee(held: Option<Item>) -> Melee {
+        const fn m(damage: f32, reach: f32, cooldown: f32, knockback: f32) -> Melee {
+            Melee {
+                damage,
+                reach,
+                cooldown,
+                knockback,
+                sweep: false,
+            }
+        }
+        const fn tier(t: Tier, wood: f32, stone: f32, iron: f32) -> f32 {
+            match t {
+                Tier::Wood => wood,
+                Tier::Stone => stone,
+                Tier::Iron => iron,
+            }
+        }
+        match held {
+            Some(Item::Sword(t)) => m(tier(t, 18.0, 26.0, 38.0), 3.0, 0.4, 6.0),
+            Some(Item::Spear(t)) => m(tier(t, 15.0, 22.0, 32.0), 4.5, 0.55, 9.0),
+            Some(Item::Axe(t)) => m(tier(t, 22.0, 32.0, 46.0), 2.8, 0.7, 5.0),
+            Some(Item::Mace) => Melee {
+                damage: 50.0,
+                reach: 3.0,
+                cooldown: 1.0,
+                knockback: 11.0,
+                sweep: true,
+            },
+            Some(Item::Pickaxe(_)) => m(12.0, 3.0, 0.4, 5.0),
+            _ => m(9.0, 3.0, 0.35, 6.0),
         }
     }
 
     /// Dégâts d'un coup porté avec cet objet en main.
-    pub fn melee_damage(held: Option<Item>) -> f32 {
-        match held {
-            Some(Item::Sword(Tier::Wood)) => 18.0,
-            Some(Item::Sword(Tier::Stone)) => 26.0,
-            Some(Item::Sword(Tier::Iron)) => 38.0,
-            Some(Item::Pickaxe(_)) => 12.0,
-            _ => 9.0,
+    pub const fn melee_damage(held: Option<Item>) -> f32 {
+        Self::melee(held).damage
+    }
+
+    /// Arme de corps-à-corps (qui permet aussi de parer).
+    pub const fn is_melee_weapon(self) -> bool {
+        matches!(self, Item::Sword(_) | Item::Spear(_) | Item::Axe(_) | Item::Mace)
+    }
+
+    /// Pièce d'armure : emplacement et part des dégâts absorbée.
+    pub const fn armor(self) -> Option<(ArmorSlot, f32)> {
+        match self {
+            Item::Helmet(Tier::Wood) => Some((ArmorSlot::Head, 0.06)),
+            Item::Helmet(Tier::Stone) => Some((ArmorSlot::Head, 0.1)),
+            Item::Helmet(Tier::Iron) => Some((ArmorSlot::Head, 0.15)),
+            Item::BodyArmor(Tier::Wood) => Some((ArmorSlot::Body, 0.12)),
+            Item::BodyArmor(Tier::Stone) => Some((ArmorSlot::Body, 0.2)),
+            Item::BodyArmor(Tier::Iron) => Some((ArmorSlot::Body, 0.3)),
+            _ => None,
         }
     }
 
@@ -98,11 +178,16 @@ impl Item {
 
     /// Arme qu'on peut confier à un survivant.
     pub const fn is_weapon(self) -> bool {
-        matches!(self, Item::Sword(_) | Item::Bow | Item::Rifle)
+        self.is_melee_weapon() || matches!(self, Item::Bow | Item::Rifle)
+    }
+
+    /// Objet qu'on peut confier à un survivant : arme ou armure.
+    pub const fn is_giftable(self) -> bool {
+        self.is_weapon() || self.armor().is_some()
     }
 
     pub const fn is_tool(self) -> bool {
-        matches!(self, Item::Sword(_) | Item::Pickaxe(_) | Item::Bow | Item::Rifle)
+        self.is_weapon() || matches!(self, Item::Pickaxe(_))
     }
 
     /// Caractéristiques de tir, si l'objet est une arme à distance.
@@ -168,6 +253,35 @@ impl Inventory {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+
+    /// Meilleur casque et meilleure armure du sac : ils sont portés d'office.
+    pub fn worn_armor(&self) -> (Option<Item>, Option<Item>) {
+        let best = |slot: ArmorSlot| {
+            self.items
+                .keys()
+                .filter_map(|i| i.armor().filter(|(s, _)| *s == slot).map(|(_, v)| (*i, v)))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(i, _)| i)
+        };
+        (best(ArmorSlot::Head), best(ArmorSlot::Body))
+    }
+
+    /// Part des dégâts absorbée par l'armure portée.
+    pub fn armor_reduction(&self) -> f32 {
+        let (head, body) = self.worn_armor();
+        armor_reduction([head, body])
+    }
+}
+
+/// Part des dégâts absorbée par un ensemble de pièces d'armure.
+pub fn armor_reduction(pieces: [Option<Item>; 2]) -> f32 {
+    pieces
+        .iter()
+        .flatten()
+        .filter_map(|i| i.armor())
+        .map(|(_, v)| v)
+        .sum::<f32>()
+        .min(0.6)
 }
 
 /// Ce que donne un bloc cassé (la pomme des feuilles est tirée au sort par le serveur).
@@ -195,7 +309,23 @@ pub fn mining_speed(block: Block, held: Option<Item>) -> f32 {
         block,
         Block::Stone | Block::IronOre | Block::CoalOre | Block::ReinforcedWall | Block::Spikes
     );
-    if hard { 40.0 * pick } else { 40.0 * pick.sqrt() }
+    let woody = matches!(
+        block,
+        Block::Wood | Block::Planks | Block::Door | Block::DoorOpen | Block::Chest | Block::Workbench
+    );
+    let axe = match held {
+        Some(Item::Axe(Tier::Wood)) => 2.0,
+        Some(Item::Axe(Tier::Stone)) => 3.5,
+        Some(Item::Axe(Tier::Iron)) => 5.0,
+        _ => 1.0,
+    };
+    if hard {
+        40.0 * pick
+    } else if woody && axe > 1.0 {
+        40.0 * axe
+    } else {
+        40.0 * pick.sqrt()
+    }
 }
 
 /// Temps pour casser un bloc, en secondes ; `None` si l'outil ne suffit pas (minerai à la main).
@@ -229,5 +359,32 @@ mod tests {
         assert!(iron < hand / 4.0);
         assert!(break_time(Block::IronOre, None).is_none());
         assert!(break_time(Block::Dirt, None).unwrap() < 1.0);
+    }
+
+    #[test]
+    fn best_armor_is_worn_and_capped() {
+        let mut inv = Inventory::default();
+        assert_eq!(inv.armor_reduction(), 0.0);
+        inv.add(Item::Helmet(Tier::Wood), 1);
+        inv.add(Item::Helmet(Tier::Iron), 1);
+        inv.add(Item::BodyArmor(Tier::Iron), 1);
+        assert_eq!(
+            inv.worn_armor(),
+            (Some(Item::Helmet(Tier::Iron)), Some(Item::BodyArmor(Tier::Iron)))
+        );
+        assert!((inv.armor_reduction() - 0.45).abs() < 1e-6);
+        assert!(armor_reduction([Some(Item::BodyArmor(Tier::Iron)); 2]) <= 0.6);
+    }
+
+    #[test]
+    fn melee_weapons_differ() {
+        let spear = Item::melee(Some(Item::Spear(Tier::Iron)));
+        let axe = Item::melee(Some(Item::Axe(Tier::Iron)));
+        let sword = Item::melee(Some(Item::Sword(Tier::Iron)));
+        assert!(spear.reach > sword.reach && axe.damage > sword.damage);
+        assert!(Item::melee(Some(Item::Mace)).sweep);
+        assert!(Item::Mace.is_giftable() && Item::Helmet(Tier::Wood).is_giftable() && !Item::Apple.is_giftable());
+        let hand = break_time(Block::Wood, None).unwrap();
+        assert!(break_time(Block::Wood, Some(Item::Axe(Tier::Stone))).unwrap() < hand / 2.0);
     }
 }

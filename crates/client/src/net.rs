@@ -107,7 +107,10 @@ pub enum NetEvent {
         leader: Option<String>,
         order: shared::survivor::Order,
         weapon: Option<shared::item::Item>,
+        armor: [Option<shared::item::Item>; 2],
     },
+    /// Un coup de zombie a été paré.
+    Parried,
 }
 
 fn fail(commands: &mut Commands, next: &mut NextState<AppState>, message: String) {
@@ -332,6 +335,7 @@ fn receive_messages(
                 leader,
                 order,
                 weapon,
+                armor,
             } => {
                 events.write(NetEvent::SurvivorInfo {
                     id,
@@ -340,7 +344,11 @@ fn receive_messages(
                     leader,
                     order,
                     weapon,
+                    armor,
                 });
+            }
+            ServerMessage::Parried => {
+                events.write(NetEvent::Parried);
             }
             ServerMessage::Players(_) | ServerMessage::Zombies(_) | ServerMessage::Survivors(_) => {}
         }
