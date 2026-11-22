@@ -57,6 +57,7 @@ impl ServerConfig {
                 seed: parse("WORLD_SEED", get("WORLD_SEED"), d.world.seed)?,
                 size_chunks: parse("WORLD_SIZE_CHUNKS", get("WORLD_SIZE_CHUNKS"), d.world.size_chunks)?,
                 height_chunks: d.world.height_chunks,
+                generation: d.world.generation,
             },
         };
         if !(1..=8).contains(&config.max_players) {

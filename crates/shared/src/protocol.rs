@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_000D;
+pub const PROTOCOL_ID: u64 = 0x5A53_000E;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -94,6 +94,10 @@ pub enum ClientMessage {
     /// Mange ou utilise un consommable.
     Eat {
         item: Item,
+    },
+    /// Boit à la source visée (de l'eau) ; remplit plutôt une gourde vide tenue en main.
+    Drink {
+        pos: IVec3,
     },
     /// Parle à un survivant : le recrute, change son ordre, le renvoie (`dismiss`)
     /// ou lui donne l'arme tenue en main (`give`).
@@ -269,6 +273,7 @@ pub enum ServerMessage {
     Vitals {
         health: f32,
         hunger: f32,
+        thirst: f32,
     },
     /// Contenu complet de l'inventaire après un changement.
     Inventory(Inventory),

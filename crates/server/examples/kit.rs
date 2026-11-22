@@ -99,6 +99,7 @@ fn main() {
                 health: 100.0,
                 hunger: 100.0,
                 inventory,
+                thirst: 100.0,
             },
         )],
         deposits: Vec::new(),

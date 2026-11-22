@@ -20,7 +20,7 @@ use shared::zombie::{
 };
 
 use crate::daynight::Clock;
-use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, WorldVersion, send_vitals};
+use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, MAX_THIRST, WorldVersion, send_vitals};
 use crate::survivors::Survivor;
 use crate::world::{Chests, GameWorld, SpawnPoint};
 
@@ -209,7 +209,8 @@ pub(crate) fn find_spawn_spot(world: &GameWorld, around: Vec3, min: f32, max: f3
         if !world.in_bounds(feet) {
             continue;
         }
-        if world.is_solid(feet - IVec3::Y) && !world.is_solid(feet) && !world.is_solid(feet + IVec3::Y) {
+        let dry = world.block(feet) != Block::Water;
+        if dry && world.is_solid(feet - IVec3::Y) && !world.is_solid(feet) && !world.is_solid(feet + IVec3::Y) {
             return Some(Vec3::new(x as f32 + 0.5, feet.y as f32, z as f32 + 0.5));
         }
     }
@@ -845,10 +846,23 @@ const HUNGER_PER_SEC: f32 = MAX_HUNGER / 900.0;
 const STARVATION_DPS: f32 = 1.0;
 /// En dessous de cette faim, la vie ne remonte plus.
 const REGEN_MIN_HUNGER: f32 = 30.0;
+/// Soif perdue par seconde : un joueur désaltéré tient environ 10 minutes.
+const THIRST_PER_SEC: f32 = MAX_THIRST / 600.0;
+/// Vie perdue par seconde quand la soif est à zéro.
+const DEHYDRATION_DPS: f32 = 1.0;
+/// En dessous de cette soif, la vie ne remonte plus.
+const REGEN_MIN_THIRST: f32 = 20.0;
 
-/// Faim et régénération : 2 points de vie par seconde après 8 secondes sans coup, si le joueur a mangé.
-fn player_survival(time: Res<Time>, mut lobby: ResMut<Lobby>, mut server: Option<ResMut<RenetServer>>) {
+/// Faim, soif et régénération : 2 points de vie par seconde après 8 secondes sans coup,
+/// si le joueur a mangé et bu. Les anciens mondes, sans lacs, ne donnent pas soif.
+fn player_survival(
+    time: Res<Time>,
+    world: Res<GameWorld>,
+    mut lobby: ResMut<Lobby>,
+    mut server: Option<ResMut<RenetServer>>,
+) {
     let dt = time.delta_secs();
+    let thirsty = world.generator().water_level().is_some();
     for (id, player) in lobby.players.iter_mut() {
         player.attack_cooldown -= dt;
         if let Some(t) = player.guarding.as_mut() {
@@ -858,19 +872,36 @@ fn player_survival(time: Res<Time>, mut lobby: ResMut<Lobby>, mut server: Option
             continue;
         }
         let hunger_before = player.hunger.ceil();
+        let thirst_before = player.thirst.ceil();
         player.hunger = (player.hunger - HUNGER_PER_SEC * dt).max(0.0);
-        if player.hunger <= 0.0 {
+        if thirsty {
+            player.thirst = (player.thirst - THIRST_PER_SEC * dt).max(0.0);
+        }
+        let deprived = if player.hunger <= 0.0 {
+            Some((STARVATION_DPS, "Mort de faim"))
+        } else if player.thirst <= 0.0 {
+            Some((DEHYDRATION_DPS, "Mort de soif"))
+        } else {
+            None
+        };
+        if let Some((dps, cause)) = deprived {
             let since_hit = player.since_hit;
-            hurt_player(*id, player, STARVATION_DPS * dt, "Mort de faim", server.as_deref_mut());
+            hurt_player(*id, player, dps * dt, cause, server.as_deref_mut());
             player.since_hit = since_hit + dt;
             continue;
         }
         player.since_hit += dt;
         let health_before = player.health.ceil();
-        if player.since_hit > 8.0 && player.health < MAX_HEALTH && player.hunger > REGEN_MIN_HUNGER {
+        if player.since_hit > 8.0
+            && player.health < MAX_HEALTH
+            && player.hunger > REGEN_MIN_HUNGER
+            && player.thirst > REGEN_MIN_THIRST
+        {
             player.health = (player.health + 2.0 * dt).min(MAX_HEALTH);
         }
-        if (player.health.ceil() != health_before || player.hunger.ceil() != hunger_before)
+        if (player.health.ceil() != health_before
+            || player.hunger.ceil() != hunger_before
+            || player.thirst.ceil() != thirst_before)
             && let Some(server) = server.as_deref_mut()
         {
             send_vitals(server, *id, player);

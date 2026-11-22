@@ -142,7 +142,8 @@ pub fn find_spawn(world: &WorldState) -> Vec3 {
                 let (x, z) = (center + dx, center + dz);
                 let ground = world.generator().surface_height(x, z);
                 let solid = |y: i32| world.is_solid(IVec3::new(x, y, z));
-                if solid(ground - 1) && solid(ground - 2) && !solid(ground) && !solid(ground + 1) {
+                let dry = world.block(IVec3::new(x, ground, z)) == Block::Air;
+                if dry && solid(ground - 1) && solid(ground - 2) && !solid(ground) && !solid(ground + 1) {
                     return Vec3::new(x as f32 + 0.5, ground as f32, z as f32 + 0.5);
                 }
             }
@@ -186,7 +187,7 @@ mod ruin_tests {
             .flat_map(|cx| (0..8).map(move |cz| (cx, cz)))
             .find_map(|(cx, cz)| generator.ruin_in_cell(cx, cz))
             .expect("une ruine");
-        let (x, y, z) = generator.ruin_chest(ruin);
+        let (x, y, z) = generator.ruin_chests(ruin)[0];
         let pos = IVec3::new(x, y, z);
         let mut chests = Chests::default();
         chests.fill_ruin_chest(&world, pos);

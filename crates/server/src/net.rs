@@ -60,6 +60,8 @@ pub struct ConnectedPlayer {
     pub attack_cooldown: f32,
     /// Faim : 100 = rassasié, 0 = le joueur perd de la vie.
     pub hunger: f32,
+    /// Soif : 100 = désaltéré, 0 = le joueur perd de la vie.
+    pub thirst: f32,
     pub inventory: Inventory,
     /// Objet en main, toujours présent dans l'inventaire.
     pub held: Option<Item>,
@@ -80,6 +82,8 @@ const GUARD_FACTOR: f32 = 0.35;
 pub const MAX_HEALTH: f32 = 100.0;
 /// Faim maximale d'un joueur.
 pub const MAX_HUNGER: f32 = 100.0;
+/// Soif maximale d'un joueur.
+pub const MAX_THIRST: f32 = 100.0;
 /// Chance qu'un bloc de feuilles donne aussi une pomme.
 const APPLE_CHANCE: f32 = 0.25;
 /// Chance qu'un bloc d'herbe donne aussi des graines.
@@ -102,6 +106,7 @@ impl ConnectedPlayer {
             since_hit: 0.0,
             attack_cooldown: 0.0,
             hunger: MAX_HUNGER,
+            thirst: MAX_THIRST,
             inventory,
             held: None,
             mining: None,
@@ -145,6 +150,7 @@ pub fn send_vitals(server: &mut RenetServer, client: ClientId, player: &Connecte
         &ServerMessage::Vitals {
             health: player.health,
             hunger: player.hunger,
+            thirst: player.thirst,
         },
     );
 }
@@ -361,6 +367,7 @@ fn handle_reliable(
                     player.state.position = back.position;
                     player.health = back.health;
                     player.hunger = back.hunger;
+                    player.thirst = back.thirst;
                     player.inventory = back.inventory;
                 }
                 send_inventory(server, client, player);
@@ -553,6 +560,7 @@ fn handle_reliable(
             if player.health <= 0.0 {
                 player.health = MAX_HEALTH;
                 player.hunger = player.hunger.max(MAX_HUNGER * 0.5);
+                player.thirst = player.thirst.max(MAX_THIRST * 0.5);
                 player.since_hit = 0.0;
                 player.state.position = spawn;
                 send(server, client, &ServerMessage::Teleport { position: spawn });
@@ -699,8 +707,35 @@ fn handle_reliable(
                 player.hunger = (player.hunger + hunger).min(MAX_HUNGER);
                 player.health = (player.health + health).min(MAX_HEALTH);
                 send_vitals(server, client, player);
+            } else if let Some(thirst) = item.drink()
+                && player.is_alive()
+                && player.inventory.remove(item, 1)
+            {
+                // La gourde vidée reste dans l'inventaire.
+                player.inventory.add(Item::Flask, 1);
+                player.thirst = (player.thirst + thirst).min(MAX_THIRST);
+                send_vitals(server, client, player);
             }
             send_inventory(server, client, player);
+        }
+        ClientMessage::Drink { pos } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if !player.is_alive() || world.block(pos) != Block::Water || !within_reach(player, pos) {
+                return;
+            }
+            if player.held_item() == Some(Item::Flask) {
+                player.inventory.remove(Item::Flask, 1);
+                player.inventory.add(Item::WaterFlask, 1);
+                if !player.inventory.has(Item::Flask, 1) {
+                    player.held = Some(Item::WaterFlask);
+                }
+                send_inventory(server, client, player);
+            } else {
+                player.thirst = MAX_THIRST;
+                send_vitals(server, client, player);
+            }
         }
         ClientMessage::BreakBlock { pos } => {
             let Some(player) = lobby.players.get_mut(&client) else {
@@ -797,7 +832,7 @@ fn handle_reliable(
                 && soil
                 && player.inventory.has(cost, 1)
                 && within_reach(player, pos)
-                && world.block(pos) == Block::Air
+                && world.block(pos).is_replaceable()
                 && (!blocked_by_player || !block.is_solid())
                 && world.in_bounds(pos);
             if allowed && world.set_block(pos, block) {

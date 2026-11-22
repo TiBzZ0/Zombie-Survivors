@@ -20,7 +20,7 @@ use crate::world::{Chests, Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
 
 /// Change si le format du fichier change de façon incompatible.
-pub const SAVE_VERSION: u32 = 6;
+pub const SAVE_VERSION: u32 = 7;
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";
@@ -42,6 +42,8 @@ pub struct SavedPlayer {
     pub health: f32,
     pub hunger: f32,
     pub inventory: Inventory,
+    /// Soif (depuis la version 7).
+    pub thirst: f32,
 }
 
 impl SavedPlayer {
@@ -51,6 +53,47 @@ impl SavedPlayer {
             health: player.health,
             hunger: player.hunger,
             inventory: player.inventory.clone(),
+            thirst: player.thirst,
+        }
+    }
+}
+
+/// Joueur tel qu'enregistré jusqu'à la version 6, avant la soif.
+#[derive(Serialize, Deserialize)]
+struct SavedPlayerV6 {
+    position: Vec3,
+    health: f32,
+    hunger: f32,
+    inventory: Inventory,
+}
+
+impl From<SavedPlayerV6> for SavedPlayer {
+    fn from(p: SavedPlayerV6) -> Self {
+        Self {
+            position: p.position,
+            health: p.health,
+            hunger: p.hunger,
+            inventory: p.inventory,
+            thirst: crate::net::MAX_THIRST,
+        }
+    }
+}
+
+/// Paramètres du monde tels qu'enregistrés jusqu'à la version 6 : terrain d'origine.
+#[derive(Serialize, Deserialize)]
+struct WorldConfigV6 {
+    seed: i32,
+    size_chunks: i32,
+    height_chunks: i32,
+}
+
+impl From<WorldConfigV6> for WorldConfig {
+    fn from(w: WorldConfigV6) -> Self {
+        Self {
+            seed: w.seed,
+            size_chunks: w.size_chunks,
+            height_chunks: w.height_chunks,
+            generation: 1,
         }
     }
 }
@@ -167,14 +210,17 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
     let invalid = |e: postcard::Error| io::Error::new(io::ErrorKind::InvalidData, e.to_string());
     // Chaque version ajoute des champs à la fin : on lit le début commun, puis ce que
     // la version du fichier contient. Une ancienne sauvegarde se lit donc toujours.
-    type Core = (
-        u32,
-        WorldConfig,
-        GameTime,
-        Vec<(IVec3, Block)>,
-        Vec<(String, SavedPlayer)>,
-    );
-    let ((version, world, time, edits, players), rest) = postcard::take_from_bytes::<Core>(&bytes).map_err(invalid)?;
+    // Jusqu'à la version 6, ni génération du terrain ni soif : on relit l'ancien début.
+    let (version, _) = postcard::take_from_bytes::<u32>(&bytes).map_err(invalid)?;
+    type Core<W, P> = (u32, W, GameTime, Vec<(IVec3, Block)>, Vec<(String, P)>);
+    let ((_, world, time, edits, players), rest) = if version >= 7 {
+        postcard::take_from_bytes::<Core<WorldConfig, SavedPlayer>>(&bytes).map_err(invalid)?
+    } else {
+        let ((v, world, time, edits, players), rest) =
+            postcard::take_from_bytes::<Core<WorldConfigV6, SavedPlayerV6>>(&bytes).map_err(invalid)?;
+        let players = players.into_iter().map(|(name, p)| (name, p.into())).collect();
+        ((v, world.into(), time, edits, players), rest)
+    };
     let (deposits, rest) = if version >= 2 {
         postcard::take_from_bytes(rest).map_err(invalid)?
     } else {
@@ -357,6 +403,7 @@ mod tests {
                     health: 50.0,
                     hunger: 70.0,
                     inventory,
+                    thirst: 40.0,
                 },
             )],
             deposits: vec![(IVec3::new(4, 5, 6), 7)],
@@ -380,26 +427,47 @@ mod tests {
         #[derive(Serialize)]
         struct V1<'a>(
             u32,
-            &'a WorldConfig,
+            &'a WorldConfigV6,
             GameTime,
             &'a [(IVec3, Block)],
-            &'a [(String, SavedPlayer)],
+            &'a [(String, SavedPlayerV6)],
         );
         let old = loaded_fields(&dir);
-        let bytes = postcard::to_allocvec(&V1(1, &old.world, old.time, &old.edits, &old.players)).unwrap();
+        let old_world = WorldConfigV6 {
+            seed: old.world.seed,
+            size_chunks: old.world.size_chunks,
+            height_chunks: old.world.height_chunks,
+        };
+        let old_players: Vec<(String, SavedPlayerV6)> = old
+            .players
+            .iter()
+            .map(|(name, p)| {
+                let p = SavedPlayerV6 {
+                    position: p.position,
+                    health: p.health,
+                    hunger: p.hunger,
+                    inventory: p.inventory.clone(),
+                };
+                (name.clone(), p)
+            })
+            .collect();
+        let bytes = postcard::to_allocvec(&V1(1, &old_world, old.time, &old.edits, &old_players)).unwrap();
         std::fs::write(save_path(&dir), bytes).unwrap();
         let upgraded = load(&dir).unwrap().unwrap();
         assert_eq!(upgraded.edits, old.edits);
+        // Un ancien monde garde son terrain d'origine, et ses joueurs n'ont pas soif.
+        assert_eq!(upgraded.world.generation, 1);
+        assert_eq!(upgraded.players[0].1.thirst, crate::net::MAX_THIRST);
         assert!(upgraded.deposits.is_empty() && upgraded.chests.is_empty() && upgraded.survivors.is_empty());
 
         // Une sauvegarde de la version 4 garde ses survivants, sans arme.
         #[derive(Serialize)]
         struct V4<'a>(
             u32,
-            &'a WorldConfig,
+            &'a WorldConfigV6,
             GameTime,
             &'a [(IVec3, Block)],
-            &'a [(String, SavedPlayer)],
+            &'a [(String, SavedPlayerV6)],
             &'a [(IVec3, u8)],
             &'a [(IVec3, Inventory)],
             Vec<(&'a str, SurvivorStats, f32, Vec3, Vec3, Option<String>, Order)>,
@@ -415,10 +483,10 @@ mod tests {
         )];
         let bytes = postcard::to_allocvec(&V4(
             4,
-            &old.world,
+            &old_world,
             old.time,
             &old.edits,
-            &old.players,
+            &old_players,
             &[],
             &[],
             v4_survivors,

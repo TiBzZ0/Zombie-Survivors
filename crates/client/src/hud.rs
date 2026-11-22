@@ -401,10 +401,19 @@ fn update_status(
         format!("{:.0}", player.health.ceil())
     };
     fill.width = percent(player.health.clamp(0.0, 100.0));
-    hunger_text.0 = if player.hunger <= 0.0 {
-        "Affamé !".into()
+    let hunger = if player.hunger <= 0.0 {
+        "Affamé !".to_string()
     } else {
         format!("Faim {:.0}", player.hunger.ceil())
+    };
+    // La soif n'existe que dans les mondes à lacs.
+    let lakes = world.as_deref().is_some_and(|w| w.generator().water_level().is_some());
+    hunger_text.0 = if !lakes {
+        hunger
+    } else if player.thirst <= 0.0 {
+        format!("{hunger} · Assoiffé !")
+    } else {
+        format!("{hunger} · Soif {:.0}", player.thirst.ceil())
     };
     hunger_fill.width = percent(player.hunger.clamp(0.0, 100.0));
     match player.mining {
@@ -467,6 +476,15 @@ fn update_status(
         }
     } else if player.held().is_some_and(|i| i.food().is_some()) {
         "Clic droit : manger".into()
+    } else if player.held().is_some_and(|i| i.drink().is_some()) {
+        "Clic droit : boire".into()
+    } else if player.aimed_water.is_some() && player.held() == Some(shared::item::Item::Flask) {
+        "Clic droit : remplir la gourde".into()
+    } else if player.aimed_water.is_some() && !player.held().is_some_and(|i| matches!(i, shared::item::Item::Block(_)))
+    {
+        "Clic droit : boire".into()
+    } else if player.swimming {
+        "Vous nagez · Espace : remonter".into()
     } else if let Some(t) = player.held().and_then(|i| i.throwable()) {
         let blocks = if t.blast_blocks > 0.0 {
             ", détruit les blocs"

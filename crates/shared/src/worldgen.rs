@@ -25,6 +25,38 @@ pub const RUIN_CELL: i32 = 72;
 const RUIN_CHANCE: u32 = 45;
 /// Demi-largeur d'une ruine : les murs sont à cette distance du centre.
 pub const RUIN_HALF: i32 = 3;
+/// Demi-largeur d'une grande ruine (un entrepôt, à partir de la génération 2).
+pub const BIG_RUIN_HALF: i32 = 6;
+
+/// Grandes régions du monde (à partir de la génération 2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Biome {
+    /// Prairies : peu d'arbres.
+    Plains,
+    /// Forêts denses.
+    Forest,
+    /// Désert de sable, avec des cactus et sans arbres.
+    Desert,
+    /// Terres froides couvertes de neige.
+    Snow,
+}
+
+/// Ruine générée : centre au sol, côté de la porte (0 à 3) et demi-largeur.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ruin {
+    pub x: i32,
+    pub ground: i32,
+    pub z: i32,
+    pub door: u32,
+    pub half: i32,
+}
+
+impl Ruin {
+    /// Grand entrepôt à plusieurs coffres.
+    pub fn is_big(&self) -> bool {
+        self.half > RUIN_HALF
+    }
+}
 
 /// Petit hachage entier, stable d'une plateforme à l'autre.
 fn hash3(seed: i32, a: i32, b: i32) -> u32 {
@@ -46,6 +78,8 @@ pub struct WorldGenerator {
     caves: FastNoiseLite,
     ore: FastNoiseLite,
     coal: FastNoiseLite,
+    temperature: FastNoiseLite,
+    moisture: FastNoiseLite,
 }
 
 impl WorldGenerator {
@@ -68,12 +102,22 @@ impl WorldGenerator {
         coal.set_noise_type(Some(NoiseType::OpenSimplex2));
         coal.set_frequency(Some(0.08));
 
+        let mut temperature = FastNoiseLite::with_seed(config.seed.wrapping_add(10));
+        temperature.set_noise_type(Some(NoiseType::OpenSimplex2));
+        temperature.set_frequency(Some(0.0025));
+
+        let mut moisture = FastNoiseLite::with_seed(config.seed.wrapping_add(11));
+        moisture.set_noise_type(Some(NoiseType::OpenSimplex2));
+        moisture.set_frequency(Some(0.004));
+
         Self {
             config,
             height,
             caves,
             ore,
             coal,
+            temperature,
+            moisture,
         }
     }
 
@@ -86,6 +130,35 @@ impl WorldGenerator {
         let base = self.config.height_blocks() as f32 * 0.45;
         let n = self.height.get_noise_2d(x as f32, z as f32); // entre -1 et 1
         (base + n * 24.0) as i32
+    }
+
+    /// Le générateur à biomes, lacs et grandes ruines (les anciens mondes gardent leur terrain).
+    fn modern(&self) -> bool {
+        self.config.generation >= 2
+    }
+
+    /// Biome d'une colonne. Les mondes d'avant les biomes sont une forêt clairsemée partout.
+    pub fn biome(&self, x: i32, z: i32) -> Biome {
+        if !self.modern() {
+            return Biome::Forest;
+        }
+        let t = self.temperature.get_noise_2d(x as f32, z as f32);
+        let m = self.moisture.get_noise_2d(x as f32, z as f32);
+        if t > 0.3 && m < 0.2 {
+            Biome::Desert
+        } else if t < -0.35 {
+            Biome::Snow
+        } else if m > 0.1 {
+            Biome::Forest
+        } else {
+            Biome::Plains
+        }
+    }
+
+    /// Niveau de l'eau des lacs (premier bloc sans eau), ou `None` sur les anciens mondes.
+    pub fn water_level(&self) -> Option<i32> {
+        self.modern()
+            .then(|| (self.config.height_blocks() as f32 * 0.45) as i32 - 11)
     }
 
     /// Bloc à une position monde. Hors de la carte, tout est de l'air.
@@ -104,15 +177,20 @@ impl WorldGenerator {
             if deposit != Block::Air {
                 return deposit;
             }
+            if self.water_level().is_some_and(|level| y < level) {
+                return Block::Water;
+            }
             return self.tree_block_at(x, y, z);
         }
         if y > 2 && y < surface - 4 && self.caves.get_noise_3d(x as f32, y as f32, z as f32) > 0.6 {
             return Block::Air;
         }
         let depth = surface - 1 - y;
-        let beach = self.is_beach(surface);
+        let biome = self.biome(x, z);
+        let beach = self.is_beach(surface) || biome == Biome::Desert;
         match depth {
             0 if beach => Block::Sand,
+            0 if biome == Biome::Snow => Block::Snow,
             0 => Block::Grass,
             1..=3 if beach => Block::Sand,
             1..=3 => Block::Dirt,
@@ -134,11 +212,21 @@ impl WorldGenerator {
     /// un arbre, placé au hasard (de façon déterministe) loin des bords de la cellule.
     pub fn tree_in_cell(&self, cx: i32, cz: i32) -> Option<(i32, i32, i32, i32)> {
         let h = hash3(self.config.seed, cx, cz);
-        if h % 100 >= TREE_CHANCE {
-            return None;
-        }
         let x = cx * TREE_CELL + 2 + ((h >> 8) % (TREE_CELL as u32 - 4)) as i32;
         let z = cz * TREE_CELL + 2 + ((h >> 16) % (TREE_CELL as u32 - 4)) as i32;
+        let chance = if self.modern() {
+            match self.biome(x, z) {
+                Biome::Forest => 75,
+                Biome::Plains => 18,
+                Biome::Desert => 22, // des cactus
+                Biome::Snow => 35,
+            }
+        } else {
+            TREE_CHANCE
+        };
+        if h % 100 >= chance {
+            return None;
+        }
         let size = self.config.size_blocks();
         if x < 3 || z < 3 || x >= size - 3 || z >= size - 3 {
             return None;
@@ -146,6 +234,10 @@ impl WorldGenerator {
         let ground = self.surface_height(x, z);
         if self.is_beach(ground) || ground + 8 >= self.config.height_blocks() {
             return None;
+        }
+        if self.biome(x, z) == Biome::Desert {
+            // Un cactus : 2 ou 3 blocs, sans feuillage.
+            return Some((x, ground, z, 2 + ((h >> 24) % 2) as i32));
         }
         let height = 4 + ((h >> 24) % 2) as i32;
         Some((x, ground, z, height))
@@ -160,8 +252,12 @@ impl WorldGenerator {
                     continue;
                 };
                 let (ox, oy, oz) = (x - tx, y - ground, z - tz);
+                let cactus = self.biome(tx, tz) == Biome::Desert;
                 if ox == 0 && oz == 0 && (0..height).contains(&oy) {
-                    return Block::Wood;
+                    return if cactus { Block::Cactus } else { Block::Wood };
+                }
+                if cactus {
+                    continue;
                 }
                 let top = height - 1;
                 let radius = match oy - top {
@@ -216,72 +312,112 @@ impl WorldGenerator {
         if inside { kind } else { Block::Air }
     }
 
-    /// Ruine éventuelle d'une cellule : centre au sol, et côté de la porte (0 à 3).
+    /// Ruine éventuelle d'une cellule.
     ///
-    /// Une maison en ruine de 7 × 7 blocs, aux murs troués, avec un coffre dans un coin.
-    pub fn ruin_in_cell(&self, cx: i32, cz: i32) -> Option<(i32, i32, i32, u32)> {
-        let (x, z, h) = self.ruin_spot(cx, cz)?;
+    /// Une maison en ruine de 7 × 7 blocs, aux murs troués, avec un coffre dans un coin ;
+    /// parfois (génération 2) un entrepôt de 13 × 13 blocs avec trois coffres.
+    pub fn ruin_in_cell(&self, cx: i32, cz: i32) -> Option<Ruin> {
+        let (x, z, h, half) = self.ruin_spot(cx, cz)?;
         let ground = self.surface_height(x, z);
         if self.is_beach(ground) || ground + 6 >= self.config.height_blocks() {
             return None;
         }
-        // Seulement sur un terrain presque plat.
-        let r = RUIN_HALF;
-        let flat = [(-r, -r), (r, -r), (-r, r), (r, r)]
-            .iter()
-            .all(|(dx, dz)| (self.surface_height(x + dx, z + dz) - ground).abs() <= 1);
-        flat.then_some((x, ground, z, (h >> 24) % 4))
+        // Seulement sur un terrain presque plat (un entrepôt tolère un peu plus de relief).
+        let flat = |r: i32, slack: i32| {
+            [(-r, -r), (r, -r), (-r, r), (r, r)]
+                .iter()
+                .all(|(dx, dz)| (self.surface_height(x + dx, z + dz) - ground).abs() <= slack)
+        };
+        // Un entrepôt sur un terrain trop accidenté redevient une petite maison.
+        let half = if half > RUIN_HALF && flat(half, 2) {
+            half
+        } else if flat(RUIN_HALF, 1) {
+            RUIN_HALF
+        } else {
+            return None;
+        };
+        Some(Ruin {
+            x,
+            ground,
+            z,
+            door: (h >> 24) % 4,
+            half,
+        })
     }
 
-    /// Position (sans le relief) de la ruine éventuelle d'une cellule : peu coûteux.
-    fn ruin_spot(&self, cx: i32, cz: i32) -> Option<(i32, i32, u32)> {
+    /// Position (sans le relief) et demi-largeur de la ruine éventuelle d'une cellule : peu coûteux.
+    fn ruin_spot(&self, cx: i32, cz: i32) -> Option<(i32, i32, u32, i32)> {
         let h = hash3(self.config.seed.wrapping_add(4242), cx, cz);
         if h % 100 >= RUIN_CHANCE {
             return None;
         }
-        let margin = RUIN_HALF + 2;
+        let half = if self.modern() && (h >> 4) % 4 == 0 {
+            BIG_RUIN_HALF
+        } else {
+            RUIN_HALF
+        };
+        // La place d'un entrepôt est réservée même s'il redevient une maison.
+        let margin = if self.modern() { BIG_RUIN_HALF } else { RUIN_HALF } + 2;
         let span = (RUIN_CELL - 2 * margin) as u32;
         let x = cx * RUIN_CELL + margin + ((h >> 8) % span) as i32;
         let z = cz * RUIN_CELL + margin + ((h >> 16) % span) as i32;
         let size = self.config.size_blocks();
-        (x >= margin && z >= margin && x < size - margin && z < size - margin).then_some((x, z, h))
+        (x >= margin && z >= margin && x < size - margin && z < size - margin).then_some((x, z, h, half))
     }
 
-    /// Position du coffre d'une ruine.
-    pub fn ruin_chest(&self, ruin: (i32, i32, i32, u32)) -> (i32, i32, i32) {
-        let (x, ground, z, _) = ruin;
-        let (cx, cz) = (x + RUIN_HALF - 1, z + RUIN_HALF - 1);
-        // Posé sur le sol, même si le terrain monte d'un bloc dans ce coin.
-        (cx, ground.max(self.surface_height(cx, cz)), cz)
+    /// Position des coffres d'une ruine : un dans un coin, trois dans un entrepôt.
+    pub fn ruin_chests(&self, ruin: Ruin) -> Vec<(i32, i32, i32)> {
+        let c = ruin.half - 1;
+        let corners: &[(i32, i32)] = if ruin.is_big() {
+            &[(c, c), (-c, c), (c, -c)]
+        } else {
+            &[(c, c)]
+        };
+        corners
+            .iter()
+            .map(|(dx, dz)| {
+                let (cx, cz) = (ruin.x + dx, ruin.z + dz);
+                // Posé sur le sol, même si le terrain monte d'un bloc dans ce coin.
+                (cx, ruin.ground.max(self.surface_height(cx, cz)), cz)
+            })
+            .collect()
     }
 
     /// Bloc d'une ruine (murs, coffre, ou air à l'intérieur), ou `None` hors des ruines.
     fn ruin_block_at(&self, x: i32, y: i32, z: i32) -> Option<Block> {
         let (cx, cz) = (x.div_euclid(RUIN_CELL), z.div_euclid(RUIN_CELL));
-        let (rx, rz, _) = self.ruin_spot(cx, cz)?;
+        let (rx, rz, _, half) = self.ruin_spot(cx, cz)?;
         let (dx, dz) = (x - rx, z - rz);
-        if dx.abs() > RUIN_HALF || dz.abs() > RUIN_HALF {
+        if dx.abs() > half || dz.abs() > half {
             return None;
         }
         let ruin = self.ruin_in_cell(cx, cz)?;
-        let (_, ground, _, door) = ruin;
-        let dy = y - ground;
+        let half = ruin.half;
+        if dx.abs() > half || dz.abs() > half {
+            return None;
+        }
+        let dy = y - ruin.ground;
         if !(0..=4).contains(&dy) {
             return None;
         }
-        let (chest_x, chest_y, chest_z) = self.ruin_chest(ruin);
-        if (x, y, z) == (chest_x, chest_y, chest_z) {
+        if self.ruin_chests(ruin).contains(&(x, y, z)) {
             return Some(Block::Chest);
         }
-        let wall = dx.abs() == RUIN_HALF || dz.abs() == RUIN_HALF;
-        if !wall || dy > 2 {
+        let wall = dx.abs() == half || dz.abs() == half;
+        // Les entrepôts ont des piliers qui soutenaient le toit.
+        let pillar = ruin.is_big() && dx.abs() == 3 && dz.abs() == 3;
+        if pillar && dy <= 3 {
+            return Some(Block::Stone);
+        }
+        if !wall || dy > if ruin.is_big() { 3 } else { 2 } {
             return Some(Block::Air);
         }
-        let doorway = match door {
-            0 => dz == -RUIN_HALF && dx == 0,
-            1 => dz == RUIN_HALF && dx == 0,
-            2 => dx == -RUIN_HALF && dz == 0,
-            _ => dx == RUIN_HALF && dz == 0,
+        let gate = if ruin.is_big() { 1 } else { 0 };
+        let doorway = match ruin.door {
+            0 => dz == -half && dx.abs() <= gate,
+            1 => dz == half && dx.abs() <= gate,
+            2 => dx == -half && dz.abs() <= gate,
+            _ => dx == half && dz.abs() <= gate,
         };
         if doorway && dy <= 1 {
             return Some(Block::Air);
@@ -305,7 +441,7 @@ impl WorldGenerator {
             for z in 0..CHUNK_SIZE {
                 for y in 0..CHUNK_SIZE {
                     let block = self.block_at(ox + x as i32, oy + y as i32, oz + z as i32);
-                    if block.is_solid() {
+                    if block != Block::Air {
                         chunk.set(x, y, z, block);
                     }
                 }
@@ -390,10 +526,58 @@ mod tests {
             .collect();
         assert!(ruins.len() >= 5, "seulement {} ruines", ruins.len());
         for ruin in ruins {
-            let (x, y, z) = generator.ruin_chest(ruin);
-            assert_eq!(generator.block_at(x, y, z), Block::Chest);
+            for (x, y, z) in generator.ruin_chests(ruin) {
+                assert_eq!(generator.block_at(x, y, z), Block::Chest);
+            }
             // L'intérieur est dégagé.
-            assert_eq!(generator.block_at(ruin.0, ruin.1 + 1, ruin.2), Block::Air);
+            assert_eq!(generator.block_at(ruin.x, ruin.ground + 1, ruin.z), Block::Air);
+        }
+    }
+
+    #[test]
+    fn modern_worlds_have_biomes_lakes_and_warehouses() {
+        let generator = WorldGenerator::new(WorldConfig::default());
+        let size = generator.config().size_blocks();
+        let mut seen = std::collections::HashSet::new();
+        let mut water = 0;
+        for i in 0..64 {
+            for j in 0..64 {
+                let (x, z) = (i * size / 64, j * size / 64);
+                seen.insert(generator.biome(x, z) as u8);
+                let surface = generator.surface_height(x, z);
+                if generator.block_at(x, surface, z) == Block::Water {
+                    water += 1;
+                }
+            }
+        }
+        assert_eq!(seen.len(), 4, "biomes vus : {seen:?}");
+        assert!(water > 20, "seulement {water} colonnes d'eau");
+        let cells = size / RUIN_CELL;
+        let big = (0..cells)
+            .flat_map(|cx| (0..cells).map(move |cz| (cx, cz)))
+            .filter_map(|(cx, cz)| generator.ruin_in_cell(cx, cz))
+            .find(Ruin::is_big)
+            .expect("un entrepôt");
+        let chests = generator.ruin_chests(big);
+        assert_eq!(chests.len(), 3);
+        for (x, y, z) in chests {
+            assert_eq!(generator.block_at(x, y, z), Block::Chest);
+        }
+    }
+
+    #[test]
+    fn old_worlds_keep_their_terrain() {
+        let old = WorldGenerator::new(WorldConfig {
+            generation: 1,
+            ..WorldConfig::default()
+        });
+        assert_eq!(old.water_level(), None);
+        let size = old.config().size_blocks();
+        for i in 0..64 {
+            let (x, z) = (i * size / 64, (63 - i) * size / 64);
+            let surface = old.surface_height(x, z);
+            assert_ne!(old.block_at(x, surface, z), Block::Water);
+            assert_ne!(old.block_at(x, surface - 1, z), Block::Snow);
         }
     }
 

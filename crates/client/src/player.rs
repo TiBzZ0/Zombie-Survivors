@@ -9,7 +9,7 @@ use bevy::window::{CursorGrabMode, CursorOptions};
 use bevy_renet::RenetClient;
 use shared::block::Block;
 use shared::item::{Inventory, Item, break_time};
-use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid, step_body};
+use shared::physics::{GRAVITY, PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid, step_body};
 use shared::protocol::{ClientMessage, PlayerState, REACH};
 use shared::raycast::{ray_aabb, raycast};
 use shared::survivor::TALK_RANGE;
@@ -24,6 +24,12 @@ use crate::zombies::ZombieView;
 const WALK_SPEED: f32 = 4.5;
 const SPRINT_SPEED: f32 = 7.0;
 const JUMP_SPEED: f32 = 8.5;
+/// Vitesse de nage, en part de la vitesse de marche.
+const SWIM_FACTOR: f32 = 0.6;
+/// Vitesse de remontée à la nage (assez pour se hisser sur la rive).
+const SWIM_UP_SPEED: f32 = 5.5;
+/// Vitesse maximale à laquelle on coule.
+const SINK_SPEED: f32 = 2.0;
 const MOUSE_SENSITIVITY: f32 = 0.0025;
 /// Délai entre deux poses de blocs quand le bouton reste enfoncé.
 const ACTION_COOLDOWN: f32 = 0.22;
@@ -65,6 +71,7 @@ impl Plugin for PlayerPlugin {
 pub struct LocalPlayer {
     pub health: f32,
     pub hunger: f32,
+    pub thirst: f32,
     pub inventory: Inventory,
     /// Objets rangés dans la barre, dans l'ordre des touches.
     pub hotbar: [Option<Item>; HOTBAR_SLOTS],
@@ -93,6 +100,10 @@ pub struct LocalPlayer {
     pub selected: usize,
     /// Bloc visé, s'il y en a un à portée.
     pub target: Option<shared::raycast::RayHit>,
+    /// Eau visée, à portée pour boire.
+    pub aimed_water: Option<IVec3>,
+    /// Le joueur nage (le milieu du corps est dans l'eau).
+    pub swimming: bool,
     /// Survivant visé, assez près pour lui parler.
     pub aimed_survivor: Option<u32>,
     /// Indication à afficher sur le survivant visé.
@@ -151,6 +162,7 @@ fn spawn_player(mut player: ResMut<LocalPlayer>, session: Res<Session>) {
     *player = LocalPlayer {
         health: 100.0,
         hunger: 100.0,
+        thirst: 100.0,
         position: session.spawn,
         yaw: -std::f32::consts::FRAC_PI_4,
         ..default()
@@ -270,12 +282,13 @@ fn apply_teleports(
                 player.position = *position;
                 player.velocity = Vec3::ZERO;
             }
-            NetEvent::Vitals { health, hunger } => {
+            NetEvent::Vitals { health, hunger, thirst } => {
                 if *health < player.health - 0.5 {
                     player.hurt_flash = 1.0;
                 }
                 player.health = *health;
                 player.hunger = *hunger;
+                player.thirst = *thirst;
                 if *health > 0.0 {
                     player.dead = None;
                 }
@@ -344,15 +357,27 @@ fn move_player(
     } else {
         speed
     };
+    // Dans l'eau : on avance plus lentement, on coule doucement, Espace fait remonter.
+    let wet = |y: f32| world.block((player.position + Vec3::Y * y).floor().as_ivec3()) == Block::Water;
+    player.swimming = wet(0.6) || wet(0.05);
+    let speed = if player.swimming { speed * SWIM_FACTOR } else { speed };
     let wish = Quat::from_rotation_y(player.yaw) * wish.normalize_or_zero() * speed;
 
     let dt = time.delta_secs().min(0.05);
-    let control = if player.on_ground { 1.0 } else { 0.25 };
+    let control = if player.on_ground || player.swimming { 1.0 } else { 0.25 };
     let horizontal = Vec3::new(player.velocity.x, 0.0, player.velocity.z);
     let target = Vec3::new(wish.x, 0.0, wish.z);
     let new_horizontal = horizontal.lerp(target, (control * 15.0 * dt).min(1.0));
     let mut velocity = Vec3::new(new_horizontal.x, player.velocity.y, new_horizontal.z);
-    if player.on_ground && pressed(KeyCode::Space) {
+    if player.swimming {
+        // La poussée d'Archimède compense presque la gravité appliquée par `step_body`.
+        velocity.y += GRAVITY * 0.85 * dt;
+        velocity.y = if pressed(KeyCode::Space) {
+            SWIM_UP_SPEED
+        } else {
+            velocity.y.clamp(-SINK_SPEED, SWIM_UP_SPEED)
+        };
+    } else if player.on_ground && pressed(KeyCode::Space) {
         velocity.y = JUMP_SPEED;
     }
 
@@ -389,6 +414,13 @@ fn interact(
     player.target = raycast(player.eye(), player.look_direction(), REACH, |p| {
         world.block(p).is_targetable()
     });
+    // L'eau ne se vise pas comme un bloc (on pose et on casse à travers), mais on y boit.
+    player.aimed_water = raycast(player.eye(), player.look_direction(), REACH, |p| {
+        let b = world.block(p);
+        b.is_targetable() || b == Block::Water
+    })
+    .map(|h| h.block)
+    .filter(|p| world.block(*p) == Block::Water);
     let block_dist = player
         .target
         .map(|h| (h.block.as_vec3() + Vec3::splat(0.5)).distance(player.eye()))
@@ -543,7 +575,7 @@ fn interact(
         }
     }
     match player.held() {
-        Some(item) if item.food().is_some() => {
+        Some(item) if item.food().is_some() || item.drink().is_some() => {
             send_reliable(&mut client, &ClientMessage::Eat { item });
             player.cooldown = EAT_COOLDOWN;
         }
@@ -570,7 +602,7 @@ fn interact(
             let Some(hit) = player.target else { return };
             let pos = hit.block + hit.normal;
             let blocks_me = block.is_solid() && overlaps_solid(player.position, PLAYER_SIZE, &|b| b == pos);
-            if !blocks_me && world.in_bounds(pos) && world.block(pos) == Block::Air {
+            if !blocks_me && world.in_bounds(pos) && world.block(pos).is_replaceable() {
                 // Appliqué tout de suite pour la réactivité ; le serveur corrige s'il refuse.
                 world.set_block(pos, block);
                 player.inventory.remove(Item::Block(block), 1);
@@ -579,7 +611,15 @@ fn interact(
                 player.cooldown = ACTION_COOLDOWN;
             }
         }
-        _ => {}
+        _ => {
+            // Main libre ou gourde vide : boire à la source visée (ou remplir la gourde).
+            if let Some(pos) = player.aimed_water
+                && mouse.just_pressed(MouseButton::Right)
+            {
+                send_reliable(&mut client, &ClientMessage::Drink { pos });
+                player.cooldown = EAT_COOLDOWN;
+            }
+        }
     }
 }
 
