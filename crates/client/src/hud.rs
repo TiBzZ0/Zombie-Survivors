@@ -425,8 +425,30 @@ fn update_status(
             (block, left)
         })
     });
-    hint_text.0 = if let Some(hint) = &player.survivor_hint {
+    let aimed_gun = player
+        .target
+        .zip(world.as_deref())
+        .map(|(hit, world)| world.block(hit.block))
+        .filter(|b| b.emplacement().is_some());
+    let mounted_gun = player
+        .mounted
+        .zip(world.as_deref())
+        .and_then(|(pos, world)| world.block(pos).emplacement().map(|g| (world.block(pos), g)));
+    hint_text.0 = if let Some((block, gun)) = mounted_gun {
+        format!(
+            "{} : clic gauche pour tirer ({} : {}) · clic droit : descendre",
+            block.name(),
+            gun.ammo.name(),
+            player.inventory.count(gun.ammo)
+        )
+    } else if let Some(hint) = &player.survivor_hint {
         hint.clone()
+    } else if let Some(block) = aimed_gun {
+        let ammo = block.emplacement().map(|g| g.ammo.name()).unwrap_or_default();
+        format!(
+            "{} : clic droit pour prendre les commandes (munitions : {ammo})",
+            block.name()
+        )
     } else if player.needs_pickaxe {
         match aimed_deposit {
             Some((block, _)) => format!("{} : il faut une pioche", block.name()),

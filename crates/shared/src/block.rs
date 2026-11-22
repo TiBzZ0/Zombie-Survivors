@@ -37,6 +37,32 @@ pub enum Block {
     Turret,
     /// Barbelés : se traversent, mais ralentissent et blessent les zombies (et s'usent).
     BarbedWire,
+    /// Mitrailleuse : se pilote, tire vite avec les cartouches du joueur.
+    MachineGun,
+    /// Canon : se pilote, tire des boulets qui explosent à l'impact.
+    Cannon,
+    /// Catapulte : se pilote, lance des pierres en cloche loin derrière les murs.
+    Catapult,
+}
+
+/// Distance maximale entre un joueur et l'arme fixe qu'il pilote.
+pub const EMPLACEMENT_REACH: f32 = 3.0;
+
+/// Arme fixe qu'un joueur peut piloter.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Emplacement {
+    /// Munition prise dans l'inventaire du pilote.
+    pub ammo: crate::item::Item,
+    /// Délai entre deux tirs, en secondes.
+    pub cooldown: f32,
+    /// Vitesse du projectile (0 : tir instantané, comme un fusil).
+    pub speed: f32,
+    /// Dégâts d'un tir (au centre de l'explosion pour un projectile).
+    pub damage: f32,
+    /// Rayon de l'explosion à l'impact (0 : pas d'explosion).
+    pub radius: f32,
+    /// Part de la gravité subie par le projectile.
+    pub gravity: f32,
 }
 
 /// Nombre de récoltes d'un bloc de filon avant qu'il ne disparaisse.
@@ -62,6 +88,38 @@ impl Block {
     /// Bloc qui garde des objets (ouvert avec le panneau du coffre).
     pub const fn is_storage(self) -> bool {
         matches!(self, Block::Chest | Block::Turret)
+    }
+
+    /// Arme fixe pilotable, avec ses caractéristiques de tir.
+    pub const fn emplacement(self) -> Option<Emplacement> {
+        use crate::item::Item;
+        match self {
+            Block::MachineGun => Some(Emplacement {
+                ammo: Item::Ammo,
+                cooldown: 0.12,
+                speed: 0.0,
+                damage: 28.0,
+                radius: 0.0,
+                gravity: 0.0,
+            }),
+            Block::Cannon => Some(Emplacement {
+                ammo: Item::CannonBall,
+                cooldown: 2.0,
+                speed: 38.0,
+                damage: 110.0,
+                radius: 3.5,
+                gravity: 0.35,
+            }),
+            Block::Catapult => Some(Emplacement {
+                ammo: Item::Block(Block::Stone),
+                cooldown: 3.0,
+                speed: 24.0,
+                damage: 80.0,
+                radius: 3.0,
+                gravity: 1.0,
+            }),
+            _ => None,
+        }
     }
 
     /// Bloc qu'un joueur peut poser depuis son inventaire.
@@ -111,6 +169,9 @@ impl Block {
             Block::Forge => [0.30, 0.28, 0.30],
             Block::Turret => [0.40, 0.42, 0.46],
             Block::BarbedWire => [0.55, 0.55, 0.58],
+            Block::MachineGun => [0.30, 0.32, 0.30],
+            Block::Cannon => [0.22, 0.22, 0.25],
+            Block::Catapult => [0.55, 0.40, 0.25],
         }
     }
 
@@ -135,6 +196,9 @@ impl Block {
             Block::Forge => "Forge",
             Block::Turret => "Tourelle",
             Block::BarbedWire => "Barbelés",
+            Block::MachineGun => "Mitrailleuse",
+            Block::Cannon => "Canon",
+            Block::Catapult => "Catapulte",
         }
     }
 
@@ -157,6 +221,9 @@ impl Block {
             Block::Spikes => 100,
             Block::Turret => 300,
             Block::BarbedWire => 60,
+            Block::MachineGun => 320,
+            Block::Cannon => 400,
+            Block::Catapult => 260,
         }
     }
 }

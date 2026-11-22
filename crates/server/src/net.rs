@@ -433,6 +433,47 @@ fn handle_reliable(
             broadcast(server, &projectile.message());
             projectiles.0.push(projectile);
         }
+        ClientMessage::FireEmplacement { pos, direction } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            let Some(gun) = world.block(pos).emplacement() else {
+                return;
+            };
+            let dir = direction.normalize_or_zero();
+            let center = pos.as_vec3() + Vec3::splat(0.5);
+            let close = center.distance(player.state.position + Vec3::Y) <= shared::block::EMPLACEMENT_REACH;
+            if !player.is_alive() || player.attack_cooldown > 0.0 || !close || dir == Vec3::ZERO || !dir.is_finite() {
+                return;
+            }
+            if !player.inventory.remove(gun.ammo, 1) {
+                send_inventory(server, client, player);
+                return;
+            }
+            player.attack_cooldown = gun.cooldown * 0.85;
+            send_inventory(server, client, player);
+            // Le tir part du haut de l'arme, un peu devant.
+            let origin = center + Vec3::Y * 0.9 + dir * 0.6;
+            if gun.speed == 0.0 {
+                // Mitrailleuse : légère dispersion.
+                let spread = Vec3::new(fastrand::f32() - 0.5, fastrand::f32() - 0.5, fastrand::f32() - 0.5) * 0.04;
+                let dir = (dir + spread).normalize_or_zero();
+                let end = hitscan(origin, dir, 70.0, gun.damage, 1, client, world, zombies);
+                broadcast(
+                    server,
+                    &ServerMessage::Shot {
+                        from: client,
+                        origin,
+                        end,
+                        rifle: true,
+                    },
+                );
+            } else {
+                let shell = crate::explosives::Projectile::shell(client, gun, origin, dir);
+                broadcast(server, &shell.message());
+                projectiles.0.push(shell);
+            }
+        }
         ClientMessage::Guard { active } => {
             if let Some(player) = lobby.players.get_mut(&client) {
                 player.guarding = match (active, player.guarding) {
@@ -460,34 +501,16 @@ fn handle_reliable(
             // Petite marge : le client et le serveur ne mesurent pas le temps tout à fait pareil.
             player.attack_cooldown = weapon.cooldown * 0.85;
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
-            let wall = raycast(eye, dir, weapon.range, |p| world.is_solid(p))
-                .map(|hit| ray_aabb(eye, dir, hit.block.as_vec3(), hit.block.as_vec3() + Vec3::ONE).unwrap_or(0.0))
-                .unwrap_or(weapon.range);
-            // Les zombies sur la trajectoire, du plus proche au plus loin ; un carreau en traverse plusieurs.
-            let mut hits: Vec<(Mut<Zombie>, f32)> = zombies
-                .iter_mut()
-                .filter_map(|(z, body)| {
-                    let size = z.kind.stats().size;
-                    let half = Vec3::new(size.half_width + 0.1, 0.0, size.half_width + 0.1);
-                    let top = Vec3::Y * size.height;
-                    ray_aabb(eye, dir, body.position - half, body.position + half + top)
-                        .filter(|t| *t < wall)
-                        .map(|t| (z, t))
-                })
-                .collect();
-            hits.sort_by(|a, b| a.1.total_cmp(&b.1));
-            hits.truncate(weapon.pierce as usize);
-            let pierced_all = hits.len() == weapon.pierce as usize;
-            let mut end = eye + dir * wall;
-            for (z, t) in &mut hits {
-                z.health -= weapon.damage;
-                z.hurt_timer = 0.3;
-                z.knockback = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 3.0;
-                z.last_attacker = Some(client);
-                if pierced_all {
-                    end = eye + dir * *t;
-                }
-            }
+            let end = hitscan(
+                eye,
+                dir,
+                weapon.range,
+                weapon.damage,
+                weapon.pierce,
+                client,
+                world,
+                zombies,
+            );
             send_inventory(server, client, player);
             broadcast(
                 server,
@@ -753,6 +776,50 @@ fn handle_reliable(
             send_inventory(server, client, player);
         }
     }
+}
+
+/// Tir instantané le long d'un rayon : blesse jusqu'à `pierce` zombies avant le premier mur.
+/// Renvoie le point d'arrivée, pour l'effet visuel.
+#[allow(clippy::too_many_arguments)]
+fn hitscan(
+    eye: Vec3,
+    dir: Vec3,
+    range: f32,
+    damage: f32,
+    pierce: u8,
+    client: ClientId,
+    world: &GameWorld,
+    zombies: &mut Query<(&mut Zombie, &ZombieBody)>,
+) -> Vec3 {
+    let wall = raycast(eye, dir, range, |p| world.is_solid(p))
+        .map(|hit| ray_aabb(eye, dir, hit.block.as_vec3(), hit.block.as_vec3() + Vec3::ONE).unwrap_or(0.0))
+        .unwrap_or(range);
+    // Les zombies sur la trajectoire, du plus proche au plus loin ; un carreau en traverse plusieurs.
+    let mut hits: Vec<(Mut<Zombie>, f32)> = zombies
+        .iter_mut()
+        .filter_map(|(z, body)| {
+            let size = z.kind.stats().size;
+            let half = Vec3::new(size.half_width + 0.1, 0.0, size.half_width + 0.1);
+            let top = Vec3::Y * size.height;
+            ray_aabb(eye, dir, body.position - half, body.position + half + top)
+                .filter(|t| *t < wall)
+                .map(|t| (z, t))
+        })
+        .collect();
+    hits.sort_by(|a, b| a.1.total_cmp(&b.1));
+    hits.truncate(pierce as usize);
+    let pierced_all = hits.len() == pierce as usize;
+    let mut end = eye + dir * wall;
+    for (z, t) in &mut hits {
+        z.health -= damage;
+        z.hurt_timer = 0.3;
+        z.knockback = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 3.0;
+        z.last_attacker = Some(client);
+        if pierced_all {
+            end = eye + dir * *t;
+        }
+    }
+    end
 }
 
 /// Envoie le contenu d'un coffre à tous les joueurs qui l'ont ouvert.

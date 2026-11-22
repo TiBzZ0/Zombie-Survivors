@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_000A;
+pub const PROTOCOL_ID: u64 = 0x5A53_000B;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -108,6 +108,11 @@ pub enum ClientMessage {
     },
     /// Lance l'explosif tenu en main dans cette direction.
     Throw {
+        direction: Vec3,
+    },
+    /// Tire avec l'arme fixe pilotée (mitrailleuse, canon, catapulte).
+    FireEmplacement {
+        pos: IVec3,
         direction: Vec3,
     },
 }
