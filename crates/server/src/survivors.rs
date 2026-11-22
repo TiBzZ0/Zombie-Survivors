@@ -14,8 +14,8 @@ use shared::physics::step_body;
 use shared::protocol::{ServerMessage, SurvivorState, encode};
 use shared::raycast::raycast;
 use shared::survivor::{
-    MORALE_BREAKING, MORALE_START, MoraleFactors, Order, RECRUIT_COST, SURVIVOR_SIZE, SURVIVOR_SPEED, SurvivorStats,
-    TALK_RANGE, morale_multiplier, name_from_seed,
+    MORALE_BREAKING, MORALE_START, MoraleFactors, Offer, Order, RECRUIT_COST, SURVIVOR_SIZE, SURVIVOR_SPEED,
+    SurvivorStats, TALK_RANGE, TRADES, morale_multiplier, name_from_seed,
 };
 use shared::worldgen::RUIN_CELL;
 
@@ -60,6 +60,7 @@ impl Plugin for SurvivorPlugin {
                 FixedUpdate,
                 (
                     spawn_wanderers,
+                    spawn_traders,
                     handle_talk,
                     survivor_ai,
                     survivor_deaths,
@@ -132,6 +133,8 @@ pub struct Survivor {
     /// Feu de camp près du poste, cherché de temps en temps.
     campfire: Option<IVec3>,
     scan_timer: f32,
+    /// Marchés d'un marchand de passage (vide pour un survivant).
+    pub offers: Vec<Offer>,
 }
 
 impl Survivor {
@@ -166,6 +169,7 @@ impl Survivor {
             job_target: None,
             campfire: None,
             scan_timer: 0.0,
+            offers: Vec::new(),
         }
     }
 
@@ -190,6 +194,7 @@ impl Survivor {
             order: self.order,
             weapon: self.weapon,
             armor: self.armor,
+            offers: self.offers.clone(),
         }
     }
 
@@ -334,6 +339,23 @@ fn handle_talk(
         }
         let mut changed = false;
         let reply = match s.leader.clone() {
+            // Un marchand ne se recrute pas : il échange.
+            None if !s.offers.is_empty() => {
+                match s.offers.iter().find(|o| player.inventory.has(o.want, o.give)).copied() {
+                    Some(o) => {
+                        player.inventory.remove(o.want, o.give);
+                        player.inventory.add(o.offer, o.get);
+                        if let Some(server) = server.as_deref_mut() {
+                            send_inventory(server, client, player);
+                        }
+                        format!("Marché conclu : {}.", o.describe())
+                    }
+                    None => {
+                        let list: Vec<String> = s.offers.iter().map(|o| o.describe()).collect();
+                        format!("Je prends : {}. Reviens avec ce qu'il faut.", list.join(", "))
+                    }
+                }
+            }
             None => match RECRUIT_COST.iter().find(|(item, n)| player.inventory.has(*item, *n)) {
                 Some((item, n)) => {
                     player.inventory.remove(*item, *n);
@@ -1483,5 +1505,114 @@ mod tests {
         }
         run(&mut app, 60.0);
         assert!(survivor(&mut app).morale >= shared::survivor::MORALE_HIGH);
+    }
+}
+
+/// Un marchand passe près d'un joueur quand l'événement du jour le prévoit ; il repart à la nuit.
+fn spawn_traders(
+    mut commands: Commands,
+    clock: Res<Clock>,
+    lobby: Res<Lobby>,
+    world: Res<GameWorld>,
+    mut ids: ResMut<NextSurvivorId>,
+    plans: Option<ResMut<crate::events::Happenings>>,
+    traders: Query<(Entity, &Survivor)>,
+    mut server: Option<ResMut<RenetServer>>,
+) {
+    if clock.is_night() {
+        for (entity, s) in traders.iter().filter(|(_, s)| !s.offers.is_empty()) {
+            commands.entity(entity).despawn();
+            if let Some(server) = server.as_deref_mut() {
+                broadcast(
+                    server,
+                    &ServerMessage::Chat {
+                        from: "Serveur".into(),
+                        text: format!("{} repart avant la nuit.", s.name),
+                    },
+                );
+            }
+        }
+        return;
+    }
+    let Some(mut plans) = plans else { return };
+    if !plans.trader_due {
+        return;
+    }
+    plans.trader_due = false;
+    let players: Vec<(&str, Vec3)> = lobby
+        .players
+        .values()
+        .filter(|p| p.is_alive())
+        .map(|p| (p.name.as_str(), p.state.position))
+        .collect();
+    if players.is_empty() {
+        return;
+    }
+    let (player_name, around) = players[fastrand::usize(0..players.len())];
+    let Some(spot) = find_spawn_spot(&world, around, 12.0, 25.0) else {
+        return;
+    };
+    let id = next_id(&mut ids);
+    let seed = fastrand::u32(..);
+    let name = format!("{} le marchand", name_from_seed(seed));
+    let mut trader = Survivor::new(id, name.clone(), SurvivorStats::from_seed(seed), spot);
+    let mut deck = TRADES.to_vec();
+    fastrand::shuffle(&mut deck);
+    trader.offers = deck.into_iter().take(3).collect();
+    if let Some(server) = server.as_deref_mut() {
+        broadcast(server, &trader.info());
+        broadcast(
+            server,
+            &ServerMessage::Chat {
+                from: "Serveur".into(),
+                text: format!(
+                    "{name} passe {}, près de {player_name}, jusqu'au soir.",
+                    crate::events::compass(around, spot)
+                ),
+            },
+        );
+    }
+    commands.spawn(trader);
+}
+
+#[cfg(test)]
+mod trader_tests {
+    use super::*;
+    use crate::net::ConnectedPlayer;
+
+    #[test]
+    fn a_trader_swaps_goods_instead_of_joining() {
+        let mut trader = Survivor::new(
+            9,
+            "Ambroise le marchand".into(),
+            SurvivorStats::from_seed(1),
+            Vec3::ZERO,
+        );
+        trader.offers = vec![TRADES[0]];
+        let mut player = ConnectedPlayer::new(Vec3::new(1.0, 0.0, 0.0));
+        player.name = "Alice".into();
+        player.inventory.add(Item::Hide, 5);
+        player.inventory.add(Item::Ration, 1);
+        let mut lobby = Lobby::default();
+        lobby.players.insert(1, player);
+        let mut app = App::new();
+        app.insert_resource(lobby)
+            .init_resource::<SurvivorTalk>()
+            .add_systems(Update, handle_talk);
+        app.world_mut().spawn(trader);
+        let talk = TalkRequest {
+            client: 1,
+            id: 9,
+            dismiss: false,
+            give: false,
+        };
+        app.world_mut().resource_mut::<SurvivorTalk>().0.push(talk);
+        app.update();
+        let lobby = app.world().resource::<Lobby>();
+        let inv = &lobby.players[&1].inventory;
+        assert!(inv.has(Item::Ammo, 12) && inv.has(Item::Hide, 1) && !inv.has(Item::Hide, 2));
+        assert!(inv.has(Item::Ration, 1), "la ration n'a pas servi à le recruter");
+        let s = app.world_mut().query::<&Survivor>().single(app.world()).unwrap();
+        assert_eq!(s.leader, None);
     }
 }

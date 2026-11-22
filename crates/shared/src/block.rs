@@ -68,6 +68,8 @@ pub enum Block {
     ElectricDoorOpen,
     /// Bobine électrique : foudroie le zombie le plus proche quand elle est alimentée.
     TeslaCoil,
+    /// Caisse de ravitaillement larguée du ciel, pleine de matériel.
+    SupplyCrate,
 }
 
 /// Distance à laquelle un générateur en marche alimente les appareils électriques.
@@ -137,7 +139,10 @@ impl Block {
 
     /// Bloc qui garde des objets (ouvert avec le panneau du coffre).
     pub const fn is_storage(self) -> bool {
-        matches!(self, Block::Chest | Block::Turret | Block::Generator)
+        matches!(
+            self,
+            Block::Chest | Block::Turret | Block::Generator | Block::SupplyCrate
+        )
     }
 
     /// Appareil qui ne marche qu'alimenté par un générateur proche.
@@ -245,6 +250,7 @@ impl Block {
             Block::Floodlight => [0.92, 0.92, 0.85],
             Block::ElectricDoor | Block::ElectricDoorOpen => [0.45, 0.50, 0.56],
             Block::TeslaCoil => [0.55, 0.40, 0.25],
+            Block::SupplyCrate => [0.95, 0.50, 0.10],
             Block::BarbedWire => [0.55, 0.55, 0.58],
             Block::MachineGun => [0.30, 0.32, 0.30],
             Block::Cannon => [0.22, 0.22, 0.25],
@@ -283,6 +289,7 @@ impl Block {
             Block::Floodlight => "Projecteur",
             Block::ElectricDoor | Block::ElectricDoorOpen => "Porte électrique",
             Block::TeslaCoil => "Bobine électrique",
+            Block::SupplyCrate => "Caisse de ravitaillement",
             Block::BarbedWire => "Barbelés",
             Block::MachineGun => "Mitrailleuse",
             Block::Cannon => "Canon",
@@ -320,6 +327,7 @@ impl Block {
             Block::Floodlight => 150,
             Block::ElectricDoor | Block::ElectricDoorOpen => 500,
             Block::TeslaCoil => 300,
+            Block::SupplyCrate => 150,
             Block::BarbedWire => 60,
             Block::MachineGun => 320,
             Block::Cannon => 400,

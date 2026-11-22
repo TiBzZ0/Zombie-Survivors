@@ -349,8 +349,10 @@ fn spawn_waves(
     mut ids: ResMut<NextZombieId>,
     zombies: Query<(), With<Zombie>>,
     mut server: Option<ResMut<RenetServer>>,
+    weather: Option<Res<crate::events::Weather>>,
 ) {
-    if !clock.is_night() {
+    let fog = weather.is_some_and(|w| w.fog);
+    if !clock.is_night() && !fog {
         return;
     }
     waves.spawn_timer -= time.delta_secs();
@@ -366,8 +368,22 @@ fn spawn_waves(
     if players.is_empty() {
         return;
     }
-    let horde = clock.is_horde_night();
+    let horde = clock.is_night() && clock.is_horde_night();
     let n = players.len() as u32;
+    if !clock.is_night() {
+        // Dans le brouillard, quelques zombies rôdent en plein jour.
+        let alive = zombies.iter().count() as u32;
+        waves.spawn_timer = 8.0;
+        if alive < (6 + 4 * n).min(30) {
+            let around = players[fastrand::usize(0..players.len())];
+            for _ in 0..2 {
+                if let Some(pos) = find_spawn_spot(&world, around, SPAWN_MIN_DIST, SPAWN_MAX_DIST) {
+                    spawn_zombie(&mut commands, &mut ids, random_kind(clock.day), pos);
+                }
+            }
+        }
+        return;
+    }
     let cap = if horde {
         (100 + 40 * n).min(320)
     } else {
@@ -891,7 +907,9 @@ fn sun_and_cleanup(
     waves: Res<Waves>,
     lobby: Res<Lobby>,
     mut zombies: Query<(Entity, &mut Zombie, &ZombieBody)>,
+    weather: Option<Res<crate::events::Weather>>,
 ) {
+    let fog = weather.is_some_and(|w| w.fog);
     let players: Vec<Vec3> = lobby
         .players
         .values()
@@ -899,7 +917,8 @@ fn sun_and_cleanup(
         .map(|p| p.state.position)
         .collect();
     for (entity, mut zombie, body) in &mut zombies {
-        if !clock.is_night() && !waves.stress {
+        // Le brouillard cache le soleil : les zombies ne brûlent pas.
+        if !clock.is_night() && !waves.stress && !fog {
             zombie.health -= SUN_DPS * time.delta_secs();
         }
         let far = players.iter().all(|p| p.distance(body.position) > DESPAWN_DIST);
@@ -1363,5 +1382,66 @@ mod climate_tests {
             "l'infection avancée ronge la vie : {}",
             player.health
         );
+    }
+}
+
+#[cfg(test)]
+mod fog_tests {
+    use shared::config::WorldConfig;
+    use shared::daytime::GameTime;
+    use shared::world::WorldState;
+
+    use super::*;
+
+    fn daylight_zombie(fog: bool) -> f32 {
+        let mut app = App::new();
+        app.insert_resource(GameWorld(WorldState::new(WorldConfig::default())))
+            .insert_resource(Clock(GameTime { day: 3, phase: 0.2 }))
+            .insert_resource(crate::events::Weather { fog })
+            .init_resource::<Time>()
+            .init_resource::<Waves>()
+            .init_resource::<Lobby>()
+            .add_systems(Update, sun_and_cleanup);
+        // Un joueur tout près, pour que le zombie ne soit pas retiré.
+        let mut player = crate::net::ConnectedPlayer::new(Vec3::new(52.0, 40.0, 50.0));
+        player.name = "Alice".into();
+        app.world_mut().resource_mut::<Lobby>().players.insert(1, player);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Zombie {
+                    id: 1,
+                    kind: ZombieKind::Walker,
+                    health: 100.0,
+                    attack_cooldown: 0.0,
+                    attacking: 0.0,
+                    hurt_timer: 0.0,
+                    knockback: Vec3::ZERO,
+                    last_attacker: None,
+                    climb_from: None,
+                    stuck: 0.0,
+                },
+                ZombieBody {
+                    position: Vec3::new(50.0, 40.0, 50.0),
+                    velocity: Vec3::ZERO,
+                    yaw: 0.0,
+                    on_ground: true,
+                    hit_wall: false,
+                },
+            ))
+            .id();
+        for _ in 0..30 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f32(0.1));
+            app.update();
+        }
+        app.world().get::<Zombie>(entity).unwrap().health
+    }
+
+    #[test]
+    fn fog_hides_the_sun_from_zombies() {
+        assert!(daylight_zombie(false) < 90.0);
+        assert_eq!(daylight_zombie(true), 100.0);
     }
 }

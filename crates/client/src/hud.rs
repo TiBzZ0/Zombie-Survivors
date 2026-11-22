@@ -408,7 +408,16 @@ fn update_status(
         } else {
             ""
         };
-        format!("Jour {}\nNuit dans {}{next}", t.day, format_secs(t.secs_until_night()))
+        let fog = if clock.fog {
+            "\nBrouillard : les zombies ne brûlent pas"
+        } else {
+            ""
+        };
+        format!(
+            "Jour {}\nNuit dans {}{next}{fog}",
+            t.day,
+            format_secs(t.secs_until_night())
+        )
     };
     let armor = player.inventory.armor_reduction();
     health_text.0 = if armor > 0.0 {
