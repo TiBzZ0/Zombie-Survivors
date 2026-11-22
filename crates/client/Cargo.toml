@@ -8,5 +8,6 @@ publish.workspace = true
 
 [dependencies]
 shared.workspace = true
+bevy_renet.workspace = true
 server.workspace = true
 bevy = { workspace = true, default-features = true, features = ["free_camera"] }

@@ -15,10 +15,23 @@ Jeu de survie coopératif en voxel, à la première personne, écrit en Rust ave
 Prérequis : Rust stable récent (1.97.1 minimum, exigé par Bevy 0.20).
 
 ```sh
-cargo run -p client --release
+cargo run -p client --release                              # menu principal
+cargo run -p client --release -- --solo                    # partie locale directe
+cargo run -p client --release -- --connect 1.2.3.4:7777    # rejoindre un serveur
+cargo run -p client --release -- --name Pseudo             # choisir son pseudo
 ```
 
-Pour l'instant, une caméra libre survole le terrain : clic droit maintenu ou `M` pour capturer la souris, `ZQSD`/`WASD` pour avancer, `A`/`E` pour monter et descendre, `Maj` pour aller plus vite.
+En partie locale, le client héberge le serveur : les joueurs du même réseau peuvent rejoindre avec ton adresse IP locale (port UDP 7777).
+
+| Touche | Action |
+| --- | --- |
+| `ZQSD` (AZERTY) ou `WASD` (QWERTY) | Se déplacer |
+| Espace | Sauter |
+| Maj gauche | Courir |
+| Souris | Regarder (clic dans la fenêtre pour capturer la souris, Échap pour la libérer) |
+| Clic gauche | Casser un bloc |
+| Clic droit | Poser le bloc sélectionné |
+| `1` à `7` | Choisir le bloc à poser |
 
 Sous Linux, Bevy demande `libasound2-dev`, `libudev-dev`, `libwayland-dev` et `libxkbcommon-dev`.
 

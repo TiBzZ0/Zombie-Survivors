@@ -4,6 +4,8 @@
 //! - le binaire `server`, lancé seul dans Docker (serveur dédié) ;
 //! - le mode local, où le client démarre ce serveur dans un thread à côté de lui.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bevy::app::ScheduleRunnerPlugin;
@@ -12,6 +14,7 @@ use bevy::prelude::*;
 use shared::TICK_RATE_HZ;
 
 pub mod config;
+pub mod net;
 pub mod world;
 
 pub use config::ServerConfig;
@@ -26,10 +29,12 @@ impl Plugin for ServerPlugin {
         app.insert_resource(self.config.clone())
             .insert_resource(Time::<Fixed>::from_hz(TICK_RATE_HZ))
             .init_resource::<TickCount>()
-            .add_plugins(world::WorldPlugin)
+            .init_resource::<ShutdownFlag>()
+            .add_plugins((world::WorldPlugin, net::NetPlugin))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)
-            .add_systems(Update, report_status);
+            .add_systems(Update, report_status)
+            .add_systems(Last, exit_on_shutdown);
     }
 }
 
@@ -76,37 +81,60 @@ pub fn build_app(config: ServerConfig, with_logs: bool) -> App {
     app
 }
 
-/// Arrête proprement le serveur sur SIGTERM (`docker stop`) ou Ctrl+C, pour laisser
-/// le temps de sauvegarder au lieu d'être tué en plein tick.
-pub fn install_shutdown_handler(app: &mut App) {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+/// Drapeau d'arrêt partagé : quand il passe à vrai, le serveur se ferme proprement
+/// à la fin du tick en cours (et pourra sauvegarder avant).
+#[derive(Resource, Clone, Default)]
+pub struct ShutdownFlag(pub Arc<AtomicBool>);
 
-    #[derive(Resource, Clone)]
-    struct ShutdownRequested(Arc<AtomicBool>);
-
-    fn exit_on_signal(flag: Res<ShutdownRequested>, mut exit: MessageWriter<AppExit>) {
-        if flag.0.load(Ordering::Relaxed) {
-            info!("Signal d'arrêt reçu, fermeture du serveur");
-            exit.write(AppExit::Success);
-        }
+impl ShutdownFlag {
+    pub fn request(&self) {
+        self.0.store(true, Ordering::Relaxed);
     }
+}
 
-    let flag = Arc::new(AtomicBool::new(false));
-    let handler_flag = flag.clone();
-    if let Err(error) = ctrlc::set_handler(move || handler_flag.store(true, Ordering::Relaxed)) {
+fn exit_on_shutdown(flag: Res<ShutdownFlag>, mut exit: MessageWriter<AppExit>) {
+    if flag.0.load(Ordering::Relaxed) {
+        info!("Arrêt demandé, fermeture du serveur");
+        exit.write(AppExit::Success);
+    }
+}
+
+/// Arrête proprement le serveur sur SIGTERM (`docker stop`) ou Ctrl+C.
+pub fn install_shutdown_handler(app: &mut App) {
+    let flag = app.world().resource::<ShutdownFlag>().clone();
+    if let Err(error) = ctrlc::set_handler(move || flag.request()) {
         warn!("Impossible d'intercepter les signaux d'arrêt : {error}");
     }
-    app.insert_resource(ShutdownRequested(flag))
-        .add_systems(Last, exit_on_signal);
+}
+
+/// Serveur local lancé par le client. Le serveur s'arrête quand la poignée est abandonnée.
+pub struct LocalServer {
+    flag: ShutdownFlag,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for LocalServer {
+    fn drop(&mut self) {
+        self.flag.request();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 /// Démarre le serveur dans un thread, pour le mode local (solo ou LAN).
-pub fn spawn_local(config: ServerConfig) -> std::thread::JoinHandle<()> {
-    std::thread::Builder::new()
+pub fn spawn_local(config: ServerConfig) -> std::io::Result<LocalServer> {
+    let flag = ShutdownFlag::default();
+    let thread_flag = flag.clone();
+    let thread = std::thread::Builder::new()
         .name("serveur-local".into())
         .spawn(move || {
-            build_app(config, false).run();
-        })
-        .expect("impossible de démarrer le thread du serveur local")
+            let mut app = build_app(config, false);
+            app.insert_resource(thread_flag);
+            app.run();
+        })?;
+    Ok(LocalServer {
+        flag,
+        thread: Some(thread),
+    })
 }

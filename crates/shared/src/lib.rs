@@ -7,6 +7,10 @@
 pub mod block;
 pub mod chunk;
 pub mod config;
+pub mod physics;
+pub mod protocol;
+pub mod raycast;
+pub mod world;
 pub mod worldgen;
 
 /// Fréquence de simulation du serveur, en ticks par seconde.
