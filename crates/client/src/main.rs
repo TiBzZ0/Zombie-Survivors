@@ -17,6 +17,7 @@ mod effects;
 mod hud;
 mod menu;
 mod meshing;
+mod minimap;
 mod net;
 mod player;
 mod remote;
@@ -26,6 +27,7 @@ mod sound;
 mod survivors;
 mod terrain;
 mod textures;
+mod tutorial;
 mod zombies;
 
 use bevy::prelude::*;
@@ -121,7 +123,11 @@ fn main() {
             chest::ChestPlugin,
             survivors::SurvivorsPlugin,
         ))
-        .add_plugins(settings::SettingsPlugin)
+        .add_plugins((
+            settings::SettingsPlugin,
+            minimap::MinimapPlugin,
+            tutorial::TutorialPlugin,
+        ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
         .add_systems(OnExit(AppState::Playing), release_cursor)

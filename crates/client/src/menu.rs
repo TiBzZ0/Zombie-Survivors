@@ -40,6 +40,7 @@ enum SettingLine {
     Sensitivity,
     Volume,
     Fullscreen,
+    ViewDistance,
 }
 
 /// Ligne de réglage : nom et valeur, boutons − et + (ou un seul bouton pour basculer).
@@ -65,6 +66,7 @@ fn setting_row(line: SettingLine) -> impl Bundle {
                 SettingLine::Sensitivity => settings.nudge_sensitivity(steps),
                 SettingLine::Volume => settings.nudge_volume(steps),
                 SettingLine::Fullscreen => settings.fullscreen = !settings.fullscreen,
+                SettingLine::ViewDistance => settings.nudge_view_distance(steps),
             }
             settings.save();
         }
@@ -96,6 +98,7 @@ fn settings_labels(settings: Res<Settings>, mut labels: Query<(&SettingLine, &mu
         let value = match line {
             SettingLine::Sensitivity => format!("Sensibilité souris : {:.2}", settings.sensitivity),
             SettingLine::Volume => format!("Volume : {:.0} %", settings.volume * 100.0),
+            SettingLine::ViewDistance => format!("Distance d'affichage : {} chunks", settings.view_distance),
             SettingLine::Fullscreen => {
                 format!(
                     "Plein écran (F11) : {}",
@@ -212,8 +215,9 @@ fn spawn_menu(mut commands: Commands, options: Res<LaunchOptions>, mut notice: R
                 setting_row(SettingLine::Sensitivity),
                 setting_row(SettingLine::Volume),
                 setting_row(SettingLine::Fullscreen),
+                setting_row(SettingLine::ViewDistance),
                 label(
-                    "ZQSD/WASD : se déplacer · Espace : sauter · Clic gauche : frapper / miner / tirer · Clic droit : parler, ouvrir, poser, manger · 1-9, molette : objet · C : fabriquer · T : discuter",
+                    "ZQSD/WASD : se déplacer · Espace : sauter · Clic gauche : frapper / miner / tirer · Clic droit : parler, ouvrir, poser, manger · 1-9, molette : objet · C : fabriquer · T : discuter · M : carte · H : objectifs",
                     14.0,
                     Color::srgb(0.6, 0.6, 0.6)
                 ),

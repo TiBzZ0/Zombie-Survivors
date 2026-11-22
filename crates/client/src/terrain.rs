@@ -13,9 +13,9 @@ use shared::world::WorldState;
 use crate::AppState;
 use crate::meshing::{MeshData, build_chunk_mesh};
 use crate::net::{ClientWorld, NetEvent};
+use crate::settings::Settings;
 
 /// Distance d'affichage, en chunks.
-const VIEW_RADIUS: i32 = 7;
 /// Nombre maximal de chunks en cours de génération en même temps.
 const MAX_TASKS: usize = 12;
 
@@ -114,7 +114,9 @@ fn request_chunks(
     mut terrain: ResMut<Terrain>,
     world: Res<ClientWorld>,
     camera: Single<&Transform, With<Camera3d>>,
+    settings: Res<Settings>,
 ) {
+    let view_radius = settings.view_distance;
     let mut budget = MAX_TASKS.saturating_sub(terrain.pending.len());
 
     // Les chunks modifiés passent en premier : c'est ce que le joueur regarde.
@@ -136,9 +138,9 @@ fn request_chunks(
     let center = ChunkPos::from_block(p.x as i32, 0, p.z as i32);
     let config = world.config().clone();
     let mut wanted: Vec<ChunkPos> = Vec::new();
-    for dx in -VIEW_RADIUS..=VIEW_RADIUS {
-        for dz in -VIEW_RADIUS..=VIEW_RADIUS {
-            if dx * dx + dz * dz > VIEW_RADIUS * VIEW_RADIUS {
+    for dx in -view_radius..=view_radius {
+        for dz in -view_radius..=view_radius {
+            if dx * dx + dz * dz > view_radius * view_radius {
                 continue;
             }
             for y in 0..config.height_chunks {
@@ -156,7 +158,7 @@ fn request_chunks(
     }
 
     // Décharge les chunks trop loin.
-    let far = VIEW_RADIUS + 2;
+    let far = view_radius + 2;
     let to_unload: Vec<ChunkPos> = terrain
         .loaded
         .keys()
