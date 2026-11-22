@@ -2,6 +2,12 @@
 
 Jeu de survie coopératif en voxel, à la première personne, écrit en Rust avec Bevy : récolter des ressources, construire sa base et tenir face à des hordes de zombies. De 2 à 8 joueurs sur un serveur dédié (Docker) ou en mode local. Nom provisoire.
 
+## Jouer
+
+Télécharger `ZombieSurvivors-windows.zip` dans les [versions](https://github.com/TiBzZ0/Zombie-Survivors/releases), décompresser, lancer `ZombieSurvivors.exe`. Dans le menu : « Jouer en solo / héberger » ou « Rejoindre » avec l'adresse du serveur.
+
+Publier une version : `git tag v0.1.0 && git push origin v0.1.0` (la CI construit le .zip et l'image du serveur).
+
 ## Organisation
 
 | Crate | Rôle |

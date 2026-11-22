@@ -6,6 +6,9 @@
 //! - `--connect <adresse:port>` : rejoint directement un serveur ;
 //! - `--name <pseudo>` : choisit le pseudo.
 
+// Sous Windows, pas de fenêtre de console en plus du jeu (en version release).
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod crafting;
 mod hud;
 mod menu;
