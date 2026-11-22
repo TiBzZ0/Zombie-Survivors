@@ -58,9 +58,15 @@ struct ChunkTask {
 #[derive(Component)]
 struct ChunkMesh;
 
-fn setup_material(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn setup_material(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let atlas = images.add(crate::textures::build_atlas());
     let handle = materials.add(StandardMaterial {
         base_color: Color::WHITE,
+        base_color_texture: Some(atlas),
         perceptual_roughness: 1.0,
         ..default()
     });
@@ -186,11 +192,10 @@ fn finish_chunks(
             terrain.loaded.insert(pos, None);
             continue;
         }
-        let vertex_count = data.positions.len();
         let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, data.positions)
             .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32, 0.0]; vertex_count])
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs)
             .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, data.colors)
             .with_inserted_indices(Indices::U32(data.indices));
         let [ox, oy, oz] = pos.origin();

@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button, TextInput, observe};
 
+use crate::settings::Settings;
 use crate::{AppState, LaunchOptions, MenuNotice};
 
 pub struct MenuPlugin;
@@ -14,7 +15,10 @@ impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Menu), (spawn_menu, auto_start).chain())
             .add_systems(OnExit(AppState::Menu), despawn_menu)
-            .add_systems(Update, button_colors.run_if(in_state(AppState::Menu)));
+            .add_systems(
+                Update,
+                (button_colors, settings_labels).run_if(in_state(AppState::Menu)),
+            );
     }
 }
 
@@ -29,6 +33,81 @@ struct AddressInput;
 
 #[derive(Component)]
 struct MenuButton;
+
+/// Réglage affiché sur une ligne du menu.
+#[derive(Component, Clone, Copy)]
+enum SettingLine {
+    Sensitivity,
+    Volume,
+    Fullscreen,
+}
+
+/// Ligne de réglage : nom et valeur, boutons − et + (ou un seul bouton pour basculer).
+fn setting_row(line: SettingLine) -> impl Bundle {
+    let small = |text: &'static str| {
+        (
+            Button,
+            MenuButton,
+            Hovered::default(),
+            Node {
+                width: px(40),
+                padding: px(4).all(),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(BUTTON_COLOR),
+            children![label(text, 20.0, Color::WHITE)],
+        )
+    };
+    let change = move |steps: f32| {
+        move |_: On<Activate>, mut settings: ResMut<Settings>| {
+            match line {
+                SettingLine::Sensitivity => settings.nudge_sensitivity(steps),
+                SettingLine::Volume => settings.nudge_volume(steps),
+                SettingLine::Fullscreen => settings.fullscreen = !settings.fullscreen,
+            }
+            settings.save();
+        }
+    };
+    (
+        Node {
+            width: px(320),
+            column_gap: px(8),
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        children![
+            (small("−"), observe(change(-1.0))),
+            (
+                Node {
+                    flex_grow: 1.0,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                children![(label("", 18.0, Color::WHITE), line)],
+            ),
+            (small("+"), observe(change(1.0))),
+        ],
+    )
+}
+
+fn settings_labels(settings: Res<Settings>, mut labels: Query<(&SettingLine, &mut Text)>) {
+    for (line, mut text) in &mut labels {
+        let value = match line {
+            SettingLine::Sensitivity => format!("Sensibilité souris : {:.2}", settings.sensitivity),
+            SettingLine::Volume => format!("Volume : {:.0} %", settings.volume * 100.0),
+            SettingLine::Fullscreen => {
+                format!(
+                    "Plein écran (F11) : {}",
+                    if settings.fullscreen { "oui" } else { "non" }
+                )
+            }
+        };
+        if text.0 != value {
+            text.0 = value;
+        }
+    }
+}
 
 const BUTTON_COLOR: Color = Color::srgb(0.18, 0.22, 0.18);
 const BUTTON_HOVER: Color = Color::srgb(0.28, 0.36, 0.26);
@@ -129,8 +208,12 @@ fn spawn_menu(mut commands: Commands, options: Res<LaunchOptions>, mut notice: R
                     }),
                 ),
                 label(&notice_text, 18.0, Color::srgb(1.0, 0.55, 0.45)),
+                label("Réglages", 18.0, Color::WHITE),
+                setting_row(SettingLine::Sensitivity),
+                setting_row(SettingLine::Volume),
+                setting_row(SettingLine::Fullscreen),
                 label(
-                    "ZQSD/WASD : se déplacer · Espace : sauter · Clic gauche : frapper / miner · Clic droit : poser / manger · 1-9, molette : objet · C : fabriquer",
+                    "ZQSD/WASD : se déplacer · Espace : sauter · Clic gauche : frapper / miner / tirer · Clic droit : parler, ouvrir, poser, manger · 1-9, molette : objet · C : fabriquer · T : discuter",
                     14.0,
                     Color::srgb(0.6, 0.6, 0.6)
                 ),

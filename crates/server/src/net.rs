@@ -491,6 +491,7 @@ fn handle_reliable(
                 return;
             };
             if player.is_alive() && world.block(pos) == Block::Chest && within_reach(player, pos) {
+                chests.fill_ruin_chest(world, pos);
                 player.open_chest = Some(pos);
                 let contents = chests.0.get(&pos).cloned().unwrap_or_default();
                 send(server, client, &ServerMessage::Chest { pos, contents });
@@ -523,7 +524,7 @@ fn handle_reliable(
                 from.remove(item, moved);
                 to.add(item, moved);
             }
-            if chests.0.get(&pos).is_some_and(Inventory::is_empty) {
+            if chests.0.get(&pos).is_some_and(Inventory::is_empty) && !Chests::is_ruin_chest(world, pos) {
                 chests.0.remove(&pos);
             }
             send_inventory(server, client, player);
@@ -576,6 +577,10 @@ fn handle_reliable(
                 _ => false,
             };
             let allowed = pos.y > 0 && within_reach(player, pos) && block.is_solid() && mined_long_enough;
+            if allowed && block == Block::Chest {
+                // Un coffre de ruine cassé sans avoir été ouvert rend quand même son butin.
+                chests.fill_ruin_chest(world, pos);
+            }
             if allowed && block.is_deposit() {
                 // Un filon donne une ressource par récolte et ne disparaît qu'à la dernière.
                 let remaining = deposits.0.entry(pos).or_insert(DEPOSIT_HARVESTS);

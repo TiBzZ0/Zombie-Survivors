@@ -16,6 +16,7 @@ use shared::survivor::TALK_RANGE;
 
 use crate::AppState;
 use crate::net::{ClientWorld, NetEvent, Session, send_reliable, send_state};
+use crate::settings::Settings;
 use crate::survivors::{SurvivorView, aimed_survivor};
 use crate::zombies::ZombieView;
 
@@ -199,12 +200,18 @@ fn close_chest(player: &mut LocalPlayer, client: &mut RenetClient) {
     }
 }
 
-fn look(motion: Res<AccumulatedMouseMotion>, cursor: Single<&CursorOptions>, mut player: ResMut<LocalPlayer>) {
+fn look(
+    motion: Res<AccumulatedMouseMotion>,
+    cursor: Single<&CursorOptions>,
+    settings: Res<Settings>,
+    mut player: ResMut<LocalPlayer>,
+) {
     if !cursor_locked(&cursor) {
         return;
     }
-    player.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
-    player.pitch = (player.pitch - motion.delta.y * MOUSE_SENSITIVITY).clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
+    let k = MOUSE_SENSITIVITY * settings.sensitivity;
+    player.yaw -= motion.delta.x * k;
+    player.pitch = (player.pitch - motion.delta.y * k).clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
 }
 
 fn select_slot(

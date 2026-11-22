@@ -13,6 +13,7 @@ use shared::protocol::{ServerMessage, SurvivorState, encode};
 use shared::survivor::{
     MAX_FOLLOWERS, Order, RECRUIT_COST, SURVIVOR_SIZE, SURVIVOR_SPEED, SurvivorStats, TALK_RANGE, name_from_seed,
 };
+use shared::worldgen::RUIN_CELL;
 
 use crate::daynight::Clock;
 use crate::net::{Lobby, broadcast, send, send_chest_to_viewers, send_inventory};
@@ -211,7 +212,8 @@ fn spawn_wanderers(
     if wild.iter().any(|w| w.distance(around) < 100.0) {
         return;
     }
-    let Some(position) = find_spawn_spot(&world, around, 25.0, 45.0) else {
+    // De préférence dans une ruine proche, sinon quelque part dans la nature.
+    let Some(position) = ruin_near(&world, around).or_else(|| find_spawn_spot(&world, around, 25.0, 45.0)) else {
         return;
     };
     let seed = fastrand::u32(..);
@@ -226,6 +228,22 @@ fn spawn_wanderers(
         broadcast(server, &survivor.info());
     }
     commands.spawn(survivor);
+}
+
+/// Centre d'une ruine à bonne distance d'un joueur (ni sous ses yeux, ni trop loin).
+fn ruin_near(world: &GameWorld, around: Vec3) -> Option<Vec3> {
+    let generator = world.generator();
+    let (cx, cz) = (
+        (around.x as i32).div_euclid(RUIN_CELL),
+        (around.z as i32).div_euclid(RUIN_CELL),
+    );
+    let ruins: Vec<Vec3> = (-1..=1)
+        .flat_map(|dx| (-1..=1).map(move |dz| (cx + dx, cz + dz)))
+        .filter_map(|(x, z)| generator.ruin_in_cell(x, z))
+        .map(|(x, ground, z, _)| Vec3::new(x as f32 + 0.5, ground as f32, z as f32 + 0.5))
+        .filter(|p| (20.0..90.0).contains(&p.distance(around)))
+        .collect();
+    (!ruins.is_empty()).then(|| ruins[fastrand::usize(0..ruins.len())])
 }
 
 /// Recrutement, changement d'ordre et renvoi.
