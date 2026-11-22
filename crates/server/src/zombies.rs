@@ -38,7 +38,8 @@ const DESPAWN_DIST: f32 = 120.0;
 const VIEW_DIST: f32 = 90.0;
 /// Dégâts du soleil par seconde.
 const SUN_DPS: f32 = 6.0;
-const JUMP_SPEED: f32 = 7.5;
+/// Assez pour franchir une marche d'un bloc avec de la marge.
+const JUMP_SPEED: f32 = 8.5;
 
 pub struct ZombiePlugin;
 
@@ -93,6 +94,8 @@ pub struct Zombie {
     pub last_attacker: Option<ClientId>,
     /// Hauteur où il a commencé à grimper sur les autres zombies (pour borner la pile).
     pub climb_from: Option<f32>,
+    /// Depuis combien de temps il pousse contre un obstacle sans avancer.
+    pub stuck: f32,
 }
 
 /// Corps physique d'un zombie.
@@ -127,6 +130,20 @@ struct Waves {
     colossus_day: Option<u32>,
     /// En mode test de charge, les zombies ne brûlent pas le jour.
     stress: bool,
+    /// Nuit en cours (son jour) et zombies déjà envoyés cette nuit-là.
+    night: u32,
+    spawned: u32,
+}
+
+/// Nombre total de zombies envoyés pendant une nuit : il grandit avec les nuits et les joueurs.
+/// Sans ce plafond, un joueur qui tue vite verrait arriver un flot sans fin.
+pub fn night_budget(day: u32, players: u32, horde: bool) -> u32 {
+    let extra = players.saturating_sub(1);
+    if horde {
+        90 + 15 * day + 50 * extra
+    } else {
+        25 + 11 * day + 15 * extra
+    }
 }
 
 #[derive(Resource, Default)]
@@ -187,6 +204,7 @@ fn spawn_zombie(commands: &mut Commands, ids: &mut NextZombieId, kind: ZombieKin
             knockback: Vec3::ZERO,
             last_attacker: None,
             climb_from: None,
+            stuck: 0.0,
         },
         ZombieBody {
             position,
@@ -221,8 +239,8 @@ fn random_kind(day: u32) -> ZombieKind {
     let r = fastrand::f32();
     let brute = (0.04 + day as f32 * 0.01).min(0.2);
     let runner = (0.15 + day as f32 * 0.015).min(0.35);
-    // Les cracheurs arrivent à partir de la deuxième nuit.
-    let spitter = if day >= 2 {
+    // Les cracheurs arrivent à partir de la troisième nuit.
+    let spitter = if day >= 3 {
         (0.04 + day as f32 * 0.01).min(0.15)
     } else {
         0.0
@@ -349,16 +367,24 @@ fn spawn_waves(
     let horde = clock.is_horde_night();
     let n = players.len() as u32;
     let cap = if horde {
-        (150 + 50 * n).min(400)
+        (100 + 40 * n).min(320)
     } else {
         (20 + 10 * n + 4 * clock.day).min(150)
     };
     let alive = zombies.iter().count() as u32;
     waves.spawn_timer = if horde { 1.5 } else { 4.0 };
-    if alive >= cap {
+    if waves.night != clock.day {
+        waves.night = clock.day;
+        waves.spawned = 0;
+    }
+    let left = night_budget(clock.day, n, horde).saturating_sub(waves.spawned);
+    if alive >= cap || left == 0 {
         return;
     }
-    let group = (if horde { 8 } else { 3 } + fastrand::u32(0..4)).min(cap - alive);
+    let group = (if horde { 8 } else { 3 } + fastrand::u32(0..4))
+        .min(cap - alive)
+        .min(left);
+    waves.spawned += group;
     let around = players[fastrand::usize(0..players.len())];
     // Chaque grande horde est menée par un colosse.
     if horde
@@ -597,7 +623,45 @@ fn zombie_ai(
         }
 
         let slow = if in_wire { WIRE_SLOW } else { 1.0 };
-        let wish = wish.normalize_or_zero() * stats.speed * slow;
+        let mut wish = wish.normalize_or_zero() * stats.speed * slow;
+        // Coincé (fosse, marche trop haute, branches basses) : il escalade d'abord, puis casse ce qui le bloque.
+        let mut scrambling = false;
+        if zombie.stuck > STUCK_SECS && !climbing && face.is_none() {
+            if wish.length() < 0.1
+                && let Some((_, player_pos, _)) = nearest
+            {
+                wish = (player_pos - body.position).with_y(0.0).normalize_or_zero() * stats.speed;
+            }
+            // On n'escalade que contre une paroi, jamais dans le vide.
+            let against = [Vec3::X, Vec3::NEG_X, Vec3::Z, Vec3::NEG_Z].into_iter().any(|d| {
+                world.is_solid(block_containing(
+                    body.position + d * (stats.size.half_width + 0.3) + Vec3::Y * 0.5,
+                ))
+            });
+            scrambling = against && zombie.stuck < STUCK_SECS * 3.0;
+        }
+        if zombie.stuck > STUCK_SECS * 3.0 && wish != Vec3::ZERO && !climbing {
+            let dir = wish.normalize();
+            let reach = body.position + dir * (stats.size.half_width + 0.45);
+            let blocker = [0.2, 1.2, 1.9]
+                .into_iter()
+                .map(|dy| block_containing(reach + Vec3::Y * dy))
+                .find(|p| p.y > 0 && world.is_solid(*p) && world.block(*p).max_health() > 0);
+            if let Some(block_pos) = blocker {
+                face = Some(block_pos.as_vec3() + Vec3::splat(0.5));
+                zombie.attacking = 0.4;
+                damage_block(
+                    block_pos,
+                    stats.block_dps * dt,
+                    &mut damage,
+                    &mut world,
+                    &mut version,
+                    server.as_deref_mut(),
+                    &mut lobby,
+                    &mut chests,
+                );
+            }
+        }
         if let Some(target) = face {
             body.yaw = (body.position.x - target.x).atan2(body.position.z - target.z);
         } else if wish != Vec3::ZERO {
@@ -608,7 +672,7 @@ fn zombie_ai(
         if body.on_ground && body.hit_wall && wish != Vec3::ZERO {
             velocity.y = JUMP_SPEED;
         }
-        if climbing {
+        if climbing || scrambling {
             velocity.y = velocity.y.max(CLIMB_SPEED);
         } else if body.on_ground && !at_wall {
             zombie.climb_from = None;
@@ -616,6 +680,20 @@ fn zombie_ai(
         let result = step_body(body.position, velocity, stats.size, dt, &|p| {
             world.is_solid(p) || p.y < 0
         });
+        // Avance réelle comparée à l'avance voulue.
+        let moved = (result.position - body.position).with_y(0.0).length();
+        let wanted = wish.with_y(0.0).length() * dt;
+        let blocked = wanted > 0.0 && moved < wanted * 0.2;
+        // Rester sur place en voulant monter (fond d'une fosse) compte aussi.
+        let pinned = face.is_none()
+            && nearest.is_some_and(|n| n.2 > ZOMBIE_REACH + 1.0 && n.2 < 64.0)
+            && moved < 0.01
+            && wanted == 0.0;
+        if (blocked || pinned) && !climbing {
+            zombie.stuck += dt;
+        } else {
+            zombie.stuck = (zombie.stuck - dt * 2.0).max(0.0);
+        }
         body.position = result.position;
         body.velocity = Vec3::new(0.0, result.velocity.y, 0.0);
         body.on_ground = result.on_ground;
@@ -627,6 +705,9 @@ fn zombie_ai(
         }
     }
 }
+
+/// Temps passé à pousser sans avancer avant qu'un zombie ne casse l'obstacle.
+const STUCK_SECS: f32 = 1.5;
 
 /// Distance à laquelle un zombie s'en prend à un survivant plutôt qu'au joueur le plus proche.
 const SURVIVOR_AGGRO: f32 = 12.0;
@@ -1008,6 +1089,7 @@ mod tests {
                     knockback: Vec3::ZERO,
                     last_attacker: None,
                     climb_from: None,
+                    stuck: 0.0,
                 },
                 ZombieBody {
                     position: pos,
@@ -1033,6 +1115,70 @@ mod tests {
             .iter(app.world())
             .filter(|b| b.position.z > wall_z as f32 + 1.0)
             .count()
+    }
+
+    #[test]
+    fn nights_send_a_bounded_but_growing_number_of_zombies() {
+        assert!(night_budget(1, 1, false) < night_budget(6, 1, false));
+        assert!(night_budget(6, 1, false) < night_budget(6, 4, false));
+        assert!(night_budget(7, 1, true) > 2 * night_budget(6, 1, false));
+        assert!(night_budget(1, 1, false) <= 40, "première nuit trop chargée");
+    }
+
+    #[test]
+    fn zombies_reach_a_player_across_natural_terrain() {
+        // Sur le vrai terrain autour du point de départ (arbres, marches, rives), aucun zombie
+        // ne doit rester coincé : ils cassent ce qui les bloque.
+        let world = GameWorld(WorldState::new(WorldConfig::default()));
+        let spawn = crate::world::find_spawn(&world);
+        let mut lobby = Lobby::default();
+        let mut player = ConnectedPlayer::new(spawn);
+        player.name = "Zoé".into();
+        player.health = f32::MAX;
+        lobby.players.insert(1, player);
+        let mut app = App::new();
+        app.insert_resource(Clock(GameTime { day: 1, phase: 0.9 }))
+            .insert_resource(lobby)
+            .init_resource::<Time>()
+            .init_resource::<Flow>()
+            .init_resource::<BlockDamage>()
+            .init_resource::<WorldVersion>()
+            .init_resource::<Chests>()
+            .init_resource::<TickStats>()
+            .add_systems(Update, (update_flow_field, zombie_ai, separate_zombies).chain());
+        let mut ids = NextZombieId::default();
+        fastrand::seed(7);
+        let mut spawned = 0;
+        for _ in 0..200 {
+            if spawned == 16 {
+                break;
+            }
+            if let Some(pos) = find_spawn_spot(&world, spawn, 20.0, 30.0) {
+                let mut commands = app.world_mut().commands();
+                spawn_zombie(&mut commands, &mut ids, ZombieKind::Walker, pos);
+                spawned += 1;
+            }
+        }
+        app.insert_resource(world);
+        app.world_mut().flush();
+        for _ in 0..(90.0 * 30.0) as usize {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f32(1.0 / 30.0));
+            app.update();
+        }
+        let far: Vec<Vec3> = app
+            .world_mut()
+            .query::<&ZombieBody>()
+            .iter(app.world())
+            .map(|b| b.position)
+            .filter(|p| p.distance(spawn) > 4.0)
+            .collect();
+        assert!(
+            far.len() <= 2,
+            "{} zombies sur {spawned} sont restés loin : {far:?}",
+            far.len()
+        );
     }
 
     #[test]
