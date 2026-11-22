@@ -439,13 +439,28 @@ fn zombie_ai(
                     zombie.attack_cooldown = ZOMBIE_ATTACK_COOLDOWN;
                     zombie.attacking = 0.4;
                     if let Some(player) = lobby.players.get_mut(&player_id) {
-                        hurt_player(
-                            player_id,
-                            player,
-                            stats.damage,
-                            death_cause(zombie.kind),
-                            server.as_deref_mut(),
-                        );
+                        let (amount, parried) = player.incoming_damage(stats.damage, body.position);
+                        if parried {
+                            // Parade : le zombie est repoussé et met du temps à revenir.
+                            let back = (body.position - player_pos).with_y(0.0).normalize_or_zero();
+                            zombie.knockback = back * 8.0 + Vec3::Y * 3.0;
+                            zombie.attack_cooldown += PARRY_STUN;
+                            if let Some(server) = server.as_deref_mut() {
+                                server.send_message(
+                                    player_id,
+                                    DefaultChannel::ReliableOrdered,
+                                    encode(&ServerMessage::Parried),
+                                );
+                            }
+                        } else {
+                            hurt_player(
+                                player_id,
+                                player,
+                                amount,
+                                death_cause(zombie.kind),
+                                server.as_deref_mut(),
+                            );
+                        }
                     }
                 }
             } else if let Some(node) = flow.field.get(feet) {
@@ -518,6 +533,8 @@ const SURVIVOR_AGGRO: f32 = 12.0;
 
 /// Dégâts par seconde des piques aux zombies qui les touchent.
 const SPIKE_DPS: f32 = 12.0;
+/// Temps d'étourdissement d'un zombie dont le coup a été paré.
+const PARRY_STUN: f32 = 1.2;
 /// Dégâts par seconde des barbelés, usure du fil et ralentissement.
 const WIRE_DPS: f32 = 8.0;
 const WIRE_WEAR: f32 = 6.0;
@@ -731,6 +748,9 @@ fn player_survival(time: Res<Time>, mut lobby: ResMut<Lobby>, mut server: Option
     let dt = time.delta_secs();
     for (id, player) in lobby.players.iter_mut() {
         player.attack_cooldown -= dt;
+        if let Some(t) = player.guarding.as_mut() {
+            *t += dt;
+        }
         if !player.is_alive() {
             continue;
         }

@@ -28,10 +28,6 @@ const MOUSE_SENSITIVITY: f32 = 0.0025;
 const ACTION_COOLDOWN: f32 = 0.22;
 /// Délai après avoir mangé.
 const EAT_COOLDOWN: f32 = 0.6;
-/// Délai entre deux coups portés à un zombie (le serveur applique le même).
-const ATTACK_COOLDOWN: f32 = 0.4;
-/// Portée d'un coup de mêlée.
-const MELEE_REACH: f32 = 3.0;
 
 /// Nombre de cases de la barre d'objets (touches 1 à 9).
 pub const HOTBAR_SLOTS: usize = 9;
@@ -98,6 +94,10 @@ pub struct LocalPlayer {
     pub aimed_survivor: Option<u32>,
     /// Indication à afficher sur le survivant visé.
     pub survivor_hint: Option<String>,
+    /// Garde levée (arme de mêlée en main, clic droit maintenu).
+    pub guarding: bool,
+    /// Intensité de l'effet « paré ! » (0 à 1).
+    pub parry_flash: f32,
     cooldown: f32,
     last_sent: f64,
 }
@@ -257,8 +257,10 @@ fn apply_teleports(
     time: Res<Time>,
 ) {
     player.hurt_flash = (player.hurt_flash - time.delta_secs() * 2.0).max(0.0);
+    player.parry_flash = (player.parry_flash - time.delta_secs() * 3.0).max(0.0);
     for event in events.read() {
         match event {
+            NetEvent::Parried => player.parry_flash = 1.0,
             NetEvent::Teleport(position) => {
                 player.position = *position;
                 player.velocity = Vec3::ZERO;
@@ -329,6 +331,8 @@ fn move_player(
     } else {
         WALK_SPEED
     };
+    // Garde levée : on avance à petits pas.
+    let speed = if player.guarding { WALK_SPEED * 0.5 } else { speed };
     let wish = Quat::from_rotation_y(player.yaw) * wish.normalize_or_zero() * speed;
 
     let dt = time.delta_secs().min(0.05);
@@ -382,6 +386,25 @@ fn interact(
         .map(|(id, _)| id);
     player.cooldown -= dt;
     player.needs_pickaxe = false;
+    // Garde : clic droit maintenu avec une arme de mêlée, sauf pour parler, ouvrir une porte ou un coffre.
+    let interactable = player.aimed_survivor.is_some()
+        || player.target.is_some_and(|h| {
+            let b = world.block(h.block);
+            b.is_door() || b.is_storage()
+        });
+    let guard = cursor_locked(&cursor)
+        && player.dead.is_none()
+        && mouse.pressed(MouseButton::Right)
+        && player.held().is_some_and(Item::is_melee_weapon)
+        && (player.guarding || !interactable);
+    if guard != player.guarding {
+        player.guarding = guard;
+        send_reliable(&mut client, &ClientMessage::Guard { active: guard });
+    }
+    if guard {
+        player.mining = None;
+        return;
+    }
     if !cursor_locked(&cursor) || player.dead.is_some() || !mouse.pressed(MouseButton::Left) {
         player.mining = None;
     }
@@ -408,13 +431,14 @@ fn interact(
             .target
             .map(|h| (h.block.as_vec3() + Vec3::splat(0.5)).distance(player.eye()))
             .unwrap_or(f32::MAX);
-        if let Some((id, dist)) = aimed_zombie(player.eye(), player.look_direction(), &zombies)
+        let melee = Item::melee(player.held());
+        if let Some((id, dist)) = aimed_zombie(player.eye(), player.look_direction(), melee.reach, &zombies)
             && dist < block_dist
         {
             player.mining = None;
             if player.cooldown <= 0.0 {
                 send_reliable(&mut client, &ClientMessage::Attack { zombie: id });
-                player.cooldown = ATTACK_COOLDOWN;
+                player.cooldown = melee.cooldown;
             }
             return;
         }
@@ -531,14 +555,14 @@ fn send_position(mut player: ResMut<LocalPlayer>, mut client: ResMut<RenetClient
 }
 
 /// Zombie visé (intersection rayon / boîte) à portée de mêlée, avec sa distance.
-fn aimed_zombie(eye: Vec3, dir: Vec3, zombies: &Query<(&ZombieView, &Transform)>) -> Option<(u32, f32)> {
+fn aimed_zombie(eye: Vec3, dir: Vec3, reach: f32, zombies: &Query<(&ZombieView, &Transform)>) -> Option<(u32, f32)> {
     let mut best: Option<(u32, f32)> = None;
     for (view, transform) in zombies.iter() {
         let size = view.kind.stats().size;
         let min = transform.translation - Vec3::new(size.half_width + 0.1, 0.0, size.half_width + 0.1);
         let max = transform.translation + Vec3::new(size.half_width + 0.1, size.height, size.half_width + 0.1);
         if let Some(t) = ray_aabb(eye, dir, min, max)
-            && t <= MELEE_REACH
+            && t <= reach
             && best.is_none_or(|(_, d)| t < d)
         {
             best = Some((view.id, t));

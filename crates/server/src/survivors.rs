@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy_renet::RenetServer;
 use bevy_renet::renet::{ClientId, DefaultChannel};
 use shared::block::Block;
-use shared::item::Item;
+use shared::item::{ArmorSlot, Item, armor_reduction};
 use shared::physics::step_body;
 use shared::protocol::{ServerMessage, SurvivorState, encode};
 use shared::raycast::raycast;
@@ -95,6 +95,8 @@ pub struct Survivor {
     pub order: Order,
     /// Arme confiée par son chef.
     pub weapon: Option<Item>,
+    /// Casque et armure confiés par son chef.
+    pub armor: [Option<Item>; 2],
     /// Endroit gardé, récolté ou réparé (son camp s'il n'a pas de chef).
     pub post: Vec3,
     pub position: Vec3,
@@ -123,6 +125,7 @@ impl Survivor {
             leader: None,
             order: Order::Idle,
             weapon: None,
+            armor: [None; 2],
             post: position,
             position,
             velocity: Vec3::ZERO,
@@ -140,8 +143,9 @@ impl Survivor {
         }
     }
 
+    /// Blessure, atténuée par l'armure portée.
     pub fn hurt(&mut self, amount: f32) {
-        self.health -= amount;
+        self.health -= amount * (1.0 - armor_reduction(self.armor));
         self.hurt_timer = 0.3;
         self.since_hit = 0.0;
     }
@@ -159,7 +163,22 @@ impl Survivor {
             leader: self.leader.clone(),
             order: self.order,
             weapon: self.weapon,
+            armor: self.armor,
         }
+    }
+
+    /// Rend au chef tout ce qu'il avait confié.
+    fn return_gear(&mut self, inventory: &mut shared::item::Inventory) -> bool {
+        let gear: Vec<Item> = self
+            .weapon
+            .take()
+            .into_iter()
+            .chain(self.armor.iter_mut().filter_map(Option::take))
+            .collect();
+        for item in &gear {
+            inventory.add(*item, 1);
+        }
+        !gear.is_empty()
     }
 }
 
@@ -175,6 +194,7 @@ fn restore_survivors(mut commands: Commands, saved: Res<SavedSurvivors>, mut ids
         survivor.leader = s.leader.clone();
         survivor.order = s.order;
         survivor.weapon = s.weapon;
+        survivor.armor = s.armor;
         survivor.post = s.post;
         commands.spawn(survivor);
     }
@@ -305,36 +325,44 @@ fn handle_talk(
                 None => "J'ai trop faim pour te suivre. Apporte-moi une ration ou 3 pommes.".into(),
             },
             Some(leader) if leader == player.name && give => {
-                // Le chef confie l'arme qu'il tient ; l'ancienne lui revient.
-                match player.held_item().filter(|i| i.is_weapon()) {
-                    Some(weapon) if Some(weapon) != s.weapon => {
-                        player.inventory.remove(weapon, 1);
-                        if let Some(old) = s.weapon.replace(weapon) {
+                // Le chef confie l'arme ou l'armure qu'il tient ; l'ancienne pièce lui revient.
+                let held = player.held_item().filter(|i| i.is_giftable());
+                let slot = held.map(|item| match item.armor() {
+                    Some((ArmorSlot::Head, _)) => &mut s.armor[0],
+                    Some((ArmorSlot::Body, _)) => &mut s.armor[1],
+                    None => &mut s.weapon,
+                });
+                match (held, slot) {
+                    (Some(item), Some(slot)) if Some(item) != *slot => {
+                        player.inventory.remove(item, 1);
+                        if let Some(old) = slot.replace(item) {
                             player.inventory.add(old, 1);
                         }
                         if let Some(server) = server.as_deref_mut() {
                             send_inventory(server, client, player);
                         }
                         changed = true;
-                        if weapon.ranged().is_some() {
-                            let ammo = weapon.ranged().map_or(String::new(), |r| r.ammo.name().to_lowercase());
+                        if let Some(ranged) = item.ranged() {
+                            let ammo = ranged.ammo.name().to_lowercase();
                             format!(
                                 "Merci ! Je prendrai les {ammo}s dans ton sac, ou dans le coffre près de mon poste."
                             )
+                        } else if item.armor().is_some() {
+                            "Merci, je me sens déjà mieux protégé.".into()
                         } else {
                             "Merci, ça va m'aider à les tenir à distance.".into()
                         }
                     }
-                    Some(_) => "J'ai déjà la même.".into(),
-                    None => "Tiens une épée, un arc ou un fusil en main pour me le donner.".into(),
+                    (Some(_), _) => "J'ai déjà la même.".into(),
+                    _ => "Tiens une arme ou une pièce d'armure en main pour me la donner.".into(),
                 }
             }
             Some(leader) if leader == player.name => {
-                if dismiss && let Some(old) = s.weapon.take() {
-                    player.inventory.add(old, 1);
-                    if let Some(server) = server.as_deref_mut() {
-                        send_inventory(server, client, player);
-                    }
+                if dismiss
+                    && s.return_gear(&mut player.inventory)
+                    && let Some(server) = server.as_deref_mut()
+                {
+                    send_inventory(server, client, player);
                 }
                 s.order = if dismiss { Order::Idle } else { s.order.next() };
                 if dismiss {
@@ -421,6 +449,9 @@ fn survivor_ai(
             _ => (s.post, DEFEND_RADIUS),
         };
         let ranged = s.weapon.and_then(Item::ranged);
+        let melee = Item::melee(s.weapon.filter(|w| w.is_melee_weapon()));
+        // Une lance tient les zombies plus loin.
+        let melee_range = ATTACK_RANGE + (melee.reach - Item::melee(None).reach).max(0.0);
         // Avec une arme à distance, il vise plus loin que sa zone.
         let radius = if ranged.is_some() { radius + 8.0 } else { radius };
         let threat = zombies
@@ -464,19 +495,28 @@ fn survivor_ai(
                         );
                     }
                 }
-            } else if flat.length() < ATTACK_RANGE && (target.y - s.position.y).abs() < 1.6 {
+            } else if flat.length() < melee_range && (target.y - s.position.y).abs() < 1.6 {
                 face = Some(target);
                 if s.attack_cooldown <= 0.0 {
-                    s.attack_cooldown = ATTACK_COOLDOWN;
+                    // L'arme de mêlée ajoute ses dégâts à la force du survivant et règle sa cadence.
+                    s.attack_cooldown = ATTACK_COOLDOWN * (melee.cooldown / Item::melee(None).cooldown).sqrt();
                     s.attacking = 0.4;
-                    // Une épée ajoute ses dégâts à la force du survivant.
-                    let blade = s.weapon.filter(|w| w.ranged().is_none());
-                    let bonus = Item::melee_damage(blade) - Item::melee_damage(None);
-                    if let Some((mut z, _)) = zombies.iter_mut().find(|(z, _)| z.id == zombie_id) {
-                        z.health -= s.stats.damage() + bonus;
-                        z.hurt_timer = 0.3;
-                        let push = flat.normalize_or_zero() * 5.0;
-                        z.knockback = Vec3::new(push.x, 2.5, push.y);
+                    let damage = s.stats.damage() + melee.damage - Item::melee_damage(None);
+                    let dir = flat.normalize_or_zero();
+                    for (mut z, body) in zombies.iter_mut() {
+                        let to = Vec2::new(body.position.x - s.position.x, body.position.z - s.position.z);
+                        // La masse balaie tout ce qui est devant ; sinon, seule la cible est touchée.
+                        let hit = if melee.sweep {
+                            z.health > 0.0 && to.length() < melee_range + 0.3 && to.normalize_or_zero().dot(dir) > 0.4
+                        } else {
+                            z.id == zombie_id
+                        };
+                        if hit {
+                            z.health -= damage;
+                            z.hurt_timer = 0.3;
+                            let push = to.normalize_or_zero() * melee.knockback * 0.8;
+                            z.knockback = Vec3::new(push.x, 2.5, push.y);
+                        }
                     }
                 }
             } else {
@@ -800,6 +840,7 @@ fn record_survivors(survivors: Query<&Survivor>, mut saved: ResMut<SavedSurvivor
             leader: s.leader.clone(),
             order: s.order,
             weapon: s.weapon,
+            armor: s.armor,
         })
         .collect();
     saved.0.sort_by(|a, b| a.name.cmp(&b.name));

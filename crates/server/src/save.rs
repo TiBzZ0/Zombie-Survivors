@@ -20,7 +20,7 @@ use crate::world::{Chests, Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
 
 /// Change si le format du fichier change de façon incompatible.
-pub const SAVE_VERSION: u32 = 5;
+pub const SAVE_VERSION: u32 = 6;
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";
@@ -68,6 +68,37 @@ pub struct SavedSurvivor {
     pub order: Order,
     /// Arme confiée (depuis la version 5).
     pub weapon: Option<Item>,
+    /// Casque et armure confiés (depuis la version 6).
+    pub armor: [Option<Item>; 2],
+}
+
+/// Survivant tel qu'enregistré en version 5, avant les armures.
+#[derive(Deserialize)]
+struct SavedSurvivorV5 {
+    name: String,
+    stats: SurvivorStats,
+    health: f32,
+    position: Vec3,
+    post: Vec3,
+    leader: Option<String>,
+    order: Order,
+    weapon: Option<Item>,
+}
+
+impl From<SavedSurvivorV5> for SavedSurvivor {
+    fn from(s: SavedSurvivorV5) -> Self {
+        Self {
+            name: s.name,
+            stats: s.stats,
+            health: s.health,
+            position: s.position,
+            post: s.post,
+            leader: s.leader,
+            order: s.order,
+            weapon: s.weapon,
+            armor: [None; 2],
+        }
+    }
 }
 
 /// Survivant tel qu'enregistré en version 4, avant les armes.
@@ -93,6 +124,7 @@ impl From<SavedSurvivorV4> for SavedSurvivor {
             leader: s.leader,
             order: s.order,
             weapon: None,
+            armor: [None; 2],
         }
     }
 }
@@ -153,8 +185,11 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
     } else {
         (Vec::new(), rest)
     };
-    let survivors: Vec<SavedSurvivor> = if version >= 5 {
+    let survivors: Vec<SavedSurvivor> = if version >= 6 {
         postcard::take_from_bytes(rest).map_err(invalid)?.0
+    } else if version == 5 {
+        let (old, _) = postcard::take_from_bytes::<Vec<SavedSurvivorV5>>(rest).map_err(invalid)?;
+        old.into_iter().map(Into::into).collect()
     } else if version == 4 {
         let (old, _) = postcard::take_from_bytes::<Vec<SavedSurvivorV4>>(rest).map_err(invalid)?;
         old.into_iter().map(Into::into).collect()
@@ -335,6 +370,7 @@ mod tests {
                 leader: Some("Alice".into()),
                 order: Order::Guard,
                 weapon: Some(Item::Bow),
+                armor: [Some(Item::Helmet(shared::item::Tier::Iron)), None],
             }],
         };
         write(&dir, &save).unwrap();
@@ -393,6 +429,7 @@ mod tests {
         assert_eq!(upgraded.survivors.len(), 1);
         assert_eq!(upgraded.survivors[0].order, Order::Gather);
         assert_eq!(upgraded.survivors[0].weapon, None);
+        assert_eq!(upgraded.survivors[0].armor, [None; 2]);
 
         std::fs::write(save_path(&dir), b"abime").unwrap();
         assert!(load(&dir).is_err());

@@ -25,7 +25,6 @@ use crate::zombies::{Zombie, ZombieBody};
 
 /// Portée d'un coup de mêlée, en mètres.
 pub const MELEE_REACH: f32 = 3.0;
-const PLAYER_ATTACK_COOLDOWN: f32 = 0.35;
 
 /// Nombre de blocs modifiés par message lors du rattrapage d'un joueur qui arrive.
 const EDITS_PER_MESSAGE: usize = 2048;
@@ -66,7 +65,14 @@ pub struct ConnectedPlayer {
     pub mining: Option<(IVec3, f64)>,
     /// Coffre ouvert par le joueur.
     pub open_chest: Option<IVec3>,
+    /// Depuis combien de secondes le joueur tient sa garde levée.
+    pub guarding: Option<f32>,
 }
+
+/// Durée après avoir levé la garde pendant laquelle un coup est paré.
+pub const PARRY_WINDOW: f32 = 0.3;
+/// Part des dégâts qui passe à travers la garde.
+const GUARD_FACTOR: f32 = 0.35;
 
 /// Santé maximale d'un joueur.
 pub const MAX_HEALTH: f32 = 100.0;
@@ -96,7 +102,29 @@ impl ConnectedPlayer {
             held: None,
             mining: None,
             open_chest: None,
+            guarding: None,
         }
+    }
+
+    /// Garde levée avec une arme de mêlée en main.
+    pub fn guard_time(&self) -> Option<f32> {
+        self.guarding
+            .filter(|_| self.held_item().is_some_and(Item::is_melee_weapon))
+    }
+
+    /// Dégâts réellement subis d'un coup venu de `from` : la garde levée face au coup
+    /// les réduit (ou les annule si elle vient d'être levée : parade), l'armure aussi.
+    /// Renvoie aussi vrai si le coup a été paré.
+    pub fn incoming_damage(&self, amount: f32, from: Vec3) -> (f32, bool) {
+        let look = Quat::from_rotation_y(self.state.yaw) * Vec3::NEG_Z;
+        let to = Vec3::new(from.x - self.state.position.x, 0.0, from.z - self.state.position.z).normalize_or_zero();
+        let facing = look.dot(to) > 0.2;
+        let (amount, parried) = match self.guard_time() {
+            Some(t) if facing && t <= PARRY_WINDOW => (0.0, true),
+            Some(_) if facing => (amount * GUARD_FACTOR, false),
+            _ => (amount, false),
+        };
+        (amount * (1.0 - self.inventory.armor_reduction()), parried)
     }
 
     /// Objet en main s'il est encore dans l'inventaire.
@@ -344,20 +372,50 @@ fn handle_reliable(
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
             };
-            if !player.is_alive() || player.attack_cooldown > 0.0 {
+            if !player.is_alive() || player.attack_cooldown > 0.0 || player.guard_time().is_some() {
                 return;
             }
+            let melee = Item::melee(player.held_item());
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
             let look = Quat::from_euler(EulerRot::YXZ, player.state.yaw, 0.0, 0.0) * Vec3::NEG_Z;
-            if let Some((mut z, body)) = zombies.iter_mut().find(|(z, _)| z.id == zombie) {
+            let flat_look = Vec3::new(look.x, 0.0, look.z).normalize_or_zero();
+            let in_reach = |z: &Zombie, body: &ZombieBody| {
                 let center = body.position + Vec3::Y * z.kind.stats().size.height * 0.5;
-                if center.distance(eye) <= MELEE_REACH + 1.0 {
-                    player.attack_cooldown = PLAYER_ATTACK_COOLDOWN;
-                    z.health -= Item::melee_damage(player.held_item());
+                center.distance(eye) <= melee.reach + 1.0
+            };
+            let Some(target) = zombies
+                .iter()
+                .find(|(z, b)| z.id == zombie && in_reach(z, b))
+                .map(|(_, b)| b.position)
+            else {
+                return;
+            };
+            // Petite marge : le client et le serveur ne mesurent pas le temps tout à fait pareil.
+            player.attack_cooldown = melee.cooldown * 0.85;
+            for (mut z, body) in zombies.iter_mut() {
+                // La masse balaie tous les zombies devant le joueur.
+                let to = Vec3::new(body.position.x - target.x, 0.0, body.position.z - target.z);
+                let ahead = Vec3::new(body.position.x - eye.x, 0.0, body.position.z - eye.z).normalize_or_zero();
+                let hit = z.id == zombie
+                    || (melee.sweep
+                        && z.health > 0.0
+                        && in_reach(&z, body)
+                        && (ahead.dot(flat_look) > 0.5 || to.length() < 1.0));
+                if hit {
+                    z.health -= melee.damage;
                     z.hurt_timer = 0.3;
-                    z.knockback = Vec3::new(look.x, 0.0, look.z).normalize_or_zero() * 6.0 + Vec3::Y * 3.0;
+                    z.knockback = flat_look * melee.knockback + Vec3::Y * 3.0;
                     z.last_attacker = Some(client);
                 }
+            }
+        }
+        ClientMessage::Guard { active } => {
+            if let Some(player) = lobby.players.get_mut(&client) {
+                player.guarding = match (active, player.guarding) {
+                    (true, Some(t)) => Some(t),
+                    (true, None) => Some(0.0),
+                    (false, _) => None,
+                };
             }
         }
         ClientMessage::Shoot { direction } => {
@@ -763,6 +821,29 @@ fn sanitize_name(name: &str, client: ClientId) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::item::Tier;
+
+    #[test]
+    fn guard_parry_and_armor_reduce_damage() {
+        // Le joueur regarde vers -Z ; le zombie arrive de face.
+        let mut p = ConnectedPlayer::new(Vec3::ZERO);
+        let front = Vec3::new(0.0, 0.0, -1.0);
+        let back = Vec3::new(0.0, 0.0, 1.0);
+        assert_eq!(p.incoming_damage(20.0, front), (20.0, false));
+        // Sans arme de mêlée, lever la garde ne sert à rien.
+        p.guarding = Some(0.0);
+        assert_eq!(p.incoming_damage(20.0, front), (20.0, false));
+        p.inventory.add(Item::Sword(Tier::Wood), 1);
+        p.held = Some(Item::Sword(Tier::Wood));
+        assert_eq!(p.incoming_damage(20.0, front), (0.0, true));
+        p.guarding = Some(1.0);
+        assert_eq!(p.incoming_damage(20.0, front), (20.0 * GUARD_FACTOR, false));
+        assert_eq!(p.incoming_damage(20.0, back), (20.0, false));
+        p.guarding = None;
+        p.inventory.add(Item::BodyArmor(Tier::Iron), 1);
+        let (dealt, _) = p.incoming_damage(20.0, back);
+        assert!((dealt - 14.0).abs() < 1e-4);
+    }
 
     #[test]
     fn names_are_cleaned() {

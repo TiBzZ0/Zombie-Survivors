@@ -30,6 +30,11 @@ fn main() {
         (Item::Ammo, 48),
         (Item::Pickaxe(Tier::Iron), 1),
         (Item::Sword(Tier::Iron), 1),
+        (Item::Spear(Tier::Iron), 1),
+        (Item::Axe(Tier::Stone), 1),
+        (Item::Mace, 1),
+        (Item::Helmet(Tier::Iron), 1),
+        (Item::BodyArmor(Tier::Wood), 1),
         (Item::Ration, 5),
     ] {
         inventory.add(item, n);
@@ -48,6 +53,7 @@ fn main() {
         position: at,
         post: at,
         weapon: leader.as_ref().map(|_| Item::Bow),
+        armor: [None; 2],
         leader,
         order,
     };

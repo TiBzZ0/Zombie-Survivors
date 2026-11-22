@@ -394,7 +394,12 @@ fn update_status(
         };
         format!("Jour {}\nNuit dans {}{next}", t.day, format_secs(t.secs_until_night()))
     };
-    health_text.0 = format!("{:.0}", player.health.ceil());
+    let armor = player.inventory.armor_reduction();
+    health_text.0 = if armor > 0.0 {
+        format!("{:.0} · armure {:.0} %", player.health.ceil(), armor * 100.0)
+    } else {
+        format!("{:.0}", player.health.ceil())
+    };
     fill.width = percent(player.health.clamp(0.0, 100.0));
     hunger_text.0 = if player.hunger <= 0.0 {
         "Affamé !".into()
@@ -440,10 +445,18 @@ fn update_status(
         }
     } else if player.held().is_some_and(|i| i.food().is_some()) {
         "Clic droit : manger".into()
+    } else if player.guarding {
+        "Garde levée".into()
+    } else if player.held().is_some_and(|i| i.is_melee_weapon()) {
+        "Clic droit maintenu : garde (levée juste avant le coup, elle le pare)".into()
     } else {
         String::new()
     };
-    overlay.0 = Color::srgba(0.8, 0.0, 0.0, player.hurt_flash * 0.35);
+    overlay.0 = if player.parry_flash > player.hurt_flash {
+        Color::srgba(0.85, 0.9, 1.0, player.parry_flash * 0.3)
+    } else {
+        Color::srgba(0.8, 0.0, 0.0, player.hurt_flash * 0.35)
+    };
     match &player.dead {
         Some(cause) => {
             **death = Visibility::Visible;

@@ -43,6 +43,7 @@ pub struct SurvivorInfo {
     pub leader: Option<String>,
     pub order: Order,
     pub weapon: Option<Item>,
+    pub armor: [Option<Item>; 2],
 }
 
 /// Survivants affichés et identités connues, par identifiant serveur.
@@ -203,6 +204,7 @@ fn receive_survivors(
                 leader,
                 order,
                 weapon,
+                armor,
             } => {
                 registry.infos.insert(
                     *id,
@@ -212,6 +214,7 @@ fn receive_survivors(
                         leader: leader.clone(),
                         order: *order,
                         weapon: *weapon,
+                        armor: *armor,
                     },
                 );
             }
@@ -325,7 +328,12 @@ fn update_hint(registry: Res<SurvivorRegistry>, session: Option<Res<Session>>, m
         .and_then(|id| registry.infos.get(&id))
         .map(|info| {
             let me = session.as_ref().map(|s| s.my_name.as_str());
-            let armed = info.weapon.map_or(String::new(), |w| format!(", {}", w.name()));
+            let armed: String = info
+                .weapon
+                .iter()
+                .chain(info.armor.iter().flatten())
+                .map(|i| format!(", {}", i.name().to_lowercase()))
+                .collect();
             match &info.leader {
                 None => format!(
                     "{} ({})\nClic droit : recruter contre 1 ration ou 3 pommes",
@@ -333,7 +341,7 @@ fn update_hint(registry: Res<SurvivorRegistry>, session: Option<Res<Session>>, m
                     info.stats.describe()
                 ),
                 Some(leader) if Some(leader.as_str()) == me => format!(
-                    "{} {} ({}{armed})\nClic droit : ordre suivant ({}) · Ctrl : confier l'arme tenue · Maj : renvoyer",
+                    "{} {} ({}{armed})\nClic droit : ordre suivant ({}) · Ctrl : confier l'arme ou l'armure tenue · Maj : renvoyer",
                     info.name,
                     info.order.label(),
                     info.stats.describe(),

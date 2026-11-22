@@ -166,6 +166,84 @@ pub const RECIPES: &[Recipe] = &[
         inputs: &[(Item::IronIngot, 3), (b(Block::Planks), 4), (Item::Bow, 1)],
         station: Some(Block::Forge),
     },
+    Recipe {
+        output: Item::Spear(Tier::Wood),
+        count: 1,
+        inputs: &[(Item::Stick, 3), (b(Block::Planks), 1)],
+        station: None,
+    },
+    Recipe {
+        output: Item::Axe(Tier::Wood),
+        count: 1,
+        inputs: &[(b(Block::Planks), 3), (Item::Stick, 2)],
+        station: None,
+    },
+    Recipe {
+        output: Item::Spear(Tier::Stone),
+        count: 1,
+        inputs: &[(Item::Stick, 3), (b(Block::Stone), 1)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: Item::Axe(Tier::Stone),
+        count: 1,
+        inputs: &[(b(Block::Stone), 3), (Item::Stick, 2)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: Item::Spear(Tier::Iron),
+        count: 1,
+        inputs: &[(Item::Stick, 3), (Item::IronIngot, 1)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: Item::Axe(Tier::Iron),
+        count: 1,
+        inputs: &[(Item::IronIngot, 3), (Item::Stick, 2)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: Item::Mace,
+        count: 1,
+        inputs: &[(Item::IronIngot, 4), (Item::Stick, 2), (b(Block::Stone), 2)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: Item::Helmet(Tier::Wood),
+        count: 1,
+        inputs: &[(b(Block::Planks), 5)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: Item::BodyArmor(Tier::Wood),
+        count: 1,
+        inputs: &[(b(Block::Planks), 8), (Item::Stick, 2)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: Item::Helmet(Tier::Stone),
+        count: 1,
+        inputs: &[(b(Block::Stone), 5), (Item::Stick, 1)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: Item::BodyArmor(Tier::Stone),
+        count: 1,
+        inputs: &[(b(Block::Stone), 8), (Item::Stick, 2)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: Item::Helmet(Tier::Iron),
+        count: 1,
+        inputs: &[(Item::IronIngot, 5)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: Item::BodyArmor(Tier::Iron),
+        count: 1,
+        inputs: &[(Item::IronIngot, 8)],
+        station: Some(Block::Forge),
+    },
 ];
 
 impl Recipe {
