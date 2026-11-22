@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0013;
+pub const PROTOCOL_ID: u64 = 0x5A53_0014;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -370,6 +370,11 @@ pub enum ServerMessage {
     Zap {
         origin: Vec3,
         end: Vec3,
+    },
+    /// Une construction s'est effondrée (pour la poussière et le grondement).
+    Collapse {
+        pos: Vec3,
+        blocks: u16,
     },
 }
 

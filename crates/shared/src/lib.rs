@@ -16,6 +16,7 @@ pub mod pathfinding;
 pub mod physics;
 pub mod protocol;
 pub mod raycast;
+pub mod structure;
 pub mod survivor;
 pub mod world;
 pub mod worldgen;

@@ -16,6 +16,7 @@ use shared::item::{Inventory, Item, break_time, drop_for};
 use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid};
 use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMessage, decode, encode};
 use shared::raycast::{ray_aabb, raycast};
+use shared::structure::would_hold;
 
 use crate::ServerConfig;
 use crate::animals::Animal;
@@ -893,7 +894,19 @@ fn handle_reliable(
                 && world.block(pos).is_replaceable()
                 && (!blocked_by_player || !block.is_solid())
                 && world.in_bounds(pos);
-            if allowed && world.set_block(pos, block) {
+            // Un bloc trop loin de tout appui s'effondrerait aussitôt : on refuse de le poser.
+            let holds = would_hold(pos, block, |p| world.block(p), |p| world.edits().contains_key(&p));
+            if allowed && !holds {
+                send(
+                    server,
+                    client,
+                    &ServerMessage::Chat {
+                        from: "Serveur".into(),
+                        text: "Ce bloc ne tiendrait pas : rapprochez-le d'un pilier ou du sol.".into(),
+                    },
+                );
+            }
+            if allowed && holds && world.set_block(pos, block) {
                 player.inventory.remove(cost, 1);
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block });
