@@ -40,6 +40,12 @@ pub enum Item {
     Bolt,
     /// Boulet de canon.
     CannonBall,
+    /// Graines de blé : se sèment sur la terre ou l'herbe.
+    Seeds,
+    Wheat,
+    Bread,
+    RawMeat,
+    CookedMeat,
 }
 
 /// Caractéristiques d'un explosif qu'on lance.
@@ -135,6 +141,11 @@ impl Item {
             Item::Crossbow => "Arbalète".into(),
             Item::Bolt => "Carreau".into(),
             Item::CannonBall => "Boulet".into(),
+            Item::Seeds => "Graines".into(),
+            Item::Wheat => "Blé".into(),
+            Item::Bread => "Pain".into(),
+            Item::RawMeat => "Viande crue".into(),
+            Item::CookedMeat => "Viande cuite".into(),
         }
     }
 
@@ -220,6 +231,9 @@ impl Item {
             Item::Apple => Some((20.0, 0.0)),
             Item::Ration => Some((55.0, 5.0)),
             Item::Bandage => Some((0.0, 35.0)),
+            Item::Bread => Some((40.0, 0.0)),
+            Item::RawMeat => Some((12.0, 0.0)),
+            Item::CookedMeat => Some((60.0, 8.0)),
             _ => None,
         }
     }
@@ -350,6 +364,9 @@ pub fn drop_for(block: Block) -> Option<Item> {
         Block::IronOre => Some(Item::RawIron),
         Block::CoalOre => Some(Item::Coal),
         Block::DoorOpen => Some(Item::Block(Block::Door)),
+        // Les cultures rendent leurs graines, le blé mûr du blé (le serveur ajoute des graines).
+        Block::Sprout | Block::YoungWheat => Some(Item::Seeds),
+        Block::RipeWheat => Some(Item::Wheat),
         other => Some(Item::Block(other)),
     }
 }

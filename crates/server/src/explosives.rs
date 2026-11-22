@@ -9,6 +9,7 @@ use shared::item::{Item, Throwable};
 use shared::physics::{PROJECTILE_GRAVITY, step_projectile};
 use shared::protocol::ServerMessage;
 
+use crate::animals::Animal;
 use crate::net::{Lobby, WorldVersion, broadcast};
 use crate::survivors::Survivor;
 use crate::world::{Deposits, GameWorld};
@@ -114,6 +115,7 @@ fn update_projectiles(
     mut server: Option<ResMut<RenetServer>>,
     mut zombies: Query<(&mut Zombie, &ZombieBody)>,
     mut survivors: Query<&mut Survivor>,
+    mut animals: Query<&mut Animal>,
 ) {
     let dt = time.delta_secs();
     let mut exploded = Vec::new();
@@ -167,6 +169,15 @@ fn update_projectiles(
             if d < blast.radius {
                 let amount = falloff(d) * FRIENDLY_FACTOR * (1.0 - player.inventory.armor_reduction());
                 hurt_player(*id, player, amount, "Pris dans une explosion", server.as_deref_mut());
+            }
+        }
+        for mut a in &mut animals {
+            let (min, max) = a.bounds();
+            let center = (min + max) * 0.5;
+            let d = center.distance(p.position);
+            if d < blast.radius {
+                let away = (center - p.position).with_y(0.0).normalize_or_zero();
+                a.hurt(falloff(d), p.owner, away * 8.0 + Vec3::Y * 4.0);
             }
         }
         for mut s in &mut survivors {

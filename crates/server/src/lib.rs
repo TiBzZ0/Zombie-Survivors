@@ -13,9 +13,11 @@ use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use shared::TICK_RATE_HZ;
 
+pub mod animals;
 pub mod config;
 pub mod daynight;
 pub mod explosives;
+pub mod farming;
 pub mod net;
 pub mod save;
 pub mod survivors;
@@ -45,6 +47,8 @@ impl Plugin for ServerPlugin {
                 survivors::SurvivorPlugin,
                 turrets::TurretPlugin,
                 explosives::ExplosivesPlugin,
+                farming::FarmingPlugin,
+                animals::AnimalPlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)

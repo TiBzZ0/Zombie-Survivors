@@ -43,6 +43,14 @@ pub enum Block {
     Cannon,
     /// Catapulte : se pilote, lance des pierres en cloche loin derrière les murs.
     Catapult,
+    /// Pousse de blé, tout juste semée.
+    Sprout,
+    /// Blé en herbe.
+    YoungWheat,
+    /// Blé mûr, prêt à récolter.
+    RipeWheat,
+    /// Feu de camp : on y cuit la viande et le pain.
+    Campfire,
 }
 
 /// Distance maximale entre un joueur et l'arme fixe qu'il pilote.
@@ -77,12 +85,17 @@ impl Block {
 
     /// Un bloc solide bloque le déplacement et cache les faces voisines.
     pub const fn is_solid(self) -> bool {
-        !matches!(self, Block::Air | Block::DoorOpen | Block::BarbedWire)
+        !matches!(self, Block::Air | Block::DoorOpen | Block::BarbedWire | Block::Campfire) && !self.is_crop()
+    }
+
+    /// Culture qui pousse sur la terre.
+    pub const fn is_crop(self) -> bool {
+        matches!(self, Block::Sprout | Block::YoungWheat | Block::RipeWheat)
     }
 
     /// Un bloc opaque est un cube plein : il cache les faces de ses voisins.
     pub const fn is_opaque(self) -> bool {
-        !matches!(self, Block::Air | Block::DoorOpen | Block::BarbedWire)
+        !matches!(self, Block::Air | Block::DoorOpen | Block::BarbedWire | Block::Campfire) && !self.is_crop()
     }
 
     /// Bloc qui garde des objets (ouvert avec le panneau du coffre).
@@ -139,6 +152,10 @@ impl Block {
             Block::DoorOpen => Some(([0.0, 0.0, 0.0], [0.15, 1.0, 1.0])),
             // Barbelés : une haie basse.
             Block::BarbedWire => Some(([0.05, 0.0, 0.05], [0.95, 0.45, 0.95])),
+            Block::Sprout => Some(([0.2, 0.0, 0.2], [0.8, 0.25, 0.8])),
+            Block::YoungWheat => Some(([0.12, 0.0, 0.12], [0.88, 0.55, 0.88])),
+            Block::RipeWheat => Some(([0.08, 0.0, 0.08], [0.92, 0.85, 0.92])),
+            Block::Campfire => Some(([0.1, 0.0, 0.1], [0.9, 0.4, 0.9])),
             _ => None,
         }
     }
@@ -172,6 +189,10 @@ impl Block {
             Block::MachineGun => [0.30, 0.32, 0.30],
             Block::Cannon => [0.22, 0.22, 0.25],
             Block::Catapult => [0.55, 0.40, 0.25],
+            Block::Sprout => [0.45, 0.75, 0.30],
+            Block::YoungWheat => [0.50, 0.70, 0.25],
+            Block::RipeWheat => [0.85, 0.72, 0.30],
+            Block::Campfire => [0.80, 0.40, 0.15],
         }
     }
 
@@ -199,6 +220,10 @@ impl Block {
             Block::MachineGun => "Mitrailleuse",
             Block::Cannon => "Canon",
             Block::Catapult => "Catapulte",
+            Block::Sprout => "Pousse de blé",
+            Block::YoungWheat => "Blé en herbe",
+            Block::RipeWheat => "Blé mûr",
+            Block::Campfire => "Feu de camp",
         }
     }
 
@@ -224,6 +249,8 @@ impl Block {
             Block::MachineGun => 320,
             Block::Cannon => 400,
             Block::Catapult => 260,
+            Block::Sprout | Block::YoungWheat | Block::RipeWheat => 4,
+            Block::Campfire => 60,
         }
     }
 }

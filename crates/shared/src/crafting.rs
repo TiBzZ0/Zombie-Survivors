@@ -292,6 +292,30 @@ pub const RECIPES: &[Recipe] = &[
         inputs: &[(Item::IronIngot, 2), (Item::Coal, 2)],
         station: Some(Block::Forge),
     },
+    Recipe {
+        output: b(Block::Campfire),
+        count: 1,
+        inputs: &[(Item::Stick, 4), (b(Block::Stone), 3), (Item::Coal, 1)],
+        station: None,
+    },
+    Recipe {
+        output: Item::Bread,
+        count: 1,
+        inputs: &[(Item::Wheat, 3)],
+        station: Some(Block::Campfire),
+    },
+    Recipe {
+        output: Item::CookedMeat,
+        count: 1,
+        inputs: &[(Item::RawMeat, 1)],
+        station: Some(Block::Campfire),
+    },
+    Recipe {
+        output: Item::Ration,
+        count: 2,
+        inputs: &[(Item::Bread, 1), (Item::CookedMeat, 1)],
+        station: None,
+    },
 ];
 
 impl Recipe {

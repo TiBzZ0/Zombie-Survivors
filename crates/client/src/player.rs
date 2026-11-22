@@ -15,6 +15,7 @@ use shared::raycast::{ray_aabb, raycast};
 use shared::survivor::TALK_RANGE;
 
 use crate::AppState;
+use crate::animals::{AnimalView, aimed_animal};
 use crate::net::{ClientWorld, NetEvent, Session, send_reliable, send_state};
 use crate::settings::Settings;
 use crate::survivors::{SurvivorView, aimed_survivor};
@@ -381,6 +382,7 @@ fn interact(
     mut changes: MessageWriter<NetEvent>,
     zombies: Query<(&ZombieView, &Transform)>,
     survivors: Query<(&SurvivorView, &Transform)>,
+    animals: Query<(&AnimalView, &Transform)>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
     let dt = time.delta_secs();
@@ -490,6 +492,17 @@ fn interact(
             }
             return;
         }
+        // Le gibier aussi.
+        if let Some((id, dist)) = aimed_animal(player.eye(), player.look_direction(), melee.reach, &animals)
+            && dist < block_dist
+        {
+            player.mining = None;
+            if player.cooldown <= 0.0 {
+                send_reliable(&mut client, &ClientMessage::AttackAnimal { id });
+                player.cooldown = melee.cooldown;
+            }
+            return;
+        }
         mine(&mut player, &mut world, &mut client, &mut changes, dt);
         return;
     }
@@ -533,6 +546,25 @@ fn interact(
         Some(item) if item.food().is_some() => {
             send_reliable(&mut client, &ClientMessage::Eat { item });
             player.cooldown = EAT_COOLDOWN;
+        }
+        Some(Item::Seeds) => {
+            // Semer : sur le dessus d'un bloc de terre ou d'herbe.
+            let Some(hit) = player.target else { return };
+            let pos = hit.block + IVec3::Y;
+            let soil = matches!(world.block(hit.block), Block::Grass | Block::Dirt);
+            if hit.normal == IVec3::Y && soil && world.block(pos) == Block::Air {
+                world.set_block(pos, Block::Sprout);
+                player.inventory.remove(Item::Seeds, 1);
+                changes.write(NetEvent::BlockChanged(pos));
+                send_reliable(
+                    &mut client,
+                    &ClientMessage::PlaceBlock {
+                        pos,
+                        block: Block::Sprout,
+                    },
+                );
+                player.cooldown = ACTION_COOLDOWN;
+            }
         }
         Some(Item::Block(block)) => {
             let Some(hit) = player.target else { return };

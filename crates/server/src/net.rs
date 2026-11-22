@@ -18,6 +18,7 @@ use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMes
 use shared::raycast::{ray_aabb, raycast};
 
 use crate::ServerConfig;
+use crate::animals::Animal;
 use crate::explosives::Projectiles;
 use crate::save::{SavedPlayer, SavedPlayers};
 use crate::survivors::SurvivorTalk;
@@ -81,6 +82,8 @@ pub const MAX_HEALTH: f32 = 100.0;
 pub const MAX_HUNGER: f32 = 100.0;
 /// Chance qu'un bloc de feuilles donne aussi une pomme.
 const APPLE_CHANCE: f32 = 0.25;
+/// Chance qu'un bloc d'herbe donne aussi des graines.
+const SEED_CHANCE: f32 = 0.15;
 /// Tolérance sur la durée de minage (latence, horloges).
 const MINING_TOLERANCE: f64 = 0.75;
 
@@ -244,6 +247,7 @@ fn receive_messages(
     mut chests: ResMut<Chests>,
     mut talk: ResMut<SurvivorTalk>,
     mut projectiles: ResMut<Projectiles>,
+    mut animals: Query<&mut Animal>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -265,7 +269,7 @@ fn receive_messages(
                 talk: &mut talk,
                 projectiles: &mut projectiles,
             };
-            handle_reliable(client, message, &mut ctx, &mut zombies);
+            handle_reliable(client, message, &mut ctx, &mut zombies, &mut animals);
         }
         while let Some(bytes) = server.receive_message(client, DefaultChannel::Unreliable) {
             if let Some(ClientMessage::State(state)) = decode::<ClientMessage>(&bytes) {
@@ -294,6 +298,7 @@ fn handle_reliable(
     message: ClientMessage,
     ctx: &mut Context,
     zombies: &mut Query<(&mut Zombie, &ZombieBody)>,
+    animals: &mut Query<&mut Animal>,
 ) {
     let Context {
         server,
@@ -458,7 +463,7 @@ fn handle_reliable(
                 // Mitrailleuse : légère dispersion.
                 let spread = Vec3::new(fastrand::f32() - 0.5, fastrand::f32() - 0.5, fastrand::f32() - 0.5) * 0.04;
                 let dir = (dir + spread).normalize_or_zero();
-                let end = hitscan(origin, dir, 70.0, gun.damage, 1, client, world, zombies);
+                let end = hitscan(origin, dir, 70.0, gun.damage, 1, client, world, zombies, animals);
                 broadcast(
                     server,
                     &ServerMessage::Shot {
@@ -472,6 +477,24 @@ fn handle_reliable(
                 let shell = crate::explosives::Projectile::shell(client, gun, origin, dir);
                 broadcast(server, &shell.message());
                 projectiles.0.push(shell);
+            }
+        }
+        ClientMessage::AttackAnimal { id } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if !player.is_alive() || player.attack_cooldown > 0.0 || player.guard_time().is_some() {
+                return;
+            }
+            let melee = Item::melee(player.held_item());
+            let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
+            let look = Quat::from_rotation_y(player.state.yaw) * Vec3::NEG_Z;
+            if let Some(mut a) = animals.iter_mut().find(|a| a.id == id) {
+                let (min, max) = a.bounds();
+                if ((min + max) * 0.5).distance(eye) <= melee.reach + 1.0 {
+                    player.attack_cooldown = melee.cooldown * 0.85;
+                    a.hurt(melee.damage, Some(client), look * melee.knockback * 0.5);
+                }
             }
         }
         ClientMessage::Guard { active } => {
@@ -510,6 +533,7 @@ fn handle_reliable(
                 client,
                 world,
                 zombies,
+                animals,
             );
             send_inventory(server, client, player);
             broadcast(
@@ -725,6 +749,14 @@ fn handle_reliable(
                 if block == Block::Leaves && fastrand::f32() < APPLE_CHANCE {
                     player.inventory.add(Item::Apple, 1);
                 }
+                if block == Block::Grass && fastrand::f32() < SEED_CHANCE {
+                    player.inventory.add(Item::Seeds, 1);
+                }
+                if block == Block::RipeWheat {
+                    // Une récolte : deux blés et de quoi ressemer.
+                    player.inventory.add(Item::Wheat, 1);
+                    player.inventory.add(Item::Seeds, 1 + fastrand::u32(0..2));
+                }
                 send_inventory(server, client, player);
                 if block.is_storage() {
                     chest_destroyed(server, lobby, chests, pos, Some(client));
@@ -752,15 +784,24 @@ fn handle_reliable(
             if !player.is_alive() {
                 return;
             }
+            // Une pousse se sème avec des graines, sur de la terre ou de l'herbe.
+            let cost = if block == Block::Sprout {
+                Item::Seeds
+            } else {
+                Item::Block(block)
+            };
+            let soil = !block.is_crop()
+                || (block == Block::Sprout && matches!(world.block(pos - IVec3::Y), Block::Grass | Block::Dirt));
             // Les barbelés se posent même là où un joueur se tient.
             let allowed = block.is_placeable()
-                && player.inventory.has(Item::Block(block), 1)
+                && soil
+                && player.inventory.has(cost, 1)
                 && within_reach(player, pos)
                 && world.block(pos) == Block::Air
                 && (!blocked_by_player || !block.is_solid())
                 && world.in_bounds(pos);
             if allowed && world.set_block(pos, block) {
-                player.inventory.remove(Item::Block(block), 1);
+                player.inventory.remove(cost, 1);
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block });
             } else {
@@ -790,6 +831,7 @@ fn hitscan(
     client: ClientId,
     world: &GameWorld,
     zombies: &mut Query<(&mut Zombie, &ZombieBody)>,
+    animals: &mut Query<&mut Animal>,
 ) -> Vec3 {
     let wall = raycast(eye, dir, range, |p| world.is_solid(p))
         .map(|hit| ray_aabb(eye, dir, hit.block.as_vec3(), hit.block.as_vec3() + Vec3::ONE).unwrap_or(0.0))
@@ -806,17 +848,37 @@ fn hitscan(
                 .map(|t| (z, t))
         })
         .collect();
-    hits.sort_by(|a, b| a.1.total_cmp(&b.1));
-    hits.truncate(pierce as usize);
-    let pierced_all = hits.len() == pierce as usize;
+    // Le gibier aussi se trouve sur la trajectoire.
+    let mut game: Vec<(Mut<Animal>, f32)> = animals
+        .iter_mut()
+        .filter_map(|a| {
+            let (min, max) = a.bounds();
+            ray_aabb(eye, dir, min, max).filter(|t| *t < wall).map(|t| (a, t))
+        })
+        .collect();
+    let mut order: Vec<(bool, usize, f32)> = hits
+        .iter()
+        .enumerate()
+        .map(|(i, (_, t))| (true, i, *t))
+        .chain(game.iter().enumerate().map(|(i, (_, t))| (false, i, *t)))
+        .collect();
+    order.sort_by(|a, b| a.2.total_cmp(&b.2));
+    order.truncate(pierce as usize);
+    let pierced_all = order.len() == pierce as usize;
+    let push = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 3.0;
     let mut end = eye + dir * wall;
-    for (z, t) in &mut hits {
-        z.health -= damage;
-        z.hurt_timer = 0.3;
-        z.knockback = Vec3::new(dir.x, 0.0, dir.z).normalize_or_zero() * 3.0;
-        z.last_attacker = Some(client);
+    for (zombie, i, t) in order {
+        if zombie {
+            let z = &mut hits[i].0;
+            z.health -= damage;
+            z.hurt_timer = 0.3;
+            z.knockback = push;
+            z.last_attacker = Some(client);
+        } else {
+            game[i].0.hurt(damage, Some(client), push);
+        }
         if pierced_all {
-            end = eye + dir * *t;
+            end = eye + dir * t;
         }
     }
     end
