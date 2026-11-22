@@ -37,7 +37,8 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | Souris | Regarder (clic dans la fenêtre pour capturer la souris, Échap pour la libérer) |
 | Clic gauche (maintenu) | Frapper un zombie, ou miner le bloc visé |
 | Clic gauche, arc ou fusil en main | Tirer |
-| Clic droit | Ouvrir une porte ou un coffre, sinon poser le bloc en main ou manger |
+| Clic droit | Parler à un survivant, ouvrir une porte ou un coffre, sinon poser le bloc en main ou manger |
+| Maj + clic droit | Renvoyer un de vos survivants |
 | `T` | Écrire dans la discussion (Entrée pour envoyer) |
 | `1` à `9`, molette | Choisir l'objet en main |
 | `C` ou `Tab` | Ouvrir le panneau de fabrication |
@@ -53,6 +54,7 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - Les filons de fer et de charbon (rochers sombres en surface, poches sous terre) se récoltent 20 fois par bloc. Lingot = minerai de fer + charbon.
 - Arc et flèches, puis fusil et cartouches, pour tenir les zombies à distance.
 - Portes (deux blocs empilés s'ouvrent ensemble) et coffres partagés pour la base. Un coffre cassé par un joueur lui rend son contenu ; cassé par un zombie, le contenu est perdu.
+- Des **survivants** (losange jaune au-dessus de la tête) errent dans le monde le jour. Donne-leur une ration ou 3 pommes pour les recruter (4 au plus par joueur). Chacun a sa force (dégâts), son endurance (vie) et son habileté (vitesse de travail). Clic droit sur un de tes survivants (losange vert) pour changer son ordre : **suivre**, **garder** l'endroit, **récolter** (bois, pierre, pommes, charbon, rangés dans le coffre le plus proche de son poste, sinon dans ton inventaire ; le jour seulement) ou **réparer** les blocs abîmés autour de lui. Ils se battent contre les zombies proches, mais les zombies s'en prennent aussi à eux.
 - La nuit, les zombies sortent et cassent les murs pour t'atteindre. Toutes les 7 nuits arrive une grande horde. Les murs renforcés tiennent longtemps, les piques blessent les zombies qui les frappent ou marchent dessus.
 
 Sous Linux, Bevy demande `libasound2-dev`, `libudev-dev`, `libwayland-dev` et `libxkbcommon-dev`.
@@ -86,7 +88,7 @@ Variables d'environnement :
 
 ### Sauvegarde
 
-La partie (blocs modifiés, heure, joueurs avec leur inventaire) est enregistrée dans `DATA_DIR/world.sav` toutes les minutes et à l'arrêt (`docker stop`, Ctrl+C). Au redémarrage, la graine et la taille de la sauvegarde l'emportent sur les variables d'environnement. Pour repartir de zéro, supprimer le volume : `docker compose down -v`.
+La partie (blocs modifiés, heure, joueurs avec leur inventaire, coffres, survivants recrutés) est enregistrée dans `DATA_DIR/world.sav` toutes les minutes et à l'arrêt (`docker stop`, Ctrl+C). Au redémarrage, la graine et la taille de la sauvegarde l'emportent sur les variables d'environnement. Pour repartir de zéro, supprimer le volume : `docker compose down -v`.
 
 Copie de secours : `docker compose cp server:/data/world.sav ./world.sav`.
 

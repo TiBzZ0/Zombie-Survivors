@@ -420,7 +420,9 @@ fn update_status(
             (block, left)
         })
     });
-    hint_text.0 = if player.needs_pickaxe {
+    hint_text.0 = if let Some(hint) = &player.survivor_hint {
+        hint.clone()
+    } else if player.needs_pickaxe {
         match aimed_deposit {
             Some((block, _)) => format!("{} : il faut une pioche", block.name()),
             None => "Il faut une pioche".into(),

@@ -12,9 +12,11 @@ use shared::item::{Inventory, Item, break_time};
 use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid, step_body};
 use shared::protocol::{ClientMessage, PlayerState, REACH};
 use shared::raycast::{ray_aabb, raycast};
+use shared::survivor::TALK_RANGE;
 
 use crate::AppState;
 use crate::net::{ClientWorld, NetEvent, Session, send_reliable, send_state};
+use crate::survivors::{SurvivorView, aimed_survivor};
 use crate::zombies::ZombieView;
 
 const WALK_SPEED: f32 = 4.5;
@@ -91,6 +93,10 @@ pub struct LocalPlayer {
     pub selected: usize,
     /// Bloc visé, s'il y en a un à portée.
     pub target: Option<shared::raycast::RayHit>,
+    /// Survivant visé, assez près pour lui parler.
+    pub aimed_survivor: Option<u32>,
+    /// Indication à afficher sur le survivant visé.
+    pub survivor_hint: Option<String>,
     cooldown: f32,
     last_sent: f64,
 }
@@ -353,11 +359,20 @@ fn interact(
     mut client: ResMut<RenetClient>,
     mut changes: MessageWriter<NetEvent>,
     zombies: Query<(&ZombieView, &Transform)>,
+    survivors: Query<(&SurvivorView, &Transform)>,
+    keys: Res<ButtonInput<KeyCode>>,
 ) {
     let dt = time.delta_secs();
     player.target = raycast(player.eye(), player.look_direction(), REACH, |p| {
         world.block(p).is_targetable()
     });
+    let block_dist = player
+        .target
+        .map(|h| (h.block.as_vec3() + Vec3::splat(0.5)).distance(player.eye()))
+        .unwrap_or(f32::MAX);
+    player.aimed_survivor = aimed_survivor(player.eye(), player.look_direction(), TALK_RANGE, &survivors)
+        .filter(|(_, d)| *d < block_dist)
+        .map(|(id, _)| id);
     player.cooldown -= dt;
     player.needs_pickaxe = false;
     if !cursor_locked(&cursor) || player.dead.is_some() || !mouse.pressed(MouseButton::Left) {
@@ -403,7 +418,15 @@ fn interact(
     if !mouse.pressed(MouseButton::Right) || player.cooldown > 0.0 {
         return;
     }
-    // Portes et coffres passent avant l'objet en main.
+    // Survivants, portes et coffres passent avant l'objet en main.
+    if let Some(id) = player.aimed_survivor
+        && mouse.just_pressed(MouseButton::Right)
+    {
+        let dismiss = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        send_reliable(&mut client, &ClientMessage::TalkToSurvivor { id, dismiss });
+        player.cooldown = 0.35;
+        return;
+    }
     if let Some(hit) = player.target {
         let block = world.block(hit.block);
         if block.is_door() {

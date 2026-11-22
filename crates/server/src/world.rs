@@ -56,6 +56,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
         commands.insert_resource(GameWorld(world));
         commands.insert_resource(Deposits::default());
         commands.insert_resource(Chests::default());
+        commands.insert_resource(save::SavedSurvivors::default());
         return;
     };
     if save.world != config.world {
@@ -79,6 +80,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
     commands.insert_resource(SavedPlayers(save.players.into_iter().collect()));
     commands.insert_resource(Deposits(save.deposits.into_iter().collect()));
     commands.insert_resource(Chests(save.chests.into_iter().collect()));
+    commands.insert_resource(save::SavedSurvivors(save.survivors));
     commands.insert_resource(SpawnPoint(find_spawn(&world)));
     commands.insert_resource(GameWorld(world));
 }

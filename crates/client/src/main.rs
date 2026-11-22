@@ -21,6 +21,7 @@ mod player;
 mod remote;
 mod sky;
 mod sound;
+mod survivors;
 mod terrain;
 mod zombies;
 
@@ -114,6 +115,7 @@ fn main() {
             sound::SoundPlugin,
             chat::ChatPlugin,
             chest::ChestPlugin,
+            survivors::SurvivorsPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
