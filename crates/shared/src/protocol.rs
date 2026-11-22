@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_000C;
+pub const PROTOCOL_ID: u64 = 0x5A53_000D;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -188,6 +188,8 @@ pub struct ZombieState {
 impl ZombieState {
     pub const ATTACKING: u8 = 1;
     pub const HURT: u8 = 2;
+    /// Grimpe sur les autres zombies pour passer un mur.
+    pub const CLIMBING: u8 = 4;
 
     pub fn new(id: u32, position: Vec3, yaw: f32, kind: ZombieKind, flags: u8, health: f32) -> Self {
         let q = |v: f32| (v * 32.0).clamp(0.0, u16::MAX as f32) as u16;
@@ -333,6 +335,11 @@ pub enum ServerMessage {
     },
     /// Animaux proches du joueur (canal non fiable).
     Animals(Vec<crate::animal::AnimalState>),
+    /// Un cracheur a lancé de l'acide.
+    Acid {
+        origin: Vec3,
+        end: Vec3,
+    },
 }
 
 /// Sérialise un message.

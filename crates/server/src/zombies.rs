@@ -15,7 +15,9 @@ use shared::pathfinding::{FlowField, build_flow_field};
 use shared::physics::step_body;
 use shared::protocol::{ServerMessage, ZombieState, encode};
 use shared::world::{block_containing, chunk_of};
-use shared::zombie::{ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_REACH, ZombieKind};
+use shared::zombie::{
+    SPIT_COOLDOWN, SPIT_DAMAGE, SPIT_RANGE, ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_REACH, ZombieKind, stacking,
+};
 
 use crate::daynight::Clock;
 use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, WorldVersion, send_vitals};
@@ -89,6 +91,8 @@ pub struct Zombie {
     /// Recul à appliquer au prochain pas.
     pub knockback: Vec3,
     pub last_attacker: Option<ClientId>,
+    /// Hauteur où il a commencé à grimper sur les autres zombies (pour borner la pile).
+    pub climb_from: Option<f32>,
 }
 
 /// Corps physique d'un zombie.
@@ -119,6 +123,8 @@ pub(crate) struct BlockDamage(pub HashMap<IVec3, (Block, f32)>);
 #[derive(Resource, Default)]
 struct Waves {
     spawn_timer: f32,
+    /// Jour de la dernière grande horde menée par un colosse.
+    colossus_day: Option<u32>,
     /// En mode test de charge, les zombies ne brûlent pas le jour.
     stress: bool,
 }
@@ -180,6 +186,7 @@ fn spawn_zombie(commands: &mut Commands, ids: &mut NextZombieId, kind: ZombieKin
             hurt_timer: 0.0,
             knockback: Vec3::ZERO,
             last_attacker: None,
+            climb_from: None,
         },
         ZombieBody {
             position,
@@ -213,10 +220,18 @@ fn random_kind(day: u32) -> ZombieKind {
     let r = fastrand::f32();
     let brute = (0.04 + day as f32 * 0.01).min(0.2);
     let runner = (0.15 + day as f32 * 0.015).min(0.35);
+    // Les cracheurs arrivent à partir de la deuxième nuit.
+    let spitter = if day >= 2 {
+        (0.04 + day as f32 * 0.01).min(0.15)
+    } else {
+        0.0
+    };
     if r < brute {
         ZombieKind::Brute
     } else if r < brute + runner {
         ZombieKind::Runner
+    } else if r < brute + runner + spitter {
+        ZombieKind::Spitter
     } else {
         ZombieKind::Walker
     }
@@ -312,6 +327,7 @@ fn spawn_waves(
     mut waves: ResMut<Waves>,
     mut ids: ResMut<NextZombieId>,
     zombies: Query<(), With<Zombie>>,
+    mut server: Option<ResMut<RenetServer>>,
 ) {
     if !clock.is_night() {
         return;
@@ -343,6 +359,23 @@ fn spawn_waves(
     }
     let group = (if horde { 8 } else { 3 } + fastrand::u32(0..4)).min(cap - alive);
     let around = players[fastrand::usize(0..players.len())];
+    // Chaque grande horde est menée par un colosse.
+    if horde
+        && waves.colossus_day != Some(clock.day)
+        && let Some(pos) = find_spawn_spot(&world, around, SPAWN_MIN_DIST, SPAWN_MAX_DIST)
+    {
+        waves.colossus_day = Some(clock.day);
+        spawn_zombie(&mut commands, &mut ids, ZombieKind::Colossus, pos);
+        if let Some(server) = server.as_deref_mut() {
+            server.broadcast_message(
+                DefaultChannel::ReliableOrdered,
+                encode(&ServerMessage::Chat {
+                    from: "Serveur".into(),
+                    text: "Un colosse mène la horde !".into(),
+                }),
+            );
+        }
+    }
     for _ in 0..group {
         if let Some(pos) = find_spawn_spot(&world, around, SPAWN_MIN_DIST, SPAWN_MAX_DIST) {
             spawn_zombie(&mut commands, &mut ids, random_kind(clock.day), pos);
@@ -352,6 +385,7 @@ fn spawn_waves(
 
 fn zombie_ai(
     time: Res<Time>,
+    clock: Res<Clock>,
     flow: Res<Flow>,
     mut world: ResMut<GameWorld>,
     mut version: ResMut<WorldVersion>,
@@ -370,6 +404,9 @@ fn zombie_ai(
         .map(|(id, p)| (*id, p.state.position))
         .collect();
     let survivor_spots: Vec<(Entity, Vec3)> = survivors.iter().map(|(e, s)| (e, s.position)).collect();
+    // Positions de tous les zombies, pour savoir qui se presse contre un mur.
+    let crowd: Vec<(u32, Vec3)> = zombies.iter().map(|(z, b)| (z.id, b.position)).collect();
+    let stack = stacking(clock.day);
     let mut survivor_hits: Vec<(Entity, f32)> = Vec::new();
 
     for (mut zombie, mut body) in &mut zombies {
@@ -410,6 +447,8 @@ fn zombie_ai(
 
         let mut wish = Vec3::ZERO;
         let mut face: Option<Vec3> = None;
+        let mut climbing = false;
+        let mut at_wall = false;
         // Un survivant proche, plus proche que tout joueur, est pris pour cible.
         let survivor = survivor_spots
             .iter()
@@ -432,7 +471,39 @@ fn zombie_ai(
         } else if let Some((player_id, player_pos, dist)) = nearest {
             let feet = block_containing(body.position + Vec3::Y * 0.1);
             let vertical_ok = (player_pos.y - body.position.y).abs() < 1.6;
-            if dist < ZOMBIE_REACH + stats.size.half_width && vertical_ok {
+            let mouth = body.position + Vec3::Y * 1.5;
+            let aim = player_pos + Vec3::Y * 1.2;
+            let spits = zombie.kind == ZombieKind::Spitter
+                && dist > 3.0
+                && dist < SPIT_RANGE
+                && crate::survivors::clear_line(&world, mouth, aim);
+            if spits {
+                // Le cracheur s'arrête à distance et crache.
+                face = Some(player_pos);
+                if zombie.attack_cooldown <= 0.0 {
+                    zombie.attack_cooldown = SPIT_COOLDOWN;
+                    zombie.attacking = 0.4;
+                    if let Some(player) = lobby.players.get_mut(&player_id) {
+                        let (amount, _) = player.incoming_damage(SPIT_DAMAGE, body.position);
+                        hurt_player(
+                            player_id,
+                            player,
+                            amount,
+                            death_cause(zombie.kind),
+                            server.as_deref_mut(),
+                        );
+                    }
+                    if let Some(server) = server.as_deref_mut() {
+                        server.broadcast_message(
+                            DefaultChannel::ReliableOrdered,
+                            encode(&ServerMessage::Acid {
+                                origin: mouth,
+                                end: aim,
+                            }),
+                        );
+                    }
+                }
+            } else if dist < ZOMBIE_REACH + stats.size.half_width && vertical_ok {
                 // Au contact : frappe le joueur.
                 face = Some(player_pos);
                 if zombie.attack_cooldown <= 0.0 {
@@ -463,13 +534,36 @@ fn zombie_ai(
                         }
                     }
                 }
-            } else if let Some(node) = flow.field.get(feet) {
+            } else if let Some(node) = flow.field.get(match zombie.climb_from {
+                // En pleine escalade, il suit toujours le chemin du sol d'où il est parti.
+                Some(y0) if y0.is_finite() => IVec3::new(feet.x, y0.floor() as i32, feet.z),
+                _ => feet,
+            }) {
                 let wall = node.breaks.filter(|b| world.is_solid(*b));
                 let wall_close = wall.is_some_and(|b| {
                     let c = b.as_vec3() + Vec3::splat(0.5);
                     Vec2::new(c.x - body.position.x, c.z - body.position.z).length() < 1.3
                 });
-                if let (Some(block_pos), true) = (wall, wall_close) {
+                // Serrés contre le mur, les zombies grimpent les uns sur les autres (de plus en plus haut au fil des nuits).
+                let pressed = crowd
+                    .iter()
+                    .filter(|(id, p)| *id != zombie.id && p.distance(body.position) < 1.8)
+                    .count();
+                at_wall = wall.is_some() && wall_close;
+                let climbed = body.position.y - zombie.climb_from.unwrap_or(body.position.y);
+                let can_climb = stack.is_some_and(|(needed, height)| {
+                    if climbed >= height {
+                        // Pile trop basse pour ce mur : il redescend et tape dedans.
+                        zombie.climb_from = Some(f32::NEG_INFINITY);
+                    }
+                    pressed >= needed && climbed < height
+                });
+                if let (Some(block_pos), true, true) = (wall, wall_close, can_climb) {
+                    climbing = true;
+                    zombie.climb_from.get_or_insert(body.position.y);
+                    let c = block_pos.as_vec3() + Vec3::splat(0.5);
+                    wish = Vec3::new(c.x - body.position.x, 0.0, c.z - body.position.z);
+                } else if let (Some(block_pos), true) = (wall, wall_close) {
                     // Contre le mur à casser : on tape dedans.
                     face = Some(block_pos.as_vec3() + Vec3::splat(0.5));
                     zombie.attacking = 0.4;
@@ -513,6 +607,11 @@ fn zombie_ai(
         if body.on_ground && body.hit_wall && wish != Vec3::ZERO {
             velocity.y = JUMP_SPEED;
         }
+        if climbing {
+            velocity.y = velocity.y.max(CLIMB_SPEED);
+        } else if body.on_ground && !at_wall {
+            zombie.climb_from = None;
+        }
         let result = step_body(body.position, velocity, stats.size, dt, &|p| {
             world.is_solid(p) || p.y < 0
         });
@@ -533,6 +632,8 @@ const SURVIVOR_AGGRO: f32 = 12.0;
 
 /// Dégâts par seconde des piques aux zombies qui les touchent.
 const SPIKE_DPS: f32 = 12.0;
+/// Vitesse à laquelle un zombie grimpe sur les autres.
+const CLIMB_SPEED: f32 = 2.5;
 /// Temps d'étourdissement d'un zombie dont le coup a été paré.
 const PARRY_STUN: f32 = 1.2;
 /// Dégâts par seconde des barbelés, usure du fil et ralentissement.
@@ -641,6 +742,8 @@ fn death_cause(kind: ZombieKind) -> &'static str {
         ZombieKind::Walker => "Dévoré par un zombie",
         ZombieKind::Runner => "Rattrapé par un coureur",
         ZombieKind::Brute => "Écrasé par une brute",
+        ZombieKind::Spitter => "Rongé par l'acide d'un cracheur",
+        ZombieKind::Colossus => "Piétiné par le colosse",
     }
 }
 
@@ -799,6 +902,9 @@ fn broadcast_zombies(
                 if z.hurt_timer > 0.0 {
                     flags |= ZombieState::HURT;
                 }
+                if z.climb_from.is_some_and(f32::is_finite) {
+                    flags |= ZombieState::CLIMBING;
+                }
                 ZombieState::new(z.id, b.position, b.yaw, z.kind, flags, z.health)
             })
             .collect();
@@ -817,5 +923,94 @@ fn broadcast_zombies(
                 encode(&ServerMessage::Zombies(batch.to_vec())),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use shared::config::WorldConfig;
+    use shared::daytime::GameTime;
+    use shared::world::WorldState;
+
+    use super::*;
+    use crate::net::ConnectedPlayer;
+
+    /// Une plateforme dans le ciel coupée par un mur renforcé de deux blocs ; le joueur est derrière.
+    fn arena(night: u32, zombies: usize) -> (App, i32) {
+        let mut world = GameWorld(WorldState::new(WorldConfig::default()));
+        let y = world.generator().surface_height(100, 100) + 25;
+        let wall_z = 110;
+        for x in 95..=105 {
+            for z in 95..=125 {
+                world.set_block(IVec3::new(x, y - 1, z), Block::Stone);
+            }
+            for dy in 0..2 {
+                world.set_block(IVec3::new(x, y + dy, wall_z), Block::ReinforcedWall);
+            }
+        }
+        let mut lobby = Lobby::default();
+        let mut player = ConnectedPlayer::new(Vec3::new(100.5, y as f32, 120.5));
+        player.name = "Zoé".into();
+        lobby.players.insert(1, player);
+        let mut app = App::new();
+        app.insert_resource(world)
+            .insert_resource(lobby)
+            .insert_resource(Clock(GameTime { day: night, phase: 0.9 }))
+            .init_resource::<Time>()
+            .init_resource::<Flow>()
+            .init_resource::<BlockDamage>()
+            .init_resource::<WorldVersion>()
+            .init_resource::<Chests>()
+            .init_resource::<TickStats>()
+            .add_systems(Update, (update_flow_field, zombie_ai, separate_zombies).chain());
+        for i in 0..zombies {
+            let pos = Vec3::new(97.5 + (i % 6) as f32, y as f32, 107.0 + (i / 6) as f32 * 0.6);
+            let id = i as u32 + 1;
+            app.world_mut().spawn((
+                Zombie {
+                    id,
+                    kind: ZombieKind::Walker,
+                    health: 1000.0,
+                    attack_cooldown: 0.0,
+                    attacking: 0.0,
+                    hurt_timer: 0.0,
+                    knockback: Vec3::ZERO,
+                    last_attacker: None,
+                    climb_from: None,
+                },
+                ZombieBody {
+                    position: pos,
+                    velocity: Vec3::ZERO,
+                    yaw: 0.0,
+                    on_ground: false,
+                    hit_wall: false,
+                },
+            ));
+        }
+        (app, wall_z)
+    }
+
+    fn crossed_after(app: &mut App, wall_z: i32, secs: f32) -> usize {
+        for _ in 0..(secs * 30.0) as usize {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f32(1.0 / 30.0));
+            app.update();
+        }
+        app.world_mut()
+            .query::<&ZombieBody>()
+            .iter(app.world())
+            .filter(|b| b.position.z > wall_z as f32 + 1.0)
+            .count()
+    }
+
+    #[test]
+    fn crowded_zombies_climb_over_walls_on_later_nights() {
+        // Nuit 6 : une dizaine de zombies serrés passent par-dessus le mur.
+        let (mut app, wall_z) = arena(6, 12);
+        assert!(crossed_after(&mut app, wall_z, 20.0) > 0, "personne n'a franchi le mur");
+        // Première nuit : ils restent bloqués à taper dedans.
+        let (mut app, wall_z) = arena(1, 12);
+        assert_eq!(crossed_after(&mut app, wall_z, 20.0), 0);
     }
 }

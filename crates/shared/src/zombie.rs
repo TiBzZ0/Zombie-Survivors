@@ -13,6 +13,10 @@ pub enum ZombieKind {
     Runner,
     /// Lent, très résistant, défonce les murs.
     Brute,
+    /// Crache de l'acide à distance.
+    Spitter,
+    /// Colosse : mène les grandes hordes, énorme et presque indestructible.
+    Colossus,
 }
 
 /// Caractéristiques d'un type de zombie.
@@ -60,6 +64,26 @@ impl ZombieKind {
                     height: 2.2,
                 },
             },
+            ZombieKind::Spitter => ZombieStats {
+                health: 30.0,
+                speed: 2.0,
+                damage: 6.0,
+                block_dps: 6.0,
+                size: BodySize {
+                    half_width: 0.3,
+                    height: 1.7,
+                },
+            },
+            ZombieKind::Colossus => ZombieStats {
+                health: 1500.0,
+                speed: 1.5,
+                damage: 40.0,
+                block_dps: 160.0,
+                size: BodySize {
+                    half_width: 0.8,
+                    height: 3.4,
+                },
+            },
         }
     }
 
@@ -67,6 +91,8 @@ impl ZombieKind {
         match value {
             1 => ZombieKind::Runner,
             2 => ZombieKind::Brute,
+            3 => ZombieKind::Spitter,
+            4 => ZombieKind::Colossus,
             _ => ZombieKind::Walker,
         }
     }
@@ -76,3 +102,38 @@ impl ZombieKind {
 pub const ZOMBIE_REACH: f32 = 1.4;
 /// Temps entre deux coups d'un zombie.
 pub const ZOMBIE_ATTACK_COOLDOWN: f32 = 1.0;
+
+/// Portée, cadence et dégâts du crachat d'acide.
+pub const SPIT_RANGE: f32 = 14.0;
+pub const SPIT_COOLDOWN: f32 = 2.5;
+pub const SPIT_DAMAGE: f32 = 9.0;
+
+/// À partir de cette nuit, les zombies arrêtés par un mur grimpent les uns sur les autres.
+pub const STACK_FROM_NIGHT: u32 = 2;
+
+/// Zombies qu'il faut serrer contre un mur pour qu'un d'eux grimpe sur les autres,
+/// et hauteur qu'ils peuvent franchir ainsi (en blocs), selon la nuit.
+pub const fn stacking(night: u32) -> Option<(usize, f32)> {
+    if night < STACK_FROM_NIGHT {
+        return None;
+    }
+    let needed = 6usize.saturating_sub(night as usize / 2);
+    let needed = if needed < 2 { 2 } else { needed };
+    let height = 1 + night / 2;
+    let height = if height > 6 { 6 } else { height };
+    Some((needed, height as f32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stacking_gets_easier_and_higher_with_nights() {
+        assert_eq!(stacking(1), None);
+        let (n2, h2) = stacking(2).unwrap();
+        let (n10, h10) = stacking(10).unwrap();
+        assert!(n10 < n2 && h10 > h2);
+        assert_eq!(stacking(40), Some((2, 6.0)));
+    }
+}

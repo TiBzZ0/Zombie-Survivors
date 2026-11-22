@@ -155,6 +155,7 @@ mod tests {
                     hurt_timer: 0.0,
                     knockback: Vec3::ZERO,
                     last_attacker: None,
+                    climb_from: None,
                 },
                 ZombieBody {
                     position: Vec3::new(x, y as f32, 0.5),

@@ -56,8 +56,8 @@ struct ZombieBodyPart(Handle<StandardMaterial>);
 #[derive(Resource)]
 struct ZombieAssets {
     cube: Handle<Mesh>,
-    skin: [Handle<StandardMaterial>; 3],
-    clothes: [Handle<StandardMaterial>; 3],
+    skin: [Handle<StandardMaterial>; 5],
+    clothes: [Handle<StandardMaterial>; 5],
     hurt: Handle<StandardMaterial>,
 }
 
@@ -75,8 +75,21 @@ fn setup_assets(
     };
     commands.insert_resource(ZombieAssets {
         cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-        skin: [mat(0.38, 0.55, 0.30), mat(0.55, 0.62, 0.36), mat(0.30, 0.40, 0.25)],
-        clothes: [mat(0.25, 0.22, 0.35), mat(0.45, 0.20, 0.18), mat(0.18, 0.16, 0.14)],
+        // Marcheur, coureur, brute, cracheur (verdâtre et gonflé), colosse (gris pâle).
+        skin: [
+            mat(0.38, 0.55, 0.30),
+            mat(0.55, 0.62, 0.36),
+            mat(0.30, 0.40, 0.25),
+            mat(0.62, 0.78, 0.20),
+            mat(0.55, 0.55, 0.50),
+        ],
+        clothes: [
+            mat(0.25, 0.22, 0.35),
+            mat(0.45, 0.20, 0.18),
+            mat(0.18, 0.16, 0.14),
+            mat(0.30, 0.36, 0.12),
+            mat(0.12, 0.10, 0.10),
+        ],
         hurt: mat(0.9, 0.15, 0.1),
     });
 }
@@ -214,7 +227,11 @@ fn animate_zombies(
         let hurt = view.flags & ZombieState::HURT != 0;
         for kid in kids.iter() {
             if let Ok((arm, mut arm_transform)) = arms.get_mut(kid) {
-                let swing = if attacking {
+                let climbing = view.flags & ZombieState::CLIMBING != 0;
+                let swing = if climbing {
+                    // Bras levés, qui s'agrippent à tour de rôle.
+                    -2.4 + (time.elapsed_secs() * 8.0 + arm.0 * 1.5).sin() * 0.4
+                } else if attacking {
                     (time.elapsed_secs() * 14.0 + arm.0).sin() * 0.7 - 0.2
                 } else {
                     (view.walk_phase + arm.0).sin() * 0.15

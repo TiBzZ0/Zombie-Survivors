@@ -122,6 +122,10 @@ pub enum NetEvent {
         pos: Vec3,
         radius: f32,
     },
+    Acid {
+        origin: Vec3,
+        end: Vec3,
+    },
 }
 
 fn fail(commands: &mut Commands, next: &mut NextState<AppState>, message: String) {
@@ -376,6 +380,9 @@ fn receive_messages(
             }
             ServerMessage::Explosion { pos, radius } => {
                 events.write(NetEvent::Explosion { pos, radius });
+            }
+            ServerMessage::Acid { origin, end } => {
+                events.write(NetEvent::Acid { origin, end });
             }
             ServerMessage::Players(_)
             | ServerMessage::Zombies(_)

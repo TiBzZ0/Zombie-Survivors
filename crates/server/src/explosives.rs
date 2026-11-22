@@ -285,6 +285,7 @@ mod tests {
                     hurt_timer: 0.0,
                     knockback: Vec3::ZERO,
                     last_attacker: None,
+                    climb_from: None,
                 },
                 ZombieBody {
                     position: center.as_vec3() + Vec3::new(0.5, -0.5, 0.5 + offset),
@@ -342,6 +343,7 @@ mod tests {
                 hurt_timer: 0.0,
                 knockback: Vec3::ZERO,
                 last_attacker: None,
+                climb_from: None,
             },
             ZombieBody {
                 position: Vec3::new(42.5, y, 40.5),
