@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_001D;
+pub const PROTOCOL_ID: u64 = 0x5A53_001E;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -223,6 +223,10 @@ impl ZombieState {
     pub const HURT: u8 = 2;
     /// Grimpe sur les autres zombies pour passer un mur.
     pub const CLIMBING: u8 = 4;
+    /// Enragé par le cri d'un hurleur.
+    pub const FRENZY: u8 = 8;
+    /// Gonflé dont la mèche brûle : il va exploser.
+    pub const FUSE: u8 = 16;
 
     pub fn new(id: u32, position: Vec3, yaw: f32, kind: ZombieKind, flags: u8, health: f32) -> Self {
         let q = |v: f32| (v * 32.0).clamp(0.0, u16::MAX as f32) as u16;
@@ -407,6 +411,10 @@ pub enum ServerMessage {
     Collapse {
         pos: Vec3,
         blocks: u16,
+    },
+    /// Un hurleur a crié : les zombies alentour sont enragés.
+    Howl {
+        pos: Vec3,
     },
 }
 

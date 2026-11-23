@@ -98,7 +98,7 @@ fn turret_fire(
             inv.remove(shot.ammo, 1);
         }
         if let Some((mut z, _)) = zombies.iter_mut().find(|(z, _)| z.id == zombie_id) {
-            z.health -= shot.damage;
+            z.health -= shot.damage * z.kind.armor_factor(false);
             z.hurt_timer = 0.3;
         }
         if let Some(server) = server.as_deref_mut() {
@@ -157,6 +157,8 @@ mod tests {
                     last_attacker: None,
                     climb_from: None,
                     stuck: 0.0,
+                    frenzy: 0.0,
+                    fuse: None,
                 },
                 ZombieBody {
                     position: Vec3::new(x, y as f32, 0.5),

@@ -69,6 +69,7 @@ enum Sfx {
     Hammer,
     Zap,
     Rumble,
+    Howl,
 }
 
 #[derive(Resource)]
@@ -292,6 +293,18 @@ fn synth(sfx: Sfx) -> Vec<f32> {
                 (low * 2.5 + debris * 0.5).clamp(-1.0, 1.0) * (k * 20.0).min(1.0) * (1.0 - k).powf(0.7) * 0.8
             })
         }
+        // Cri du hurleur : une plainte aiguë qui monte puis retombe, éraillée.
+        Sfx::Howl => {
+            let mut noise = Noise(149);
+            let mut phase = 0.0f32;
+            samples(1.8, |_, k| {
+                let pitch = 380.0 + 520.0 * (k * std::f32::consts::PI).sin() - 120.0 * k;
+                phase += pitch / RATE as f32;
+                let rasp = 1.0 + 0.35 * noise.next();
+                let env = (k * 10.0).min(1.0) * (1.0 - k).powf(0.8);
+                ((phase * TAU).sin() * 0.6 + (phase * 2.0 * TAU).sin() * 0.25) * rasp * env * 0.7
+            })
+        }
         Sfx::Horn => samples(2.5, |t, k| {
             let env = (k * 6.0).min(1.0) * (1.0 - k).powf(0.5);
             ((t * 82.0 * TAU).sin() + 0.5 * (t * 123.0 * TAU).sin() + 0.25 * (t * 164.0 * TAU).sin()) * env * 0.4
@@ -324,6 +337,7 @@ fn build_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>
         Sfx::Hammer,
         Sfx::Zap,
         Sfx::Rumble,
+        Sfx::Howl,
     ];
     all.extend((0..3).map(Sfx::Groan));
     let map = all
@@ -400,6 +414,7 @@ fn world_sounds(
             NetEvent::Zap { origin, .. } => play(&mut commands, &sounds, Sfx::Zap, Some(*origin), 0.8),
             NetEvent::Explosion { pos, .. } => play(&mut commands, &sounds, Sfx::Explosion, Some(*pos), 1.0),
             NetEvent::Collapse { pos, .. } => play(&mut commands, &sounds, Sfx::Rumble, Some(*pos), 1.0),
+            NetEvent::Howl { pos } => play(&mut commands, &sounds, Sfx::Howl, Some(*pos + Vec3::Y * 1.8), 1.0),
             _ => {}
         }
     }

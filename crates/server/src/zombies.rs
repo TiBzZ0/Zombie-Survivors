@@ -16,6 +16,7 @@ use shared::physics::step_body;
 use shared::protocol::{ServerMessage, ZombieState, encode};
 use shared::world::{block_containing, chunk_of};
 use shared::zombie::{
+    BLOAT_FUSE, BLOAT_TRIGGER, BLOOD_MOON_SPEED, FRENZY_SECS, FRENZY_SPEED, HOWL_COOLDOWN, HOWL_RADIUS, HOWL_RANGE,
     SPIT_COOLDOWN, SPIT_DAMAGE, SPIT_RANGE, ZOMBIE_ATTACK_COOLDOWN, ZOMBIE_REACH, ZombieKind, stacking,
 };
 
@@ -98,6 +99,10 @@ pub struct Zombie {
     pub climb_from: Option<f32>,
     /// Depuis combien de temps il pousse contre un obstacle sans avancer.
     pub stuck: f32,
+    /// Rage restante après le cri d'un hurleur (secondes).
+    pub frenzy: f32,
+    /// Mèche d'un gonflé : secondes avant qu'il n'explose.
+    pub fuse: Option<f32>,
 }
 
 /// Corps physique d'un zombie.
@@ -207,6 +212,8 @@ fn spawn_zombie(commands: &mut Commands, ids: &mut NextZombieId, kind: ZombieKin
             last_attacker: None,
             climb_from: None,
             stuck: 0.0,
+            frenzy: 0.0,
+            fuse: None,
         },
         ZombieBody {
             position,
@@ -247,15 +254,37 @@ fn random_kind(day: u32) -> ZombieKind {
     } else {
         0.0
     };
-    if r < brute {
-        ZombieKind::Brute
-    } else if r < brute + runner {
-        ZombieKind::Runner
-    } else if r < brute + runner + spitter {
-        ZombieKind::Spitter
+    // Blindés à partir de la quatrième nuit, hurleurs et gonflés à partir de la cinquième.
+    let armored = if day >= 4 {
+        (0.02 + day as f32 * 0.008).min(0.12)
     } else {
-        ZombieKind::Walker
+        0.0
+    };
+    let howler = if day >= 5 {
+        (0.01 + day as f32 * 0.004).min(0.06)
+    } else {
+        0.0
+    };
+    let bloater = if day >= 5 {
+        (0.02 + day as f32 * 0.006).min(0.1)
+    } else {
+        0.0
+    };
+    let mut edge = 0.0;
+    for (kind, part) in [
+        (ZombieKind::Brute, brute),
+        (ZombieKind::Runner, runner),
+        (ZombieKind::Spitter, spitter),
+        (ZombieKind::Armored, armored),
+        (ZombieKind::Howler, howler),
+        (ZombieKind::Bloater, bloater),
+    ] {
+        edge += part;
+        if r < edge {
+            return kind;
+        }
     }
+    ZombieKind::Walker
 }
 
 /// `STRESS_ZOMBIES=500` fait apparaître des zombies dès le démarrage, pour mesurer les performances.
@@ -273,13 +302,27 @@ fn stress_test(
         return;
     };
     waves.stress = true;
+    // `STRESS_KINDS=5,6,7` : seulement ces types, à tour de rôle (pour les essais).
+    let kinds: Vec<ZombieKind> = std::env::var("STRESS_KINDS")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .filter_map(|k| k.trim().parse().ok())
+                .map(ZombieKind::from_u8)
+                .collect()
+        })
+        .unwrap_or_default();
     let mut spawned = 0;
     for _ in 0..count * 3 {
         if spawned == count {
             break;
         }
-        if let Some(pos) = find_spawn_spot(&world, spawn.0, 12.0, 60.0) {
-            spawn_zombie(&mut commands, &mut ids, random_kind(5), pos);
+        if let Some(pos) = find_spawn_spot(&world, spawn.0, 12.0, if kinds.is_empty() { 60.0 } else { 30.0 }) {
+            let kind = kinds
+                .get(spawned % kinds.len().max(1))
+                .copied()
+                .unwrap_or_else(|| random_kind(5));
+            spawn_zombie(&mut commands, &mut ids, kind, pos);
             spawned += 1;
         }
     }
@@ -369,6 +412,9 @@ fn spawn_waves(
         return;
     }
     let horde = clock.is_night() && clock.is_horde_night();
+    // Lune de sang : plus de zombies, plus durs, plus tôt dans la partie.
+    let blood = clock.is_night() && clock.is_blood_moon();
+    let kind_day = if blood { clock.day + 3 } else { clock.day };
     let n = players.len() as u32;
     if !clock.is_night() {
         // Dans le brouillard, quelques zombies rôdent en plein jour.
@@ -386,6 +432,8 @@ fn spawn_waves(
     }
     let cap = if horde {
         (100 + 40 * n).min(320)
+    } else if blood {
+        (40 + 14 * n + 5 * clock.day).min(200)
     } else {
         (20 + 10 * n + 4 * clock.day).min(150)
     };
@@ -395,7 +443,9 @@ fn spawn_waves(
         waves.night = clock.day;
         waves.spawned = 0;
     }
-    let left = night_budget(clock.day, n, horde).saturating_sub(waves.spawned);
+    let budget = night_budget(clock.day, n, horde);
+    let budget = if blood { budget * 3 / 2 } else { budget };
+    let left = budget.saturating_sub(waves.spawned);
     if alive >= cap || left == 0 {
         return;
     }
@@ -423,7 +473,7 @@ fn spawn_waves(
     }
     for _ in 0..group {
         if let Some(pos) = find_spawn_spot(&world, around, SPAWN_MIN_DIST, SPAWN_MAX_DIST) {
-            spawn_zombie(&mut commands, &mut ids, random_kind(clock.day), pos);
+            spawn_zombie(&mut commands, &mut ids, random_kind(kind_day), pos);
         }
     }
 }
@@ -452,13 +502,26 @@ fn zombie_ai(
     // Positions de tous les zombies, pour savoir qui se presse contre un mur.
     let crowd: Vec<(u32, Vec3)> = zombies.iter().map(|(z, b)| (z.id, b.position)).collect();
     let stack = stacking(clock.day);
+    let blood = clock.is_night() && clock.is_blood_moon();
     let mut survivor_hits: Vec<(Entity, f32)> = Vec::new();
+    let mut howls: Vec<Vec3> = Vec::new();
 
     for (mut zombie, mut body) in &mut zombies {
         let stats = zombie.kind.stats();
         zombie.attack_cooldown -= dt;
         zombie.attacking -= dt;
         zombie.hurt_timer -= dt;
+        zombie.frenzy = (zombie.frenzy - dt).max(0.0);
+
+        // Mèche du gonflé : il explose (sans rapporter d'expérience à personne).
+        if let Some(fuse) = zombie.fuse.as_mut() {
+            *fuse -= dt;
+            if *fuse <= 0.0 {
+                zombie.health = 0.0;
+                zombie.last_attacker = None;
+                continue;
+            }
+        }
 
         // Debout sur des piques : le zombie se blesse.
         let below = block_containing(body.position - Vec3::Y * 0.1);
@@ -501,11 +564,25 @@ fn zombie_ai(
             .filter(|(_, _, d)| *d < SURVIVOR_AGGRO)
             .min_by(|a, b| a.2.total_cmp(&b.2))
             .filter(|(_, _, d)| nearest.is_none_or(|n| *d < n.2));
+        // Distance de la cible, pour la mèche du gonflé.
+        let target_dist = survivor.map(|s| s.2).or(nearest.map(|n| n.2)).unwrap_or(f32::MAX);
+        // Le hurleur crie dès qu'il voit un joueur : les zombies alentour enragent.
+        if zombie.kind == ZombieKind::Howler
+            && zombie.attack_cooldown <= 0.0
+            && let Some((_, player_pos, dist)) = nearest
+            && dist < HOWL_RANGE
+            && crate::survivors::clear_line(&world, body.position + Vec3::Y * 1.7, player_pos + Vec3::Y * 1.5)
+        {
+            zombie.attack_cooldown = HOWL_COOLDOWN;
+            zombie.attacking = 1.0;
+            howls.push(body.position);
+        }
+        let harmless = stats.damage <= 0.0;
         if let Some((entity, target, dist)) = survivor {
             let vertical_ok = (target.y - body.position.y).abs() < 1.6;
             if dist < ZOMBIE_REACH + stats.size.half_width && vertical_ok {
                 face = Some(target);
-                if zombie.attack_cooldown <= 0.0 {
+                if zombie.attack_cooldown <= 0.0 && !harmless {
                     zombie.attack_cooldown = ZOMBIE_ATTACK_COOLDOWN;
                     zombie.attacking = 0.4;
                     survivor_hits.push((entity, stats.damage));
@@ -551,7 +628,7 @@ fn zombie_ai(
             } else if dist < ZOMBIE_REACH + stats.size.half_width && vertical_ok {
                 // Au contact : frappe le joueur.
                 face = Some(player_pos);
-                if zombie.attack_cooldown <= 0.0 {
+                if zombie.attack_cooldown <= 0.0 && !harmless {
                     zombie.attack_cooldown = ZOMBIE_ATTACK_COOLDOWN;
                     zombie.attacking = 0.4;
                     if let Some(player) = lobby.players.get_mut(&player_id) {
@@ -647,15 +724,25 @@ fn zombie_ai(
             }
         }
 
+        // Le gonflé allume sa mèche près de sa cible, contre un mur ou coincé.
+        if zombie.kind == ZombieKind::Bloater
+            && zombie.fuse.is_none()
+            && (target_dist < BLOAT_TRIGGER || at_wall || zombie.stuck > STUCK_SECS)
+        {
+            zombie.fuse = Some(BLOAT_FUSE);
+        }
         let slow = if in_wire { WIRE_SLOW } else { 1.0 };
-        let mut wish = wish.normalize_or_zero() * stats.speed * slow;
+        let rage = if zombie.frenzy > 0.0 { FRENZY_SPEED } else { 1.0 };
+        let moon = if blood { BLOOD_MOON_SPEED } else { 1.0 };
+        let speed = stats.speed * slow * rage * moon;
+        let mut wish = wish.normalize_or_zero() * speed;
         // Coincé (fosse, marche trop haute, branches basses) : il escalade d'abord, puis casse ce qui le bloque.
         let mut scrambling = false;
         if zombie.stuck > STUCK_SECS && !climbing && face.is_none() {
             if wish.length() < 0.1
                 && let Some((_, player_pos, _)) = nearest
             {
-                wish = (player_pos - body.position).with_y(0.0).normalize_or_zero() * stats.speed;
+                wish = (player_pos - body.position).with_y(0.0).normalize_or_zero() * speed;
             }
             // On n'escalade que contre une paroi, jamais dans le vide.
             let against = [Vec3::X, Vec3::NEG_X, Vec3::Z, Vec3::NEG_Z].into_iter().any(|d| {
@@ -727,6 +814,17 @@ fn zombie_ai(
     for (entity, amount) in survivor_hits {
         if let Ok((_, mut survivor)) = survivors.get_mut(entity) {
             survivor.hurt(amount);
+        }
+    }
+    // Cris des hurleurs : les zombies alentour enragent.
+    for pos in howls {
+        for (mut z, body) in &mut zombies {
+            if body.position.distance(pos) < HOWL_RADIUS {
+                z.frenzy = FRENZY_SECS;
+            }
+        }
+        if let Some(server) = server.as_deref_mut() {
+            server.broadcast_message(DefaultChannel::ReliableOrdered, encode(&ServerMessage::Howl { pos }));
         }
     }
 }
@@ -871,6 +969,9 @@ fn death_cause(kind: ZombieKind) -> &'static str {
         ZombieKind::Brute => "Écrasé par une brute",
         ZombieKind::Spitter => "Rongé par l'acide d'un cracheur",
         ZombieKind::Colossus => "Piétiné par le colosse",
+        ZombieKind::Armored => "Broyé par un blindé",
+        ZombieKind::Howler => "Lacéré par un hurleur",
+        ZombieKind::Bloater => "Soufflé par un gonflé",
     }
 }
 
@@ -950,13 +1051,24 @@ fn sun_and_cleanup(
 
 fn kill_dead_zombies(
     mut commands: Commands,
-    zombies: Query<(Entity, &Zombie)>,
+    zombies: Query<(Entity, &Zombie, Option<&ZombieBody>)>,
     mut lobby: ResMut<Lobby>,
     mut server: Option<ResMut<RenetServer>>,
+    mut projectiles: Option<ResMut<crate::explosives::Projectiles>>,
 ) {
-    for (entity, zombie) in &zombies {
+    for (entity, zombie, body) in &zombies {
         if zombie.health <= 0.0 {
             commands.entity(entity).despawn();
+            // Le gonflé explose en mourant, quoi qui l'ait tué.
+            if zombie.kind == ZombieKind::Bloater
+                && let Some(projectiles) = projectiles.as_deref_mut()
+                && let Some(body) = body
+            {
+                projectiles.0.push(crate::explosives::Projectile::bloat(
+                    zombie.last_attacker,
+                    body.position + Vec3::Y,
+                ));
+            }
             // L'expérience revient au joueur qui a porté le dernier coup.
             let killer = zombie
                 .last_attacker
@@ -1164,6 +1276,12 @@ fn broadcast_zombies(
             })
             .map(|(z, b)| {
                 let mut flags = 0;
+                if z.frenzy > 0.0 {
+                    flags |= ZombieState::FRENZY;
+                }
+                if z.fuse.is_some() {
+                    flags |= ZombieState::FUSE;
+                }
                 if z.attacking > 0.0 {
                     flags |= ZombieState::ATTACKING;
                 }
@@ -1204,7 +1322,7 @@ mod tests {
     use crate::net::ConnectedPlayer;
 
     /// Une plateforme dans le ciel coupée par un mur renforcé de deux blocs ; le joueur est derrière.
-    fn arena(night: u32, zombies: usize) -> (App, i32) {
+    pub(super) fn arena(night: u32, zombies: usize) -> (App, i32) {
         let mut world = GameWorld(WorldState::new(WorldConfig::default()));
         let y = world.generator().surface_height(100, 100) + 25;
         let wall_z = 110;
@@ -1246,6 +1364,8 @@ mod tests {
                     last_attacker: None,
                     climb_from: None,
                     stuck: 0.0,
+                    frenzy: 0.0,
+                    fuse: None,
                 },
                 ZombieBody {
                     position: pos,
@@ -1509,6 +1629,8 @@ mod fog_tests {
                     last_attacker: None,
                     climb_from: None,
                     stuck: 0.0,
+                    frenzy: 0.0,
+                    fuse: None,
                 },
                 ZombieBody {
                     position: Vec3::new(50.0, 40.0, 50.0),
@@ -1551,6 +1673,8 @@ mod fog_tests {
             last_attacker: Some(1),
             climb_from: None,
             stuck: 0.0,
+            frenzy: 0.0,
+            fuse: None,
         });
         app.update();
         let xp = app.world().resource::<Lobby>().players[&1].progress.xp;
@@ -1569,5 +1693,83 @@ mod fog_tests {
         assert!(player.second_wind > 0.0);
         hurt_player(1, &mut player, 500.0, "test", None);
         assert_eq!(player.health, 0.0);
+    }
+
+    /// Ajoute un zombie d'un type donné à l'arène.
+    fn add_zombie(app: &mut App, id: u32, kind: ZombieKind, position: Vec3) {
+        app.world_mut().spawn((
+            Zombie {
+                id,
+                kind,
+                health: kind.stats().health,
+                attack_cooldown: 0.0,
+                attacking: 0.0,
+                hurt_timer: 0.0,
+                knockback: Vec3::ZERO,
+                last_attacker: None,
+                climb_from: None,
+                stuck: 0.0,
+                frenzy: 0.0,
+                fuse: None,
+            },
+            ZombieBody {
+                position,
+                velocity: Vec3::ZERO,
+                yaw: 0.0,
+                on_ground: false,
+                hit_wall: false,
+            },
+        ));
+    }
+
+    fn step(app: &mut App, secs: f32) {
+        for _ in 0..(secs * 30.0) as usize {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f32(1.0 / 30.0));
+            app.update();
+        }
+    }
+
+    #[test]
+    fn a_bloater_blows_itself_up_against_a_wall() {
+        let (mut app, wall_z) = super::tests::arena(6, 0);
+        app.init_resource::<crate::explosives::Projectiles>()
+            .add_systems(Update, kill_dead_zombies.after(zombie_ai));
+        let y = app.world().resource::<Lobby>().players[&1].state.position.y;
+        add_zombie(
+            &mut app,
+            1,
+            ZombieKind::Bloater,
+            Vec3::new(100.5, y, wall_z as f32 - 3.0),
+        );
+        step(&mut app, 4.0);
+        let alive = app.world_mut().query::<&Zombie>().iter(app.world()).count();
+        assert_eq!(alive, 0, "le gonflé a explosé");
+        let blasts = &app.world().resource::<crate::explosives::Projectiles>().0;
+        assert_eq!(blasts.len(), 1);
+        assert!(blasts[0].owner.is_none() && blasts[0].blast.blast_blocks > 0.0);
+    }
+
+    #[test]
+    fn a_howler_enrages_the_zombies_around_it() {
+        let (mut app, wall_z) = super::tests::arena(6, 0);
+        let y = app.world().resource::<Lobby>().players[&1].state.position.y;
+        // Le hurleur voit le joueur ; le marcheur, derrière le mur, l'entend.
+        add_zombie(
+            &mut app,
+            1,
+            ZombieKind::Howler,
+            Vec3::new(100.5, y, wall_z as f32 + 4.0),
+        );
+        add_zombie(&mut app, 2, ZombieKind::Walker, Vec3::new(98.5, y, wall_z as f32 - 6.0));
+        step(&mut app, 0.5);
+        let frenzy: Vec<f32> = app
+            .world_mut()
+            .query::<&Zombie>()
+            .iter(app.world())
+            .map(|z| z.frenzy)
+            .collect();
+        assert!(frenzy.iter().all(|f| *f > 0.0), "{frenzy:?}");
     }
 }

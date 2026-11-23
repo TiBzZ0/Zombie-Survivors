@@ -90,6 +90,26 @@ impl Projectile {
         }
     }
 
+    /// Explosion d'un gonflé, immédiate. `owner` : le joueur qui l'a tué, s'il y en a un.
+    pub fn bloat(owner: Option<ClientId>, position: Vec3) -> Self {
+        use shared::zombie::{BLOAT_BLOCKS, BLOAT_DAMAGE, BLOAT_RADIUS};
+        Self {
+            owner,
+            item: Item::Dynamite,
+            position,
+            velocity: Vec3::ZERO,
+            fuse: 0.0,
+            blast: Throwable {
+                fuse: 0.0,
+                radius: BLOAT_RADIUS,
+                damage: BLOAT_DAMAGE,
+                blast_blocks: BLOAT_BLOCKS,
+            },
+            impact: false,
+            gravity: 0.0,
+        }
+    }
+
     pub fn message(&self) -> ServerMessage {
         ServerMessage::Thrown {
             origin: self.position,
@@ -171,7 +191,9 @@ fn update_projectiles(
         for (id, player) in lobby.players.iter_mut().filter(|(_, pl)| pl.is_alive()) {
             let d = (player.state.position + Vec3::Y).distance(p.position);
             if d < blast.radius {
-                let amount = falloff(d) * FRIENDLY_FACTOR * (1.0 - player.inventory.armor_reduction());
+                // Un explosif de joueur épargne ses alliés ; celui d'un gonflé, non.
+                let friendly = if p.owner.is_some() { FRIENDLY_FACTOR } else { 1.0 };
+                let amount = falloff(d) * friendly * (1.0 - player.inventory.armor_reduction());
                 hurt_player(*id, player, amount, "Pris dans une explosion", server.as_deref_mut());
             }
         }
@@ -302,6 +324,8 @@ mod tests {
                     last_attacker: None,
                     climb_from: None,
                     stuck: 0.0,
+                    frenzy: 0.0,
+                    fuse: None,
                 },
                 ZombieBody {
                     position: center.as_vec3() + Vec3::new(0.5, -0.5, 0.5 + offset),
@@ -361,6 +385,8 @@ mod tests {
                 last_attacker: None,
                 climb_from: None,
                 stuck: 0.0,
+                frenzy: 0.0,
+                fuse: None,
             },
             ZombieBody {
                 position: Vec3::new(42.5, y, 40.5),

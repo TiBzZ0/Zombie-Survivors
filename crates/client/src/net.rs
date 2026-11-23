@@ -157,6 +157,9 @@ pub enum NetEvent {
         radius: f32,
     },
     /// Une construction s'est effondrée.
+    Howl {
+        pos: Vec3,
+    },
     Collapse {
         pos: Vec3,
         blocks: u16,
@@ -465,6 +468,9 @@ fn receive_messages(
             }
             ServerMessage::Claims(list) => {
                 commands.insert_resource(Claims(list));
+            }
+            ServerMessage::Howl { pos } => {
+                events.write(NetEvent::Howl { pos });
             }
             ServerMessage::Collapse { pos, blocks } => {
                 events.write(NetEvent::Collapse { pos, blocks });

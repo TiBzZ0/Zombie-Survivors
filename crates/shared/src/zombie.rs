@@ -17,6 +17,12 @@ pub enum ZombieKind {
     Spitter,
     /// Colosse : mène les grandes hordes, énorme et presque indestructible.
     Colossus,
+    /// Blindé : couvert de plaques, les lames et les balles glissent dessus.
+    Armored,
+    /// Hurleur : son cri rend les zombies alentour enragés.
+    Howler,
+    /// Gonflé : se jette sur sa cible et explose, même s'il est tué.
+    Bloater,
 }
 
 /// Caractéristiques d'un type de zombie.
@@ -84,6 +90,45 @@ impl ZombieKind {
                     height: 3.4,
                 },
             },
+            ZombieKind::Armored => ZombieStats {
+                health: 90.0,
+                speed: 1.9,
+                damage: 14.0,
+                block_dps: 18.0,
+                size: BodySize {
+                    half_width: 0.36,
+                    height: 1.9,
+                },
+            },
+            ZombieKind::Howler => ZombieStats {
+                health: 32.0,
+                speed: 3.2,
+                damage: 6.0,
+                block_dps: 6.0,
+                size: BodySize {
+                    half_width: 0.26,
+                    height: 2.0,
+                },
+            },
+            ZombieKind::Bloater => ZombieStats {
+                health: 22.0,
+                speed: 3.0,
+                damage: 0.0,
+                block_dps: 0.0,
+                size: BodySize {
+                    half_width: 0.42,
+                    height: 1.7,
+                },
+            },
+        }
+    }
+
+    /// Part des dégâts qui passe : les plaques du blindé arrêtent les lames et les balles,
+    /// pas la masse, les coups puissants ni les explosions (`crushing`).
+    pub const fn armor_factor(self, crushing: bool) -> f32 {
+        match self {
+            ZombieKind::Armored if !crushing => ARMOR_FACTOR,
+            _ => 1.0,
         }
     }
 
@@ -93,6 +138,9 @@ impl ZombieKind {
             2 => ZombieKind::Brute,
             3 => ZombieKind::Spitter,
             4 => ZombieKind::Colossus,
+            5 => ZombieKind::Armored,
+            6 => ZombieKind::Howler,
+            7 => ZombieKind::Bloater,
             _ => ZombieKind::Walker,
         }
     }
@@ -107,6 +155,28 @@ pub const ZOMBIE_ATTACK_COOLDOWN: f32 = 1.0;
 pub const SPIT_RANGE: f32 = 14.0;
 pub const SPIT_COOLDOWN: f32 = 2.5;
 pub const SPIT_DAMAGE: f32 = 9.0;
+
+/// Part des dégâts de lame ou de balle qui traverse les plaques d'un blindé.
+pub const ARMOR_FACTOR: f32 = 0.35;
+
+/// Le hurleur crie quand un joueur est à cette distance, et enrage les zombies dans `HOWL_RADIUS`.
+pub const HOWL_RANGE: f32 = 18.0;
+pub const HOWL_RADIUS: f32 = 28.0;
+pub const HOWL_COOLDOWN: f32 = 12.0;
+/// Durée de la rage et vitesse des zombies enragés.
+pub const FRENZY_SECS: f32 = 7.0;
+pub const FRENZY_SPEED: f32 = 1.6;
+
+/// Le gonflé allume sa mèche à cette distance de sa cible, et explose au bout de `BLOAT_FUSE`.
+pub const BLOAT_TRIGGER: f32 = 2.2;
+pub const BLOAT_FUSE: f32 = 0.9;
+/// Explosion du gonflé : rayon, dégâts au centre, rayon des blocs détruits.
+pub const BLOAT_RADIUS: f32 = 3.5;
+pub const BLOAT_DAMAGE: f32 = 38.0;
+pub const BLOAT_BLOCKS: f32 = 1.6;
+
+/// La lune de sang rend les zombies plus rapides.
+pub const BLOOD_MOON_SPEED: f32 = 1.2;
 
 /// À partir de cette nuit, les zombies arrêtés par un mur grimpent les uns sur les autres.
 pub const STACK_FROM_NIGHT: u32 = 3;
@@ -140,5 +210,15 @@ mod tests {
         let (n10, h10) = stacking(10).unwrap();
         assert!(n10 < n2 && h10 > h2);
         assert_eq!(stacking(40), Some((2, 6.0)));
+    }
+
+    #[test]
+    fn kinds_survive_the_network_and_armor_stops_blades_only() {
+        for i in 0..8u8 {
+            assert_eq!(ZombieKind::from_u8(i) as u8, i);
+        }
+        assert!(ZombieKind::Armored.armor_factor(false) < 0.5);
+        assert_eq!(ZombieKind::Armored.armor_factor(true), 1.0);
+        assert_eq!(ZombieKind::Walker.armor_factor(false), 1.0);
     }
 }

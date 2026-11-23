@@ -47,6 +47,7 @@ pub struct GameClock {
 const DAY_SKY: Vec3 = Vec3::new(0.53, 0.72, 0.90);
 const DUSK_SKY: Vec3 = Vec3::new(0.85, 0.45, 0.30);
 const NIGHT_SKY: Vec3 = Vec3::new(0.02, 0.03, 0.07);
+const BLOOD_SKY: Vec3 = Vec3::new(0.16, 0.02, 0.02);
 const FOG_SKY: Vec3 = Vec3::new(0.68, 0.70, 0.72);
 
 /// Distance des astres à la caméra : derrière le terrain, devant le plan lointain.
@@ -156,6 +157,13 @@ fn update_sky(
     let base = NIGHT_SKY.lerp(DAY_SKY, (h * 2.0 + 0.3).clamp(0.0, 1.0));
     let sky_color = base.lerp(DUSK_SKY, low * 0.6);
     let sky_color = sky_color.lerp(FOG_SKY * (0.25 + 0.75 * day), thick * 0.85);
+    // Lune de sang : le ciel nocturne vire au rouge sombre.
+    let blood = if clock.time.is_blood_moon() && clock.time.is_night() {
+        (-h * 3.0).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let sky_color = sky_color.lerp(BLOOD_SKY, blood * 0.7);
     let color = Color::srgb(sky_color.x, sky_color.y, sky_color.z);
     clear.0 = color;
     fog.color = color;
@@ -183,8 +191,8 @@ fn update_sky(
             let warm = 1.0 - (sky.sun.y * 2.5).clamp(0.0, 1.0);
             Color::srgb(1.0, 0.95 - 0.3 * warm, 0.88 - 0.5 * warm)
         }
-        // Clair de lune bleuté.
-        SkyBody::Moon => Color::srgb(0.62, 0.72, 1.0),
+        // Clair de lune bleuté, rouge les nuits de lune de sang.
+        SkyBody::Moon => Color::srgb(0.62, 0.72, 1.0).mix(&Color::srgb(1.0, 0.3, 0.22), blood),
     };
     light.shadow_maps_enabled = settings.shadows && strength > 0.0;
     **transform = Transform::default().looking_to(toward, Vec3::Y);
@@ -210,7 +218,11 @@ fn update_sky(
                 let warm = 1.0 - (sky.sun.y * 3.0).clamp(0.0, 1.0);
                 Color::LinearRgba(LinearRgba::new(6.0, 5.0 - 2.5 * warm, 3.6 - 3.0 * warm, 1.0) * shown)
             }
-            SkyBody::Moon => Color::LinearRgba(LinearRgba::new(1.6, 1.65, 1.8, shown * sky.night.max(0.35))),
+            SkyBody::Moon => {
+                let pale = LinearRgba::new(1.6, 1.65, 1.8, shown * sky.night.max(0.35));
+                let red = LinearRgba::new(2.6, 0.35, 0.25, shown * sky.night.max(0.35));
+                Color::LinearRgba(pale.mix(&red, blood))
+            }
         };
     }
     for material in &stars {
