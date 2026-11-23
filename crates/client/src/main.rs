@@ -16,6 +16,7 @@ mod chest;
 mod crafting;
 mod effects;
 mod electricity;
+mod held;
 mod hud;
 mod icons;
 mod inventory_ui;

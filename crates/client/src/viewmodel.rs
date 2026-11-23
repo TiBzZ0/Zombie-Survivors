@@ -12,7 +12,6 @@ use shared::block::Block;
 use shared::item::Item;
 
 use crate::AppState;
-use crate::icons::ItemIcons;
 use crate::player::LocalPlayer;
 
 pub struct ViewModelPlugin;
@@ -56,9 +55,9 @@ struct HeldModel(Item);
 #[derive(Resource, Default)]
 struct HeldMaterials {
     blocks: HashMap<Block, Handle<StandardMaterial>>,
-    icons: HashMap<Item, Handle<StandardMaterial>>,
+    items: HashMap<Item, Handle<Mesh>>,
+    painted: Option<Handle<StandardMaterial>>,
     cube: Option<Handle<Mesh>>,
-    quad: Option<Handle<Mesh>>,
 }
 
 /// État de l'animation.
@@ -144,7 +143,6 @@ fn despawn_view_model(mut commands: Commands, roots: Query<Entity, With<ViewMode
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct HeldAssets<'w> {
     cache: ResMut<'w, HeldMaterials>,
-    icons: ResMut<'w, ItemIcons>,
     images: ResMut<'w, Assets<Image>>,
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
@@ -181,20 +179,18 @@ impl HeldAssets<'_> {
             _ => {
                 let meshes = &mut self.meshes;
                 let mesh = cache
-                    .quad
-                    .get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0)))
-                    .clone();
-                let (icons, images, materials) = (&mut self.icons, &mut self.images, &mut self.materials);
-                let material = cache
-                    .icons
+                    .items
                     .entry(item)
-                    .or_insert_with(|| {
+                    .or_insert_with(|| meshes.add(crate::held::item_mesh(item)))
+                    .clone();
+                // Couleurs portées par les sommets : un seul matériau blanc pour tous.
+                let materials = &mut self.materials;
+                let material = cache
+                    .painted
+                    .get_or_insert_with(|| {
                         materials.add(StandardMaterial {
-                            base_color_texture: Some(icons.get(images, item)),
-                            alpha_mode: AlphaMode::Mask(0.5),
-                            double_sided: true,
-                            cull_mode: None,
-                            perceptual_roughness: 1.0,
+                            base_color: Color::WHITE,
+                            perceptual_roughness: 0.55,
                             ..default()
                         })
                     })
@@ -214,7 +210,9 @@ fn update_held_item(
     mut assets: HeldAssets,
 ) {
     let held = player.held();
-    if current.iter().map(|(_, m)| Some(m.0)).next().unwrap_or(None) == held {
+    // Bras caché derrière un panneau : le modèle change à sa fermeture (posé pendant que le bras
+    // est caché, il ne réapparaissait pas).
+    if player.panel_open() || current.iter().map(|(_, m)| Some(m.0)).next().unwrap_or(None) == held {
         return;
     }
     for (entity, _) in &current {
