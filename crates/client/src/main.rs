@@ -160,6 +160,12 @@ fn install_font(mut fonts: ResMut<Assets<Font>>) {
 fn setup_scene(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
+        // Rendu HDR : le soleil, les feux et les projecteurs peuvent briller (halo lumineux).
+        bevy::camera::Hdr,
+        bevy::post_process::bloom::Bloom {
+            intensity: 0.12,
+            ..bevy::post_process::bloom::Bloom::NATURAL
+        },
         Transform::from_xyz(0.0, 80.0, 0.0).looking_to(Vec3::new(1.0, -0.3, 1.0), Vec3::Y),
         DistanceFog {
             color: Color::srgb(0.53, 0.72, 0.90),
@@ -173,8 +179,18 @@ fn setup_scene(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 8_000.0,
+            shadow_maps_enabled: true,
             ..default()
         },
+        // Ombres nettes près du joueur, plus grossières au loin, coupées au-delà de 120 m.
+        bevy::light::CascadeShadowConfigBuilder {
+            num_cascades: 3,
+            minimum_distance: 0.1,
+            first_cascade_far_bound: 16.0,
+            maximum_distance: 120.0,
+            overlap_proportion: 0.2,
+        }
+        .build(),
         Transform::default().looking_to(Vec3::new(-0.4, -1.0, -0.3), Vec3::Y),
     ));
     commands.insert_resource(GlobalAmbientLight {

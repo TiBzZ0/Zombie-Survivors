@@ -102,7 +102,11 @@ fn main() {
     let save = SaveFile {
         version: SAVE_VERSION,
         world: WorldConfig::default(),
-        time: GameTime::START,
+        // Heure de départ réglable (KIT_PHASE=0.6 pour le coucher du soleil, 0.8 pour la nuit).
+        time: std::env::var("KIT_PHASE")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .map_or(GameTime::START, |phase| GameTime { day: 1, phase }),
         edits,
         players: vec![(
             name,

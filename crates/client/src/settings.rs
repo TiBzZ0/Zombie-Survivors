@@ -30,6 +30,8 @@ pub struct Settings {
     pub minimap: bool,
     /// Les objectifs du tutoriel sont affichés (on peut les masquer avec H).
     pub tutorial: bool,
+    /// Ombres projetées par le soleil et la lune (à couper sur un petit ordinateur).
+    pub shadows: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +43,7 @@ impl Default for Settings {
             view_distance: 7,
             minimap: true,
             tutorial: true,
+            shadows: true,
         }
     }
 }
@@ -91,6 +94,7 @@ impl Settings {
                 }
                 "carte" => settings.minimap = value != "non",
                 "tutoriel" => settings.tutorial = value != "non",
+                "ombres" => settings.shadows = value != "non",
                 _ => {}
             }
         }
@@ -100,13 +104,14 @@ impl Settings {
     pub fn to_text(&self) -> String {
         let yes = |b: bool| if b { "oui" } else { "non" };
         format!(
-            "sensibilite = {:.2}\nvolume = {:.2}\nplein_ecran = {}\ndistance = {}\ncarte = {}\ntutoriel = {}\n",
+            "sensibilite = {:.2}\nvolume = {:.2}\nplein_ecran = {}\ndistance = {}\ncarte = {}\ntutoriel = {}\nombres = {}\n",
             self.sensitivity,
             self.volume,
             yes(self.fullscreen),
             self.view_distance,
             yes(self.minimap),
-            yes(self.tutorial)
+            yes(self.tutorial),
+            yes(self.shadows)
         )
     }
 
@@ -178,13 +183,14 @@ mod tests {
             view_distance: 5,
             minimap: false,
             tutorial: false,
+            shadows: false,
         };
         assert_eq!(Settings::parse(&settings.to_text()), settings);
         let odd = Settings::parse("sensibilite = 99\nvolume = abc\nautre = 1\ndistance = 40");
         assert_eq!(odd.sensitivity, SENSITIVITY_RANGE.1);
         assert_eq!(odd.view_distance, VIEW_DISTANCE_RANGE.1);
         // Un ancien fichier de réglages garde la carte et le tutoriel.
-        assert!(odd.minimap && odd.tutorial);
+        assert!(odd.minimap && odd.tutorial && odd.shadows);
         assert_eq!(odd.volume, Settings::default().volume);
         let mut s = Settings::default();
         s.nudge_volume(5.0);
