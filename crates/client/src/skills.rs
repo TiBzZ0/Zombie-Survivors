@@ -419,8 +419,8 @@ fn update_tree(
             hovered.0 = Some(skill);
         }
         bg.0 = match (rank > 0, over.get()) {
-            (true, true) => branch_color(branch, 0.55),
-            (true, false) => branch_color(branch, 0.35),
+            (true, true) => branch_color(branch, 0.4),
+            (true, false) => branch_color(branch, 0.22),
             (false, true) => Color::srgba(0.2, 0.2, 0.2, 0.95),
             (false, false) => CARD_BG,
         };

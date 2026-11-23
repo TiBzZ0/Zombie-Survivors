@@ -80,6 +80,10 @@ struct ComponentText(usize);
 #[derive(Component)]
 struct StationText;
 
+/// Palier technologique de la recette choisie.
+#[derive(Component)]
+struct TechText;
+
 /// Bouton « Fabriquer » (1) ou « ×5 » (5).
 #[derive(Component)]
 struct CraftButton(u32);
@@ -386,6 +390,7 @@ fn spawn_panel(mut commands: Commands, mut icons: ResMut<ItemIcons>, mut images:
         StationText,
         ChildOf(detail),
     ));
+    commands.spawn((label("", 15.0), TechText, ChildOf(detail)));
     commands.spawn((
         Node {
             column_gap: px(8),
@@ -522,6 +527,7 @@ fn update_detail(
         Single<&mut Text, With<DetailText>>,
         Single<(&mut Text, &mut TextColor), With<StationText>>,
         Query<(&ComponentText, &mut Text, &mut TextColor)>,
+        Single<(&mut Text, &mut TextColor), With<TechText>>,
     )>,
     mut rows: Query<(&ComponentRow, &mut Node)>,
     mut component_icons: Query<(&ComponentIcon, &mut ImageNode), Without<DetailIcon>>,
@@ -562,19 +568,24 @@ fn update_detail(
                 color.0 = DIM;
             }
         }
+    }
+    {
         // Palier technologique : une compétence de la branche Technologie à apprendre.
+        let mut tech_text = texts.p4();
+        let (text, color) = &mut *tech_text;
         let tech = recipe.tech();
-        if let Some(skill) = tech.skill() {
-            if player.progress.has_tech(tech) {
-                text.0.push_str(&format!("\nTechnologie : {} (maîtrisée)", tech.name()));
-            } else {
-                text.0 = format!(
-                    "{}\nTechnologie : {} verrouillée. Apprenez « {} » (touche K)",
-                    text.0,
-                    tech.name(),
-                    skill.info().name
-                );
+        match tech.skill() {
+            Some(_) if player.progress.has_tech(tech) => {
+                text.0 = format!("Palier {} : maîtrisé", tech.name());
+                color.0 = GOOD;
+            }
+            Some(skill) => {
+                text.0 = format!("Palier {} : apprenez « {} » (K)", tech.name(), skill.info().name);
                 color.0 = BAD;
+            }
+            None => {
+                text.0 = "Palier primitif".into();
+                color.0 = DIM;
             }
         }
     }
