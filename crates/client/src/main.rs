@@ -28,6 +28,7 @@ mod models;
 mod net;
 mod particles;
 mod player;
+mod rain;
 mod remote;
 mod settings;
 mod skills;
@@ -152,6 +153,7 @@ fn main() {
             skills::SkillsPlugin,
             stamina::StaminaUiPlugin,
             fishing::FishingPlugin,
+            rain::RainPlugin,
             swim::SwimUiPlugin,
         ))
         .add_systems(PreStartup, install_font)

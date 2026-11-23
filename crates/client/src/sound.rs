@@ -70,6 +70,7 @@ enum Sfx {
     Zap,
     Rumble,
     Howl,
+    Thunder,
 }
 
 #[derive(Resource)]
@@ -305,6 +306,20 @@ fn synth(sfx: Sfx) -> Vec<f32> {
                 ((phase * TAU).sin() * 0.6 + (phase * 2.0 * TAU).sin() * 0.25) * rasp * env * 0.7
             })
         }
+        // Tonnerre : un claquement sec puis un long grondement qui roule.
+        Sfx::Thunder => {
+            let mut noise = Noise(173);
+            let mut low = 0.0;
+            let mut lower = 0.0;
+            samples(3.5, |_, k| {
+                let n = noise.next();
+                low += (n - low) * 0.05;
+                lower += (low - lower) * 0.03;
+                let crack = n * (1.0 - k * 12.0).max(0.0);
+                let roll = lower * 6.0 * (1.0 + 0.5 * (k * 9.0).sin());
+                ((crack * 0.9 + roll) * (k * 40.0).min(1.0) * (1.0 - k).powf(1.2)).clamp(-1.0, 1.0)
+            })
+        }
         Sfx::Horn => samples(2.5, |t, k| {
             let env = (k * 6.0).min(1.0) * (1.0 - k).powf(0.5);
             ((t * 82.0 * TAU).sin() + 0.5 * (t * 123.0 * TAU).sin() + 0.25 * (t * 164.0 * TAU).sin()) * env * 0.4
@@ -338,6 +353,7 @@ fn build_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>
         Sfx::Zap,
         Sfx::Rumble,
         Sfx::Howl,
+        Sfx::Thunder,
     ];
     all.extend((0..3).map(Sfx::Groan));
     let map = all
@@ -416,6 +432,7 @@ fn world_sounds(
             NetEvent::Collapse { pos, .. } => play(&mut commands, &sounds, Sfx::Rumble, Some(*pos), 1.0),
             NetEvent::Howl { pos } => play(&mut commands, &sounds, Sfx::Howl, Some(*pos + Vec3::Y * 1.8), 1.0),
             NetEvent::Bite => play(&mut commands, &sounds, Sfx::Splash, None, 0.5),
+            NetEvent::Lightning { pos } => play(&mut commands, &sounds, Sfx::Thunder, Some(*pos + Vec3::Y * 10.0), 1.0),
             _ => {}
         }
     }

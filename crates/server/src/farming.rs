@@ -38,8 +38,11 @@ fn grow_crops(
     mut version: ResMut<WorldVersion>,
     mut server: Option<ResMut<RenetServer>>,
     mut timer: Local<f32>,
+    weather: Option<Res<crate::events::Weather>>,
 ) {
-    *timer += time.delta_secs();
+    // La pluie arrose les champs.
+    let growth = weather.map_or(1.0, |w| w.rain.growth());
+    *timer += time.delta_secs() * growth;
     if *timer < 1.0 {
         return;
     }
