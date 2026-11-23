@@ -42,6 +42,7 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | Clic droit | Parler à un survivant, ouvrir une porte, un coffre ou une tourelle, sinon poser le bloc en main ou manger |
 | Maj + clic droit | Renvoyer un de vos survivants |
 | Ctrl + clic droit | Confier l'arme ou la pièce d'armure tenue à un de vos survivants (l'ancienne vous revient) |
+| Clic droit, canne à pêche en main | Lancer la ligne vers l'eau ; quand le bouchon plonge, clic droit pour ferrer |
 | Clic droit maintenu (arme de mêlée) | Lever la garde : les coups de face sont très réduits, et parés s'ils arrivent juste après |
 | Garde levée + clic gauche | Coup puissant : 1,8 fois les dégâts, repousse loin et touche tous les zombies devant, mais coûte un quart de l'endurance |
 | F11 | Plein écran |
@@ -71,6 +72,7 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - Arc et flèches, puis fusil et cartouches, pour tenir les zombies à distance.
 - Portes (deux blocs empilés s'ouvrent ensemble) et coffres partagés pour la base. Un coffre cassé par un joueur lui rend son contenu ; cassé par un zombie, le contenu est perdu.
 - Le monde a ses **biomes** : prairies dégagées, forêts denses, déserts de sable et de cactus, terres enneigées. Les creux sont remplis de **lacs** où l'on nage : on flotte la tête hors de l'eau, on plonge avec Ctrl, et le **souffle** (bulles au-dessus de la barre) s'épuise sous l'eau avant la noyade. Pour sortir, il suffit d'avancer vers la rive.
+- La **pêche** : fabrique une **canne à pêche** (3 bâtons et 1 peau), vise un lac et fais un clic droit pour lancer la ligne. Quand le bouchon plonge (plouf !), clic droit tout de suite pour ferrer : tu as un peu plus d'une seconde. Surtout du poisson (à griller au feu de camp), parfois des débris, et rarement un trésor tombé à l'eau (lingots, cartouches, antidote). Chaque prise rapporte un peu d'expérience.
 - La **soif** baisse plus vite que la faim (environ 10 minutes). Clic droit sur l'eau, main libre, pour boire. La **gourde** (établi : 1 lingot de fer et 1 bâton) se remplit au lac et se boit n'importe où. Sans boire, la vie ne remonte plus, puis diminue.
 - L'**eau** est transparente et **s'écoule** : creuser au bord d'un lac l'inonde, et l'eau courante s'étale jusqu'à 7 blocs à plat ou tombe dans les trous. Le **seau** (établi : 3 lingots de fer) se remplit à l'eau et se vide au clic droit : il crée une source, pratique pour des douves. Une source versée au seau se reprend ; l'eau courante se retire quand sa source disparaît.
 - La **température** compte dans la neige et le désert. La nuit enneigée glace en moins d'une minute à découvert : un **feu de camp** à quelques pas, un **toit** au-dessus de la tête ou un **manteau de fourrure** (établi : 4 peaux, prises sur le gibier) protègent. Le jour, le désert brûle : de l'ombre ou un **chapeau de paille** (4 blés). Sous 35 °C ou au-dessus de 39,5 °C, la vie baisse ; quand on a trop chaud, la soif se creuse deux fois plus vite.

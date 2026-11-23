@@ -12,6 +12,7 @@ pub mod climate;
 pub mod config;
 pub mod crafting;
 pub mod daytime;
+pub mod fishing;
 pub mod item;
 pub mod multiblock;
 pub mod pathfinding;

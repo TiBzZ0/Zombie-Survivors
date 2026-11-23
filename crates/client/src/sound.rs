@@ -415,6 +415,7 @@ fn world_sounds(
             NetEvent::Explosion { pos, .. } => play(&mut commands, &sounds, Sfx::Explosion, Some(*pos), 1.0),
             NetEvent::Collapse { pos, .. } => play(&mut commands, &sounds, Sfx::Rumble, Some(*pos), 1.0),
             NetEvent::Howl { pos } => play(&mut commands, &sounds, Sfx::Howl, Some(*pos + Vec3::Y * 1.8), 1.0),
+            NetEvent::Bite => play(&mut commands, &sounds, Sfx::Splash, None, 0.5),
             _ => {}
         }
     }

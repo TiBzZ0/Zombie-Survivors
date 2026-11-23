@@ -16,6 +16,7 @@ mod chest;
 mod crafting;
 mod effects;
 mod electricity;
+mod fishing;
 mod held;
 mod hud;
 mod icons;
@@ -150,6 +151,7 @@ fn main() {
             particles::ParticlesPlugin,
             skills::SkillsPlugin,
             stamina::StaminaUiPlugin,
+            fishing::FishingPlugin,
             swim::SwimUiPlugin,
         ))
         .add_systems(PreStartup, install_font)

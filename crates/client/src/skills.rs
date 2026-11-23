@@ -174,7 +174,7 @@ fn announce_progress(mut commands: Commands, mut events: MessageReader<NetEvent>
     }
 }
 
-fn popup(commands: &mut Commands, text: String, size: f32, color: Color, top: f32, life: f32) {
+pub(crate) fn popup(commands: &mut Commands, text: String, size: f32, color: Color, top: f32, life: f32) {
     commands.spawn((
         DespawnOnExit(AppState::Playing),
         Node {

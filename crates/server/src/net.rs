@@ -90,6 +90,8 @@ pub struct ConnectedPlayer {
     pub second_wind: f32,
     /// Souffle restant sous l'eau, en secondes.
     pub breath: f32,
+    /// Ligne de pêche à l'eau.
+    pub fishing: Option<crate::fishing::Line>,
 }
 
 /// Durée après avoir levé la garde pendant laquelle un coup est paré.
@@ -153,6 +155,7 @@ impl ConnectedPlayer {
             progress: shared::skills::Progress::default(),
             second_wind: 0.0,
             breath: shared::swim::BREATH_SECS,
+            fishing: None,
         }
     }
 
@@ -978,6 +981,22 @@ fn handle_reliable(
                 send_vitals(server, client, player);
             }
             send_inventory(server, client, player);
+        }
+        ClientMessage::Cast { at } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
+            let close = eye.distance(at.as_vec3() + Vec3::splat(0.5)) <= shared::fishing::CAST_RANGE + 1.5;
+            if player.is_alive() && player.held_item() == Some(Item::FishingRod) && world.block(at).is_water() && close
+            {
+                player.fishing = Some(crate::fishing::Line::cast(at));
+            }
+        }
+        ClientMessage::Reel => {
+            if let Some(player) = lobby.players.get_mut(&client) {
+                crate::fishing::reel(client, player, Some(server));
+            }
         }
         ClientMessage::Drink { pos } => {
             let Some(player) = lobby.players.get_mut(&client) else {

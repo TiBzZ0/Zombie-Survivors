@@ -335,6 +335,18 @@ pub const RECIPES: &[Recipe] = &[
         station: Some(Block::Campfire),
     },
     Recipe {
+        output: Item::CookedFish,
+        count: 1,
+        inputs: &[(Item::RawFish, 1)],
+        station: Some(Block::Campfire),
+    },
+    Recipe {
+        output: Item::FishingRod,
+        count: 1,
+        inputs: &[(Item::Stick, 3), (Item::Hide, 1)],
+        station: None,
+    },
+    Recipe {
         output: Item::Flask,
         count: 1,
         inputs: &[(Item::IronIngot, 1), (Item::Stick, 1)],
@@ -465,7 +477,12 @@ impl Category {
                 _ => Category::Building,
             },
             Item::Stick | Item::IronIngot | Item::Coal | Item::Flask | Item::Hide => Category::Materials,
-            Item::Pickaxe(_) | Item::Bucket | Item::WaterBucket | Item::Seeds | Item::CarrotSeeds => Category::Tools,
+            Item::Pickaxe(_)
+            | Item::Bucket
+            | Item::WaterBucket
+            | Item::Seeds
+            | Item::CarrotSeeds
+            | Item::FishingRod => Category::Tools,
             Item::Helmet(_) | Item::BodyArmor(_) | Item::FurCoat | Item::StrawHat => Category::Armor,
             Item::Bandage | Item::Antidote | Item::HerbalTea => Category::Care,
             item if item.is_weapon() || item.throwable().is_some() => Category::Weapons,

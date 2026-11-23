@@ -137,6 +137,8 @@ pub struct LocalPlayer {
     pub skills_open: bool,
     /// Endurance : course, sauts et coups la consomment.
     pub stamina: shared::stamina::Stamina,
+    /// Ligne de pêche à l'eau : bloc d'eau du bouchon, et temps restant pour ferrer s'il plonge.
+    pub fishing: Option<(IVec3, f32)>,
     /// Objets déjà vus dans l'inventaire : seuls les nouveaux venus prennent une case libre
     /// de la barre (une case vidée à la main le reste).
     known: std::collections::BTreeSet<Item>,
@@ -720,6 +722,36 @@ fn interact(
 
     if !mouse.pressed(MouseButton::Right) || player.cooldown > 0.0 {
         return;
+    }
+    // Canne à pêche : lancer vers l'eau, puis ferrer (ou remonter la ligne).
+    if player.held() == Some(Item::FishingRod) && mouse.just_pressed(MouseButton::Right) {
+        if player.fishing.take().is_some() {
+            send_reliable(&mut client, &ClientMessage::Reel);
+            player.cooldown = 0.4;
+            return;
+        }
+        let water = raycast(
+            player.eye(),
+            player.look_direction(),
+            shared::fishing::CAST_RANGE,
+            |p| {
+                let b = world.block(p);
+                b.is_targetable() || b.is_water()
+            },
+        )
+        .map(|h| h.block)
+        .filter(|p| world.block(*p).is_water());
+        if let Some(at) = water {
+            // Le bouchon flotte sur le bloc d'eau le plus haut de la colonne.
+            let mut top = at;
+            while world.block(top + IVec3::Y).is_water() {
+                top += IVec3::Y;
+            }
+            send_reliable(&mut client, &ClientMessage::Cast { at: top });
+            player.fishing = Some((top, 0.0));
+            player.cooldown = 0.4;
+            return;
+        }
     }
     // Survivants, portes et coffres passent avant l'objet en main.
     if let Some(id) = player.aimed_survivor
