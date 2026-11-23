@@ -25,6 +25,7 @@ pub mod net;
 pub mod save;
 pub mod structure;
 pub mod survivors;
+pub mod trees;
 pub mod turrets;
 pub mod water;
 pub mod world;
@@ -60,6 +61,7 @@ impl Plugin for ServerPlugin {
                 structure::StructurePlugin,
                 claims::ClaimsPlugin,
             ))
+            .add_plugins(trees::TreesPlugin)
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)
             .add_systems(Update, report_status)

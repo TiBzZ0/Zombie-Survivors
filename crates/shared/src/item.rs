@@ -417,7 +417,11 @@ pub fn armor_reduction(pieces: [Option<Item>; 2]) -> f32 {
 /// Ce que donne un bloc cassé (la pomme des feuilles est tirée au sort par le serveur).
 pub fn drop_for(block: Block) -> Option<Item> {
     match block {
-        Block::Air | Block::TallGrass => None,
+        Block::Air | Block::TallGrass | Block::RottenFruit => None,
+        // Tous les troncs donnent du bois, tous les feuillages des feuilles.
+        b if b.is_log() => Some(Item::Block(Block::Wood)),
+        b if b.is_leaves() => Some(Item::Block(Block::Leaves)),
+        Block::FallenFruit => Some(Item::Apple),
         Block::Grass => Some(Item::Block(Block::Dirt)),
         // Les filons donnent leur ressource, jamais le bloc lui-même (qui serait un filon neuf).
         Block::IronOre => Some(Item::RawIron),
@@ -446,7 +450,7 @@ pub fn mining_speed(block: Block, held: Option<Item>) -> f32 {
     let woody = matches!(
         block,
         Block::Wood | Block::Planks | Block::Door | Block::DoorOpen | Block::Chest | Block::Workbench
-    );
+    ) || block.is_log();
     let axe = match held {
         Some(Item::Axe(Tier::Wood)) => 2.0,
         Some(Item::Axe(Tier::Stone)) => 3.5,

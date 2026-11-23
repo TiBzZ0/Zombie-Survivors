@@ -101,6 +101,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
         let mut world = WorldState::new(config.world.clone());
         world.track_changes();
         world.track_removals();
+        world.track_felled();
         commands.insert_resource(SpawnPoint(find_spawn(&world)));
         commands.insert_resource(GameWorld(world));
         commands.insert_resource(Deposits::default());
@@ -135,6 +136,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
     commands.insert_resource(SpawnPoint(find_spawn(&world)));
     world.track_changes();
     world.track_removals();
+    world.track_felled();
     commands.insert_resource(GameWorld(world));
 }
 

@@ -125,6 +125,20 @@ fn handle() -> Rgba {
 }
 
 /// Petit cube en perspective, texturé comme le bloc.
+/// La tuile d'un bloc telle quelle, avec ses trous (pousses).
+fn flat(block: Block) -> Canvas {
+    let mut c = Canvas::new();
+    for y in 0..N {
+        for x in 0..N {
+            if crate::textures::opaque(block, x as u32, y as u32) {
+                let [r, g, b] = tile_color(block, x as u32, y as u32);
+                c.set(x as i32, y as i32, rgb(r, g, b));
+            }
+        }
+    }
+    c
+}
+
 fn cube(block: Block) -> Canvas {
     let mut c = Canvas::new();
     for y in 0..N {
@@ -168,6 +182,8 @@ pub fn draw(item: Item) -> Canvas {
     let white = rgb(0.94, 0.93, 0.9);
     let dark = rgb(0.12, 0.12, 0.13);
     match item {
+        // Une plante se montre à plat, telle qu'on la voit plantée.
+        Item::Block(block) if block.is_plant() => return flat(block),
         Item::Block(block) => return cube(block),
         Item::Stick => c.thick((4, 12), (11, 3), handle()),
         Item::IronIngot => {

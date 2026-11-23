@@ -36,6 +36,8 @@ pub struct WorldState {
     changes: Option<Vec<BlockPos>>,
     /// Blocs porteurs disparus depuis le dernier `take_removals`, si le suivi est activé.
     removals: Option<Vec<BlockPos>>,
+    /// Troncs disparus depuis le dernier `take_felled`, si le suivi est activé.
+    felled: Option<Vec<BlockPos>>,
 }
 
 impl WorldState {
@@ -46,6 +48,7 @@ impl WorldState {
             cache: Mutex::new(HashMap::new()),
             changes: None,
             removals: None,
+            felled: None,
         }
     }
 
@@ -57,6 +60,16 @@ impl WorldState {
     /// Blocs changés depuis le dernier appel (vide si le suivi n'est pas activé).
     pub fn take_changes(&mut self) -> Vec<BlockPos> {
         self.changes.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// Active le suivi des troncs abattus (lus avec `take_felled`).
+    pub fn track_felled(&mut self) {
+        self.felled.get_or_insert_with(Vec::new);
+    }
+
+    /// Troncs disparus depuis le dernier appel : leur feuillage risque de tomber.
+    pub fn take_felled(&mut self) -> Vec<BlockPos> {
+        self.felled.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     /// Active le suivi des blocs porteurs disparus (lus avec `take_removals`).
@@ -135,6 +148,13 @@ impl WorldState {
             && let Some(removals) = self.removals.as_mut()
         {
             removals.push(pos);
+        }
+        if self.felled.is_some()
+            && self.block(pos).is_log()
+            && !block.is_log()
+            && let Some(felled) = self.felled.as_mut()
+        {
+            felled.push(pos);
         }
         if self.generator.block_at(pos.x, pos.y, pos.z) == block {
             self.edits.remove(&pos);

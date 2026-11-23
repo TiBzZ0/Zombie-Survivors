@@ -92,7 +92,7 @@ fn setup_material(
                     base,
                     extension: Wind::water(),
                 }))
-            } else if block == Block::Leaves || block.is_plant() {
+            } else if block.is_leaves() || block.is_plant() {
                 // Feuillage troué et plantes découpées, vus des deux côtés, qui bougent au vent.
                 let base = StandardMaterial {
                     base_color: Color::WHITE,
@@ -103,7 +103,7 @@ fn setup_material(
                     double_sided: true,
                     ..default()
                 };
-                let extension = if block == Block::Leaves {
+                let extension = if block.is_leaves() {
                     Wind::foliage()
                 } else {
                     Wind::plants()

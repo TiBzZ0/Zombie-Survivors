@@ -14,12 +14,12 @@ pub struct WorldConfig {
     /// Hauteur de la carte en chunks.
     pub height_chunks: i32,
     /// Version du générateur : 1 = terrain d'origine (anciennes sauvegardes),
-    /// 2 = biomes, lacs et grandes ruines.
+    /// 2 = biomes, lacs et grandes ruines, 3 = bouleaux, sapins et pommiers.
     pub generation: u32,
 }
 
 /// Version du générateur des nouveaux mondes.
-pub const CURRENT_GENERATION: u32 = 2;
+pub const CURRENT_GENERATION: u32 = 3;
 
 impl Default for WorldConfig {
     fn default() -> Self {

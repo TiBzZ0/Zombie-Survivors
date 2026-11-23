@@ -75,6 +75,27 @@ pub enum Block {
     Banner,
     /// Herbes hautes : décor qui ondule au vent, traversable ; on les fauche pour des graines.
     TallGrass,
+    /// Tronc de bouleau, blanc tacheté de noir.
+    BirchWood,
+    /// Feuillage clair du bouleau.
+    BirchLeaves,
+    /// Tronc de sapin, sombre.
+    PineWood,
+    /// Aiguilles de sapin.
+    PineLeaves,
+    /// Feuillage de pommier, sans fruits mûrs.
+    FruitLeaves,
+    /// Feuillage de pommier chargé de pommes mûres (clic droit pour cueillir).
+    RipeFruitLeaves,
+    /// Pomme tombée au pied de l'arbre : à ramasser avant qu'elle ne pourrisse.
+    FallenFruit,
+    /// Pomme pourrie, qui finit par disparaître.
+    RottenFruit,
+    /// Jeunes arbres à planter sur la terre ; ils deviennent des arbres.
+    OakSapling,
+    BirchSapling,
+    PineSapling,
+    AppleSapling,
 }
 
 /// Rayon (à l'horizontale, sur toute la hauteur) de la base protégée par une bannière.
@@ -131,12 +152,36 @@ impl Block {
                 | Block::Water
                 | Block::FlowingWater
                 | Block::TallGrass
+                | Block::FallenFruit
+                | Block::RottenFruit
         ) && !self.is_crop()
+            && !self.is_sapling()
     }
 
     /// Eau, de source ou qui s'écoule.
     pub const fn is_water(self) -> bool {
         matches!(self, Block::Water | Block::FlowingWater)
+    }
+
+    /// Tronc d'arbre.
+    pub const fn is_log(self) -> bool {
+        matches!(self, Block::Wood | Block::BirchWood | Block::PineWood)
+    }
+
+    /// Feuillage (ajouré, il ne cache pas ce qui est derrière lui).
+    pub const fn is_leaves(self) -> bool {
+        matches!(
+            self,
+            Block::Leaves | Block::BirchLeaves | Block::PineLeaves | Block::FruitLeaves | Block::RipeFruitLeaves
+        )
+    }
+
+    /// Jeune arbre planté.
+    pub const fn is_sapling(self) -> bool {
+        matches!(
+            self,
+            Block::OakSapling | Block::BirchSapling | Block::PineSapling | Block::AppleSapling
+        )
     }
 
     /// Culture qui pousse sur la terre.
@@ -154,7 +199,10 @@ impl Block {
                 | Block::BarbedWire
                 | Block::Campfire
                 | Block::TallGrass
+                | Block::FallenFruit
+                | Block::RottenFruit
         ) && !self.is_crop()
+            && !self.is_sapling()
     }
 
     /// Bloc qui garde des objets (ouvert avec le panneau du coffre).
@@ -209,7 +257,15 @@ impl Block {
     pub const fn is_placeable(self) -> bool {
         !matches!(
             self,
-            Block::Air | Block::DoorOpen | Block::ElectricDoorOpen | Block::Water | Block::FlowingWater
+            Block::Air
+                | Block::DoorOpen
+                | Block::ElectricDoorOpen
+                | Block::Water
+                | Block::FlowingWater
+                | Block::TallGrass
+                | Block::RipeFruitLeaves
+                | Block::FallenFruit
+                | Block::RottenFruit
         )
     }
 
@@ -220,7 +276,7 @@ impl Block {
 
     /// Plante dessinée en croix (deux plans en diagonale) qui ondule au vent.
     pub const fn is_plant(self) -> bool {
-        matches!(self, Block::TallGrass) || self.is_crop()
+        matches!(self, Block::TallGrass) || self.is_crop() || self.is_sapling()
     }
 
     /// Un bloc visable par le joueur (pour casser ou utiliser), même s'il ne bloque pas.
@@ -236,6 +292,7 @@ impl Block {
             // Barbelés : une haie basse.
             Block::BarbedWire => Some(([0.05, 0.0, 0.05], [0.95, 0.45, 0.95])),
             Block::Sprout => Some(([0.2, 0.0, 0.2], [0.8, 0.25, 0.8])),
+            Block::FallenFruit | Block::RottenFruit => Some(([0.35, 0.0, 0.35], [0.65, 0.3, 0.65])),
             Block::YoungWheat => Some(([0.12, 0.0, 0.12], [0.88, 0.55, 0.88])),
             Block::RipeWheat => Some(([0.08, 0.0, 0.08], [0.92, 0.85, 0.92])),
             Block::Campfire => Some(([0.1, 0.0, 0.1], [0.9, 0.4, 0.9])),
@@ -289,6 +346,16 @@ impl Block {
             Block::Snow => [0.95, 0.97, 1.0],
             Block::Cactus => [0.25, 0.55, 0.25],
             Block::TallGrass => [0.42, 0.7, 0.3],
+            Block::BirchWood => [0.88, 0.86, 0.8],
+            Block::BirchLeaves => [0.42, 0.62, 0.25],
+            Block::PineWood => [0.3, 0.2, 0.12],
+            Block::PineLeaves => [0.12, 0.3, 0.16],
+            Block::FruitLeaves | Block::RipeFruitLeaves => [0.26, 0.5, 0.2],
+            Block::FallenFruit => [0.8, 0.15, 0.12],
+            Block::RottenFruit => [0.35, 0.25, 0.12],
+            Block::OakSapling | Block::AppleSapling => [0.3, 0.55, 0.22],
+            Block::BirchSapling => [0.45, 0.65, 0.3],
+            Block::PineSapling => [0.15, 0.38, 0.2],
         }
     }
 
@@ -331,6 +398,18 @@ impl Block {
             Block::Snow => "Neige",
             Block::Cactus => "Cactus",
             Block::TallGrass => "Herbes hautes",
+            Block::BirchWood => "Bouleau",
+            Block::BirchLeaves => "Feuilles de bouleau",
+            Block::PineWood => "Sapin",
+            Block::PineLeaves => "Aiguilles de sapin",
+            Block::FruitLeaves => "Feuilles de pommier",
+            Block::RipeFruitLeaves => "Pommier en fruits",
+            Block::FallenFruit => "Pomme tombée",
+            Block::RottenFruit => "Pomme pourrie",
+            Block::OakSapling => "Pousse de chêne",
+            Block::BirchSapling => "Pousse de bouleau",
+            Block::PineSapling => "Pousse de sapin",
+            Block::AppleSapling => "Pousse de pommier",
         }
     }
 
@@ -363,7 +442,10 @@ impl Block {
             Block::Cannon => 400,
             Block::Catapult => 260,
             Block::Sprout | Block::YoungWheat | Block::RipeWheat => 4,
-            Block::TallGrass => 2,
+            Block::TallGrass | Block::FallenFruit | Block::RottenFruit => 2,
+            Block::BirchWood | Block::PineWood => 80,
+            Block::BirchLeaves | Block::PineLeaves | Block::FruitLeaves | Block::RipeFruitLeaves => 10,
+            Block::OakSapling | Block::BirchSapling | Block::PineSapling | Block::AppleSapling => 3,
             Block::Campfire => 60,
             Block::Water | Block::FlowingWater => 1,
             Block::Snow => 30,

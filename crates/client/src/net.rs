@@ -78,6 +78,11 @@ struct ConnectStarted(f32);
 #[derive(Message, Debug, Clone)]
 pub enum NetEvent {
     BlockChanged(IVec3),
+    /// Un bloc vient d'être cassé (pour les éclats).
+    BlockBroken {
+        pos: IVec3,
+        block: shared::block::Block,
+    },
     PlayerJoined {
         id: PlayerId,
         name: String,
@@ -339,8 +344,12 @@ fn receive_messages(
                 if let Some(world) = world
                     && world.block(pos) != block
                 {
+                    let old = world.block(pos);
                     world.set_block(pos, block);
                     events.write(NetEvent::BlockChanged(pos));
+                    if block == shared::block::Block::Air {
+                        events.write(NetEvent::BlockBroken { pos, block: old });
+                    }
                 }
             }
             ServerMessage::PlayerJoined { id, name } => {
