@@ -197,6 +197,69 @@ impl Item {
         }
     }
 
+    /// Ce que fait l'objet, en une ou deux lignes (infobulles).
+    pub fn description(self) -> String {
+        let mut lines: Vec<String> = Vec::new();
+        if let Some(r) = self.ranged() {
+            lines.push(format!(
+                "Tir : {:.0} dégâts, portée {:.0} m (munition : {})",
+                r.damage,
+                r.range,
+                r.ammo.name()
+            ));
+        } else if self.is_melee_weapon() || matches!(self, Item::Pickaxe(_)) {
+            let m = Item::melee(Some(self));
+            let sweep = if m.sweep { ", frappe en arc" } else { "" };
+            lines.push(format!(
+                "Corps-à-corps : {:.0} dégâts, allonge {:.1} m{sweep}",
+                m.damage, m.reach
+            ));
+        }
+        if let Some(t) = self.throwable() {
+            let blocks = if t.blast_blocks > 0.0 {
+                ", détruit les blocs"
+            } else {
+                ""
+            };
+            lines.push(format!(
+                "Explosion : {:.0} dégâts sur {:.1} m{blocks}",
+                t.damage, t.radius
+            ));
+        }
+        if let Some((_, part)) = self.armor() {
+            lines.push(format!("Armure : absorbe {:.0} % des dégâts", part * 100.0));
+        }
+        if let Some((hunger, health)) = self.food() {
+            let mut parts = Vec::new();
+            if hunger > 0.0 {
+                parts.push(format!("+{hunger:.0} faim"));
+            }
+            if health > 0.0 {
+                parts.push(format!("+{health:.0} vie"));
+            }
+            lines.push(parts.join(", "));
+        }
+        if let Some(thirst) = self.drink() {
+            lines.push(format!("+{thirst:.0} soif"));
+        }
+        if let Some(buff) = self.buff() {
+            lines.push(format!("Effet « {} » pendant {:.0} s", buff.name(), buff.duration()));
+        }
+        if self.warmth() > 0.0 {
+            lines.push(format!("Protège du froid (+{:.0} °C)", self.warmth()));
+        }
+        if self.cooling() > 0.0 {
+            lines.push(format!("Protège de la chaleur (−{:.0} °C)", self.cooling()));
+        }
+        if matches!(self, Item::Antidote) {
+            lines.push("Guérit l'infection".into());
+        }
+        if let Item::Block(block) = self {
+            lines.push(format!("Bloc à poser · solidité {}", block.max_health()));
+        }
+        lines.join("\n")
+    }
+
     /// Coup porté avec cet objet en main (ou à mains nues).
     pub const fn melee(held: Option<Item>) -> Melee {
         const fn m(damage: f32, reach: f32, cooldown: f32, knockback: f32) -> Melee {

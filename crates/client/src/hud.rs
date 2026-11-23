@@ -22,6 +22,7 @@ impl Plugin for HudPlugin {
                     update_hud,
                     update_condition,
                     update_status,
+                    update_thirst,
                     update_buffs,
                     update_buff_labels,
                     draw_target,
@@ -63,6 +64,16 @@ struct HungerFill;
 
 #[derive(Component)]
 struct HungerText;
+
+#[derive(Component)]
+struct ThirstFill;
+
+#[derive(Component)]
+struct ThirstText;
+
+/// Jauge de soif entière (masquée dans les mondes sans lacs).
+#[derive(Component)]
+struct ThirstGauge;
 
 #[derive(Component)]
 struct MiningBar;
@@ -214,6 +225,16 @@ fn spawn_hud(mut commands: Commands, mut chat: ResMut<ChatLog>) {
                 Color::srgb(0.8, 0.55, 0.15),
                 HungerFill,
                 HungerText
+            ),
+            (
+                gauge(
+                    32.0,
+                    Color::srgba(0.0, 0.04, 0.1, 0.6),
+                    Color::srgb(0.2, 0.5, 0.9),
+                    ThirstFill,
+                    ThirstText
+                ),
+                ThirstGauge,
             ),
             // Progression du minage, sous le viseur.
             (
@@ -439,15 +460,7 @@ fn update_status(
     } else {
         format!("Faim {:.0}", player.hunger.ceil())
     };
-    // La soif n'existe que dans les mondes à lacs.
-    let lakes = world.as_deref().is_some_and(|w| w.generator().water_level().is_some());
-    hunger_text.0 = if !lakes {
-        hunger
-    } else if player.thirst <= 0.0 {
-        format!("{hunger} · Assoiffé !")
-    } else {
-        format!("{hunger} · Soif {:.0}", player.thirst.ceil())
-    };
+    hunger_text.0 = hunger;
     hunger_fill.width = percent(player.hunger.clamp(0.0, 100.0));
     match player.mining {
         Some((_, progress)) => {
@@ -662,5 +675,30 @@ fn update_buff_labels(player: Res<LocalPlayer>, mut labels: Query<(&BuffLabel, &
         if text.0 != value {
             text.0 = value;
         }
+    }
+}
+
+/// Jauge de soif, sous celle de la faim ; la soif n'existe que dans les mondes à lacs.
+fn update_thirst(
+    player: Res<LocalPlayer>,
+    world: Option<Res<crate::net::ClientWorld>>,
+    mut gauge: Single<&mut Visibility, With<ThirstGauge>>,
+    mut fill: Single<&mut Node, With<ThirstFill>>,
+    mut label: Single<&mut Text, With<ThirstText>>,
+) {
+    let lakes = world.as_deref().is_some_and(|w| w.generator().water_level().is_some());
+    **gauge = if lakes {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    fill.width = percent(player.thirst.clamp(0.0, 100.0));
+    let value = if player.thirst <= 0.0 {
+        "Assoiffé !".to_string()
+    } else {
+        format!("Soif {:.0}", player.thirst.ceil())
+    };
+    if label.0 != value {
+        label.0 = value;
     }
 }
