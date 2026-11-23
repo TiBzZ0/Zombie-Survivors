@@ -605,6 +605,11 @@ fn interact(
             }
             return;
         }
+        if block == Block::RipeFruitLeaves && mouse.just_pressed(MouseButton::Right) {
+            send_reliable(&mut client, &ClientMessage::Harvest { pos: hit.block });
+            player.cooldown = 0.35;
+            return;
+        }
         if block.is_storage() && mouse.just_pressed(MouseButton::Right) {
             send_reliable(&mut client, &ClientMessage::OpenChest { pos: hit.block });
             player.crafting_open = false;
@@ -706,6 +711,7 @@ fn mine(
         return;
     }
     send_reliable(client, &ClientMessage::BreakBlock { pos: hit.block });
+    changes.write(NetEvent::BlockBroken { pos: hit.block, block });
     if block.is_deposit() {
         // Un filon reste en place : la récolte suivante commence aussitôt.
         player.mining = Some((hit.block, 0.0));

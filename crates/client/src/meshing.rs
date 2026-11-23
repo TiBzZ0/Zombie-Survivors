@@ -119,7 +119,7 @@ const WATER_DROP: f32 = 0.125;
 /// Un bloc qui cache entièrement la face de son voisin (l'eau, transparente, et les feuilles,
 /// trouées, ne cachent rien).
 pub fn hides_faces(block: Block) -> bool {
-    block.is_opaque() && !block.is_water() && block != Block::Leaves
+    block.is_opaque() && !block.is_water() && !block.is_leaves()
 }
 
 /// Construit les maillages d'un chunk.
@@ -203,7 +203,7 @@ pub fn build_chunk_mesh(chunk: &Chunk, outside: impl Fn(i32, i32, i32) -> Block)
                         && !block.is_plant()
                         && !hides_faces(neighbour)
                         && !(block.is_water() && neighbour.is_water())
-                        && !(block == Block::Leaves && neighbour == Block::Leaves);
+                        && !(block.is_leaves() && neighbour.is_leaves());
                     let lowered = block.is_water() && !get(x, y + 1, z).is_water();
                     mask[pv * n + pu] = visible.then_some((block, lowered));
                 }

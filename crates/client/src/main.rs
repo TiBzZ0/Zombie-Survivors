@@ -23,6 +23,7 @@ mod menu;
 mod meshing;
 mod minimap;
 mod net;
+mod particles;
 mod player;
 mod remote;
 mod settings;
@@ -141,6 +142,7 @@ fn main() {
             inventory_ui::InventoryUiPlugin,
             viewmodel::ViewModelPlugin,
             wind::WindPlugin,
+            particles::ParticlesPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)

@@ -225,7 +225,60 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
             }
         }
         Block::TallGrass => gray(0.7 + 0.3 * (1.0 - y as f32 / 15.0) + 0.05 * n),
+        Block::BirchWood => {
+            // Écorce blanche rayée de noir.
+            if hash(x / 3, y, salt) > 0.8 {
+                gray(0.28)
+            } else {
+                gray(0.92 + 0.08 * n)
+            }
+        }
+        Block::PineWood => gray(0.68 + 0.22 * hash(x, 0, salt) + 0.06 * n),
+        Block::BirchLeaves | Block::FruitLeaves => {
+            if block == Block::FruitLeaves && n > 0.94 {
+                [2.6, 2.4, 2.8] // fleurs blanches
+            } else {
+                gray(0.84 + 0.16 * n)
+            }
+        }
+        Block::RipeFruitLeaves => {
+            if ripe_apple(x, y, salt) {
+                [3.4, 0.45, 0.4]
+            } else {
+                gray(0.84 + 0.16 * n)
+            }
+        }
+        Block::PineLeaves => gray(if (x + y).is_multiple_of(3) { 0.7 } else { 0.9 + 0.1 * n }),
+        Block::FallenFruit => gray(if y < 4 && x < 8 { 1.0 } else { 0.85 + 0.1 * n }),
+        Block::RottenFruit => gray(if n > 0.7 { 0.55 } else { 0.85 + 0.15 * coarse }),
+        Block::OakSapling | Block::BirchSapling | Block::PineSapling | Block::AppleSapling => {
+            if sapling_stem(x, y) {
+                [1.5, 0.75, 0.6]
+            } else {
+                gray(0.8 + 0.2 * n)
+            }
+        }
         Block::Air => gray(1.0),
+    }
+}
+
+/// Grappes de pommes mûres sur le feuillage.
+fn ripe_apple(x: u32, y: u32, salt: u32) -> bool {
+    hash(x / 3, y / 3, salt + 11) > 0.7 && x % 3 < 2 && y % 3 < 2
+}
+
+/// Tige d'une pousse.
+fn sapling_stem(x: u32, y: u32) -> bool {
+    (7..9).contains(&x) && y >= 7
+}
+
+/// Feuillage d'une pousse : une boule, ou un triangle pour le sapin.
+fn sapling_leaves(block: Block, x: u32, y: u32) -> bool {
+    let (dx, dy) = (x as f32 - 7.5, y as f32 - 6.0);
+    if block == Block::PineSapling {
+        (2..12).contains(&y) && dx.abs() <= (y as f32 - 2.0) * 0.45 + 0.5
+    } else {
+        dx * dx + dy * dy < 20.0
     }
 }
 
@@ -234,7 +287,12 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
 pub fn opaque(block: Block, x: u32, y: u32) -> bool {
     let salt = block as u32 + 1;
     match block {
-        Block::Leaves => hash(x / 2, y / 2, salt + 7) > 0.3,
+        Block::Leaves | Block::BirchLeaves | Block::FruitLeaves => hash(x / 2, y / 2, salt + 7) > 0.3,
+        Block::RipeFruitLeaves => hash(x / 2, y / 2, salt + 7) > 0.3 || ripe_apple(x, y, salt),
+        Block::PineLeaves => hash(x / 2, y / 2, salt + 7) > 0.2,
+        Block::OakSapling | Block::BirchSapling | Block::PineSapling | Block::AppleSapling => {
+            sapling_stem(x, y) || sapling_leaves(block, x, y)
+        }
         Block::TallGrass => {
             // Des brins de hauteurs variées, plus fournis au pied.
             let height = 5.0 + 11.0 * hash(x, 1, salt);
@@ -303,7 +361,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 38] = [
+const ALL_BLOCKS: [Block; 50] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -342,6 +400,18 @@ const ALL_BLOCKS: [Block; 38] = [
     Block::SupplyCrate,
     Block::Banner,
     Block::TallGrass,
+    Block::BirchWood,
+    Block::BirchLeaves,
+    Block::PineWood,
+    Block::PineLeaves,
+    Block::FruitLeaves,
+    Block::RipeFruitLeaves,
+    Block::FallenFruit,
+    Block::RottenFruit,
+    Block::OakSapling,
+    Block::BirchSapling,
+    Block::PineSapling,
+    Block::AppleSapling,
 ];
 
 #[cfg(test)]

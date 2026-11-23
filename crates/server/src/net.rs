@@ -17,6 +17,7 @@ use shared::physics::{PLAYER_EYE_HEIGHT, PLAYER_SIZE, overlaps_solid};
 use shared::protocol::{ClientMessage, PROTOCOL_ID, PlayerState, REACH, ServerMessage, decode, encode};
 use shared::raycast::{ray_aabb, raycast};
 use shared::structure::would_hold;
+use shared::trees::TreeKind;
 
 use crate::ServerConfig;
 use crate::animals::Animal;
@@ -93,7 +94,9 @@ pub const MAX_HUNGER: f32 = 100.0;
 /// Soif maximale d'un joueur.
 pub const MAX_THIRST: f32 = 100.0;
 /// Chance qu'un bloc de feuilles donne aussi une pomme.
-const APPLE_CHANCE: f32 = 0.25;
+const APPLE_CHANCE: f32 = 0.1;
+/// Chance qu'un bloc de feuillage cassé donne une pousse d'arbre.
+const SAPLING_CHANCE: f32 = 0.1;
 /// Chance qu'un bloc d'herbe donne aussi des graines.
 const SEED_CHANCE: f32 = 0.15;
 /// Chance qu'une touffe d'herbes hautes fauchée donne des graines.
@@ -354,6 +357,7 @@ fn handle_reliable(
         | ClientMessage::OpenChest { pos }
         | ClientMessage::ToggleDoor { pos }
         | ClientMessage::PourWater { pos }
+        | ClientMessage::Harvest { pos }
         | ClientMessage::FireEmplacement { pos, .. } => Some(*pos),
         _ => None,
     };
@@ -481,6 +485,24 @@ fn handle_reliable(
                     z.knockback = flat_look * melee.knockback + Vec3::Y * 3.0;
                     z.last_attacker = Some(client);
                 }
+            }
+        }
+        ClientMessage::Harvest { pos } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if player.is_alive() && within_reach(player, pos) && world.block(pos) == Block::RipeFruitLeaves {
+                world.set_block(pos, Block::FruitLeaves);
+                version.0 += 1;
+                broadcast(
+                    server,
+                    &ServerMessage::BlockChanged {
+                        pos,
+                        block: Block::FruitLeaves,
+                    },
+                );
+                player.inventory.add(Item::Apple, 1 + fastrand::u32(..2));
+                send_inventory(server, client, player);
             }
         }
         ClientMessage::AttackPlayer { id } => {
@@ -924,8 +946,18 @@ fn handle_reliable(
                 if let Some(item) = drop_for(block) {
                     player.inventory.add(item, 1);
                 }
-                if block == Block::Leaves && fastrand::f32() < APPLE_CHANCE {
-                    player.inventory.add(Item::Apple, 1);
+                // Les pommiers donnent des pommes ; tout feuillage, parfois une pousse.
+                match block {
+                    Block::RipeFruitLeaves => player.inventory.add(Item::Apple, 1 + fastrand::u32(..2)),
+                    Block::FruitLeaves | Block::Leaves if fastrand::f32() < APPLE_CHANCE => {
+                        player.inventory.add(Item::Apple, 1)
+                    }
+                    _ => {}
+                }
+                if let Some(sapling) = TreeKind::of_leaves(block).and_then(TreeKind::sapling)
+                    && fastrand::f32() < SAPLING_CHANCE
+                {
+                    player.inventory.add(Item::Block(sapling), 1);
                 }
                 if block == Block::Grass && fastrand::f32() < SEED_CHANCE {
                     player.inventory.add(Item::Seeds, 1);
@@ -982,8 +1014,9 @@ fn handle_reliable(
             } else {
                 Item::Block(block)
             };
-            let soil = !block.is_crop()
-                || (block == Block::Sprout && matches!(world.block(pos - IVec3::Y), Block::Grass | Block::Dirt));
+            let on_soil = matches!(world.block(pos - IVec3::Y), Block::Grass | Block::Dirt);
+            let soil =
+                !(block.is_crop() || block.is_sapling()) || ((block == Block::Sprout || block.is_sapling()) && on_soil);
             // Les barbelés se posent même là où un joueur se tient.
             let allowed = block.is_placeable()
                 && soil

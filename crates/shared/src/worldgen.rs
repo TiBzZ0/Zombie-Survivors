@@ -8,9 +8,11 @@ use fastnoise_lite::{FastNoiseLite, FractalType, NoiseType};
 use crate::block::Block;
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkPos};
 use crate::config::WorldConfig;
+use crate::trees::TreeKind;
+use bevy_math::IVec3;
 
 /// Taille d'une cellule de la grille des arbres, en blocs.
-const TREE_CELL: i32 = 9;
+pub const TREE_CELL: i32 = 9;
 /// Pourcentage de cellules qui ont un arbre.
 const TREE_CHANCE: u32 = 45;
 
@@ -27,6 +29,16 @@ const RUIN_CHANCE: u32 = 45;
 pub const RUIN_HALF: i32 = 3;
 /// Demi-largeur d'une grande ruine (un entrepôt, à partir de la génération 2).
 pub const BIG_RUIN_HALF: i32 = 6;
+
+/// Un arbre du monde généré : pied du tronc, hauteur du tronc et essence.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tree {
+    pub x: i32,
+    pub ground: i32,
+    pub z: i32,
+    pub height: i32,
+    pub kind: TreeKind,
+}
 
 /// Grandes régions du monde (à partir de la génération 2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -222,16 +234,17 @@ impl WorldGenerator {
         surface <= (self.config.height_blocks() as f32 * 0.45) as i32 - 10
     }
 
-    /// Arbre éventuel d'une cellule de la grille des arbres : pied du tronc et hauteur.
+    /// Arbre éventuel d'une cellule de la grille des arbres.
     ///
     /// La carte est découpée en cellules de `TREE_CELL` blocs ; chaque cellule a au plus
     /// un arbre, placé au hasard (de façon déterministe) loin des bords de la cellule.
-    pub fn tree_in_cell(&self, cx: i32, cz: i32) -> Option<(i32, i32, i32, i32)> {
+    pub fn tree_in_cell(&self, cx: i32, cz: i32) -> Option<Tree> {
         let h = hash3(self.config.seed, cx, cz);
         let x = cx * TREE_CELL + 2 + ((h >> 8) % (TREE_CELL as u32 - 4)) as i32;
         let z = cz * TREE_CELL + 2 + ((h >> 16) % (TREE_CELL as u32 - 4)) as i32;
+        let biome = self.biome(x, z);
         let chance = if self.modern() {
-            match self.biome(x, z) {
+            match biome {
                 Biome::Forest => 75,
                 Biome::Plains => 18,
                 Biome::Desert => 22, // des cactus
@@ -248,15 +261,44 @@ impl WorldGenerator {
             return None;
         }
         let ground = self.surface_height(x, z);
-        if self.is_beach(ground) || ground + 8 >= self.config.height_blocks() {
+        if self.is_beach(ground) {
             return None;
         }
-        if self.biome(x, z) == Biome::Desert {
-            // Un cactus : 2 ou 3 blocs, sans feuillage.
-            return Some((x, ground, z, 2 + ((h >> 24) % 2) as i32));
+        // Un tirage à part pour l'essence, sans toucher à ceux des anciens mondes.
+        let roll = hash3(self.config.seed.wrapping_add(53), cx, cz) % 10;
+        let kind = if biome == Biome::Desert {
+            TreeKind::Cactus
+        } else if self.config.generation >= 3 {
+            match (biome, roll) {
+                (Biome::Snow, _) => TreeKind::Pine,
+                (Biome::Forest, 0..=4) | (Biome::Plains, 0..=3) => TreeKind::Oak,
+                (Biome::Forest, 5..=7) | (Biome::Plains, 4..=5) => TreeKind::Birch,
+                _ => TreeKind::Apple,
+            }
+        } else if roll < 2 {
+            // Les anciens mondes gardent la forme de leurs arbres, dont certains donnent des pommes.
+            TreeKind::Apple
+        } else {
+            TreeKind::Oak
+        };
+        let height = if self.config.generation >= 3 {
+            kind.height(h >> 24)
+        } else {
+            match kind {
+                TreeKind::Cactus => 2 + ((h >> 24) % 2) as i32,
+                _ => 4 + ((h >> 24) % 2) as i32,
+            }
+        };
+        if ground + kind.extent(height).1 + 1 >= self.config.height_blocks() {
+            return None;
         }
-        let height = 4 + ((h >> 24) % 2) as i32;
-        Some((x, ground, z, height))
+        Some(Tree {
+            x,
+            ground,
+            z,
+            height,
+            kind,
+        })
     }
 
     /// Bloc d'arbre (tronc ou feuilles) au-dessus du sol, ou de l'air.
@@ -264,25 +306,12 @@ impl WorldGenerator {
         let (cx, cz) = (x.div_euclid(TREE_CELL), z.div_euclid(TREE_CELL));
         for dx in -1..=1 {
             for dz in -1..=1 {
-                let Some((tx, ground, tz, height)) = self.tree_in_cell(cx + dx, cz + dz) else {
+                let Some(tree) = self.tree_in_cell(cx + dx, cz + dz) else {
                     continue;
                 };
-                let (ox, oy, oz) = (x - tx, y - ground, z - tz);
-                let cactus = self.biome(tx, tz) == Biome::Desert;
-                if ox == 0 && oz == 0 && (0..height).contains(&oy) {
-                    return if cactus { Block::Cactus } else { Block::Wood };
-                }
-                if cactus {
-                    continue;
-                }
-                let top = height - 1;
-                let radius = match oy - top {
-                    -2..=0 => 2,
-                    1 => 1,
-                    _ => continue,
-                };
-                if ox.abs() <= radius && oz.abs() <= radius && !(ox.abs() == 2 && oz.abs() == 2) {
-                    return Block::Leaves;
+                let offset = IVec3::new(x - tree.x, y - tree.ground, z - tree.z);
+                if let Some(block) = tree.kind.part(tree.height, offset) {
+                    return block;
                 }
             }
         }
@@ -523,12 +552,16 @@ mod tests {
             .filter_map(|(cx, cz)| generator.tree_in_cell(cx, cz))
             .collect();
         assert!(trees.len() > 50, "seulement {} arbres", trees.len());
-        let (x, ground, z, height) = trees[0];
+        let t = trees.iter().find(|t| t.kind == TreeKind::Oak).expect("un chêne");
+        let (x, ground, z, height) = (t.x, t.ground, t.z, t.height);
         assert_eq!(generator.block_at(x, ground, z), Block::Wood);
         assert_eq!(generator.block_at(x, ground + height - 1, z), Block::Wood);
         assert_eq!(generator.block_at(x + 1, ground + height - 1, z), Block::Leaves);
         assert_eq!(generator.block_at(x, ground + height, z), Block::Leaves);
         assert_eq!(generator.block_at(x, ground + height + 1, z), Block::Air);
+        for kind in [TreeKind::Birch, TreeKind::Apple] {
+            assert!(trees.iter().any(|t| t.kind == kind), "pas de {kind:?}");
+        }
     }
 
     #[test]

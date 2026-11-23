@@ -18,17 +18,20 @@ pub const MAX_COMPONENT: usize = 4096;
 
 const NEIGHBOURS: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z, IVec3::Y, IVec3::NEG_Y];
 
-/// Un bloc qui porte ce qui est posé dessus (une porte ouverte garde son linteau).
+/// Un bloc qui porte ce qui est posé dessus (une porte ouverte garde son linteau). Le
+/// feuillage ne porte rien : il tient tout seul et tombe quand l'arbre est abattu.
 pub const fn bears_load(block: Block) -> bool {
-    block.is_solid() || matches!(block, Block::DoorOpen | Block::ElectricDoorOpen)
+    (block.is_solid() && !block.is_leaves()) || matches!(block, Block::DoorOpen | Block::ElectricDoorOpen)
 }
 
 /// Solidité d'un bloc posé sur le sol : nombre de blocs en porte-à-faux qu'il tolère, plus un.
 pub const fn span(block: Block) -> u8 {
     match block {
-        Block::Grass | Block::Dirt | Block::Sand | Block::Snow | Block::Leaves | Block::Cactus => 2,
+        Block::Grass | Block::Dirt | Block::Sand | Block::Snow | Block::Cactus => 2,
+        b if b.is_leaves() => 2,
         Block::Stone | Block::IronOre | Block::CoalOre => 4,
-        Block::Wood | Block::Planks => 5,
+        Block::Planks => 5,
+        b if b.is_log() => 5,
         Block::ReinforcedWall => 8,
         _ => 3,
     }

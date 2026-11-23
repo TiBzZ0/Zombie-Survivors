@@ -433,6 +433,10 @@ fn update_status(
             (block, left)
         })
     });
+    let aimed_block = player
+        .target
+        .zip(world.as_deref())
+        .map(|(hit, world)| world.block(hit.block));
     let aimed_gun = player
         .target
         .zip(world.as_deref())
@@ -451,6 +455,12 @@ fn update_status(
         )
     } else if let Some(hint) = &player.survivor_hint {
         hint.clone()
+    } else if aimed_block == Some(shared::block::Block::RipeFruitLeaves) {
+        "Pommier : clic droit pour cueillir les pommes".into()
+    } else if aimed_block == Some(shared::block::Block::FallenFruit) {
+        "Pomme tombée : clic gauche pour la ramasser avant qu'elle ne pourrisse".into()
+    } else if aimed_block.is_some_and(|b| b.is_sapling()) {
+        "Pousse d'arbre : elle grandira en quelques minutes".into()
     } else if let Some(block) = aimed_gun {
         let ammo = block.emplacement().map(|g| g.ammo.name()).unwrap_or_default();
         format!(

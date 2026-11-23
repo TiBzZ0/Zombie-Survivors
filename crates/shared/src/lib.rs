@@ -18,6 +18,7 @@ pub mod protocol;
 pub mod raycast;
 pub mod structure;
 pub mod survivor;
+pub mod trees;
 pub mod world;
 pub mod worldgen;
 pub mod zombie;
