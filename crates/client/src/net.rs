@@ -171,6 +171,10 @@ pub enum NetEvent {
     Bite,
     /// La ligne est remontée.
     Caught(Option<(shared::item::Item, u32)>),
+    /// Statistiques et succès du joueur.
+    Record(shared::achievements::Record),
+    /// Succès débloqué à l'instant.
+    Achievement(shared::achievements::Achievement),
     Collapse {
         pos: Vec3,
         blocks: u16,
@@ -495,6 +499,12 @@ fn receive_messages(
             }
             ServerMessage::Caught { item } => {
                 events.write(NetEvent::Caught(item));
+            }
+            ServerMessage::Record(record) => {
+                events.write(NetEvent::Record(record));
+            }
+            ServerMessage::Achievement(achievement) => {
+                events.write(NetEvent::Achievement(achievement));
             }
             ServerMessage::Collapse { pos, blocks } => {
                 events.write(NetEvent::Collapse { pos, blocks });

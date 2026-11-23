@@ -376,6 +376,7 @@ fn handle_talk(
                     s.leader = Some(player.name.clone());
                     s.order = Order::Follow;
                     s.post = s.position;
+                    player.record.recruited += 1;
                     changed = true;
                     info!("{} recrute {}", player.name, s.name);
                     let food = if *n > 1 { "ces pommes" } else { "la ration" };

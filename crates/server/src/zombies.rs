@@ -997,6 +997,10 @@ pub fn hurt_player(
         }
         return;
     }
+    if player.health <= 0.0 {
+        player.record.deaths += 1;
+        player.record.streak = 0;
+    }
     let Some(server) = server else { return };
     if player.health.ceil() != before || player.health <= 0.0 {
         send_vitals(server, id, player);
@@ -1134,6 +1138,7 @@ fn kill_dead_zombies(
                 && player.is_ready()
             {
                 player.progress.add_xp(shared::skills::zombie_xp(zombie.kind));
+                player.record.add_kill(zombie.kind);
                 if let Some(server) = server.as_deref_mut() {
                     send_progress(server, id, player);
                 }

@@ -4,6 +4,7 @@
 //! blocs, stockage des chunks, génération du monde à partir d'une graine,
 //! constantes de simulation et de réseau.
 
+pub mod achievements;
 pub mod animal;
 pub mod block;
 pub mod buff;

@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0021;
+pub const PROTOCOL_ID: u64 = 0x5A53_0022;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -440,6 +440,10 @@ pub enum ServerMessage {
     Caught {
         item: Option<(Item, u32)>,
     },
+    /// Statistiques et succès du joueur.
+    Record(crate::achievements::Record),
+    /// Un succès vient d'être débloqué.
+    Achievement(crate::achievements::Achievement),
 }
 
 /// Sérialise un message.

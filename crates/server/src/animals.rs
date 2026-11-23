@@ -286,6 +286,7 @@ fn animal_deaths(
             let extra = extra_meat.floor() as u32 + u32::from(fastrand::f32() < extra_meat.fract());
             player.inventory.add(Item::RawMeat, fastrand::u32(min..=max) + extra);
             player.progress.add_xp(HUNT_XP);
+            player.record.animals += 1;
             if let Some(server) = server.as_deref_mut() {
                 crate::net::send_progress(server, id, player);
             }

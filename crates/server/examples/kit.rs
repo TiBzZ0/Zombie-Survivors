@@ -176,6 +176,24 @@ fn main() {
                     xp: std::env::var("KIT_XP").ok().and_then(|x| x.parse().ok()).unwrap_or(0),
                     ..Default::default()
                 },
+                // KIT_RECORD=1 : un joueur qui a déjà bien vécu (pour voir le carnet et les succès).
+                record: if std::env::var("KIT_RECORD").is_ok() {
+                    shared::achievements::Record {
+                        kills: vec![38, 6, 2, 3, 0, 4, 1, 1],
+                        nights: 6,
+                        streak: 4,
+                        crafted: 31,
+                        placed: 140,
+                        mined: 260,
+                        fish: 3,
+                        recruited: 2,
+                        animals: 5,
+                        damage: 4200,
+                        ..Default::default()
+                    }
+                } else {
+                    Default::default()
+                },
             },
         )],
         deposits: Vec::new(),
@@ -184,8 +202,14 @@ fn main() {
         infections: Vec::new(),
         claims: Vec::new(),
         progress: Vec::new(),
+        records: Vec::new(),
     };
     let mut save = save;
+    save.records = save
+        .players
+        .iter()
+        .map(|(n, p)| (n.clone(), p.record.clone()))
+        .collect();
     save.progress = save
         .players
         .iter()

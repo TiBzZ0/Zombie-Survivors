@@ -467,6 +467,7 @@ fn bow_shoots_and_uses_arrows() {
                 thirst: 30.0,
                 infection: 0.0,
                 progress: Default::default(),
+                record: Default::default(),
             },
         )],
         deposits: Vec::new(),
@@ -475,6 +476,7 @@ fn bow_shoots_and_uses_arrows() {
         infections: Vec::new(),
         claims: Vec::new(),
         progress: Vec::new(),
+        records: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
 
@@ -603,6 +605,7 @@ fn doors_chests_and_chat() {
                 thirst: 100.0,
                 infection: 0.0,
                 progress: Default::default(),
+                record: Default::default(),
             },
         )],
         deposits: Vec::new(),
@@ -611,6 +614,7 @@ fn doors_chests_and_chat() {
         infections: Vec::new(),
         claims: Vec::new(),
         progress: Vec::new(),
+        records: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {
@@ -753,6 +757,7 @@ fn survivors_are_recruited_and_given_orders() {
                 thirst: 100.0,
                 infection: 0.0,
                 progress: Default::default(),
+                record: Default::default(),
             },
         )],
         deposits: Vec::new(),
@@ -761,6 +766,7 @@ fn survivors_are_recruited_and_given_orders() {
         infections: Vec::new(),
         claims: Vec::new(),
         progress: Vec::new(),
+        records: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {
@@ -957,6 +963,7 @@ fn pvp_hurts_other_players_except_at_home() {
                 thirst: 100.0,
                 infection: 0.0,
                 progress: Default::default(),
+                record: Default::default(),
             },
         )],
         deposits: Vec::new(),
@@ -965,6 +972,7 @@ fn pvp_hurts_other_players_except_at_home() {
         infections: Vec::new(),
         claims: Vec::new(),
         progress: Vec::new(),
+        records: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {

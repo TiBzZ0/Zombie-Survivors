@@ -22,6 +22,7 @@ mod held;
 mod hud;
 mod icons;
 mod inventory_ui;
+mod journal;
 mod menu;
 mod meshing;
 mod minimap;
@@ -160,6 +161,7 @@ fn main() {
             worldmap::WorldMapPlugin,
             damage::DamagePlugin,
         ))
+        .add_plugins(journal::JournalPlugin)
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
         .add_systems(OnExit(AppState::Playing), release_cursor)

@@ -13,6 +13,7 @@ use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use shared::TICK_RATE_HZ;
 
+pub mod achievements;
 pub mod animals;
 pub mod claims;
 pub mod config;
@@ -63,7 +64,11 @@ impl Plugin for ServerPlugin {
                 structure::StructurePlugin,
                 claims::ClaimsPlugin,
             ))
-            .add_plugins((trees::TreesPlugin, fishing::FishingPlugin))
+            .add_plugins((
+                trees::TreesPlugin,
+                fishing::FishingPlugin,
+                achievements::AchievementsPlugin,
+            ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)
             .add_systems(Update, report_status)

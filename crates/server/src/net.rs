@@ -95,6 +95,8 @@ pub struct ConnectedPlayer {
     /// Secondes de saignement et d'entorse restantes.
     pub bleeding: f32,
     pub sprain: f32,
+    /// Statistiques et succès.
+    pub record: shared::achievements::Record,
 }
 
 /// Durée après avoir levé la garde pendant laquelle un coup est paré.
@@ -161,6 +163,7 @@ impl ConnectedPlayer {
             fishing: None,
             bleeding: 0.0,
             sprain: 0.0,
+            record: Default::default(),
         }
     }
 
@@ -508,6 +511,7 @@ fn handle_reliable(
                     player.infection = back.infection;
                     player.inventory = back.inventory;
                     player.progress = back.progress;
+                    player.record = back.record;
                 }
                 send_inventory(server, client, player);
                 send_vitals(server, client, player);
@@ -572,7 +576,9 @@ fn handle_reliable(
                 if hit {
                     // Les plaques du blindé arrêtent les lames, pas la masse ni le coup puissant.
                     let armor = z.kind.armor_factor(power || melee.sweep);
-                    z.health -= player.melee_damage(melee.damage, Some(z.kind)) * strength * armor;
+                    let hurt = player.melee_damage(melee.damage, Some(z.kind)) * strength * armor;
+                    player.record.damage += hurt.min(z.health.max(0.0)) as u32;
+                    z.health -= hurt;
                     z.hurt_timer = 0.3;
                     z.knockback = flat_look * knockback + Vec3::Y * if power { 5.0 } else { 3.0 };
                     z.last_attacker = Some(client);
@@ -669,7 +675,8 @@ fn handle_reliable(
                 let spread = Vec3::new(fastrand::f32() - 0.5, fastrand::f32() - 0.5, fastrand::f32() - 0.5) * 0.04;
                 let dir = (dir + spread).normalize_or_zero();
                 let damage = gun.damage * player.skills().gunner;
-                let end = hitscan(origin, dir, 70.0, damage, 1, client, world, zombies, animals);
+                let (end, dealt) = hitscan(origin, dir, 70.0, damage, 1, client, world, zombies, animals);
+                player.record.damage += dealt as u32;
                 broadcast(
                     server,
                     &ServerMessage::Shot {
@@ -743,7 +750,7 @@ fn handle_reliable(
                 None
             };
             let range = victim.map_or(weapon.range, |(_, t)| t);
-            let end = hitscan(eye, dir, range, damage, weapon.pierce, client, world, zombies, animals);
+            let (end, dealt) = hitscan(eye, dir, range, damage, weapon.pierce, client, world, zombies, animals);
             if let Some((id, t)) = victim
                 && end.distance(eye) >= t - 0.05
             {
@@ -752,6 +759,7 @@ fn handle_reliable(
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
             };
+            player.record.damage += dealt as u32;
             send_inventory(server, client, player);
             broadcast(
                 server,
@@ -843,6 +851,7 @@ fn handle_reliable(
                 && recipe.station.is_none_or(|s| station_near(feet, s, |p| world.block(p)))
                 && recipe.craft(&mut player.inventory)
             {
+                player.record.crafted += 1;
                 // Économe : chaque ingrédient a une chance d'être rendu.
                 let thrifty = player.skills().thrifty;
                 for (item, n) in recipe.inputs {
@@ -1134,6 +1143,7 @@ fn handle_reliable(
                 }
             } else if allowed && world.set_block(pos, Block::Air) {
                 player.mining = None;
+                player.record.mined += 1;
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block: Block::Air });
                 if let Some(item) = drop_for(block) {
@@ -1295,6 +1305,7 @@ fn handle_reliable(
                 && world.set_block(pos, block)
             {
                 player.inventory.remove(cost, 1);
+                player.record.placed += 1;
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block });
                 for cell in extra {
@@ -1340,7 +1351,8 @@ fn hitscan(
     world: &GameWorld,
     zombies: &mut Query<(&mut Zombie, &ZombieBody)>,
     animals: &mut Query<&mut Animal>,
-) -> Vec3 {
+) -> (Vec3, f32) {
+    let mut dealt = 0.0;
     let wall = raycast(eye, dir, range, |p| world.is_solid(p))
         .map(|hit| ray_aabb(eye, dir, hit.block.as_vec3(), hit.block.as_vec3() + Vec3::ONE).unwrap_or(0.0))
         .unwrap_or(range);
@@ -1378,7 +1390,9 @@ fn hitscan(
     for (zombie, i, t) in order {
         if zombie {
             let z = &mut hits[i].0;
-            z.health -= damage * z.kind.armor_factor(false);
+            let hurt = damage * z.kind.armor_factor(false);
+            dealt += hurt.min(z.health.max(0.0));
+            z.health -= hurt;
             z.hurt_timer = 0.3;
             z.knockback = push;
             z.last_attacker = Some(client);
@@ -1389,7 +1403,7 @@ fn hitscan(
             end = eye + dir * t;
         }
     }
-    end
+    (end, dealt)
 }
 
 /// Message du serveur à un seul joueur.

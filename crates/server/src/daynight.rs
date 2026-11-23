@@ -62,6 +62,9 @@ fn advance_clock(
             / 2;
         for (id, player) in lobby.players.iter_mut().filter(|(_, p)| p.is_alive()) {
             player.progress.add_xp(xp);
+            player.record.nights += 1;
+            player.record.streak += 1;
+            player.record.blood_moons += u32::from(blood);
             if let Some(server) = server.as_deref_mut() {
                 crate::net::send_progress(server, *id, player);
             }
