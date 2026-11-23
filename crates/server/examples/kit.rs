@@ -132,6 +132,18 @@ fn main() {
         .map(|p| (p, Block::Part))
         .collect();
     edits.extend(parts);
+    // KIT_TOWER=1 : le joueur est perché sur une tour de 8 blocs, hors de portée (pour regarder les zombies).
+    let spawn = if std::env::var("KIT_TOWER").is_ok() {
+        let base = spawn.floor().as_ivec3();
+        for dy in 0..8 {
+            for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                edits.push((base + bevy::math::IVec3::new(dx, dy, dz), Block::ReinforcedWall));
+            }
+        }
+        spawn + Vec3::Y * 8.0
+    } else {
+        spawn
+    };
     let mut ammo = Inventory::default();
     ammo.add(Item::Arrow, 20);
     let save = SaveFile {
@@ -141,7 +153,11 @@ fn main() {
         time: std::env::var("KIT_PHASE")
             .ok()
             .and_then(|p| p.parse().ok())
-            .map_or(GameTime::START, |phase| GameTime { day: 1, phase }),
+            .map_or(GameTime::START, |phase| GameTime {
+                // KIT_DAY=8 : une nuit de lune de sang.
+                day: std::env::var("KIT_DAY").ok().and_then(|d| d.parse().ok()).unwrap_or(1),
+                phase,
+            }),
         edits,
         players: vec![(
             name,

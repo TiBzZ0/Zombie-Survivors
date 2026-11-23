@@ -29,6 +29,7 @@ fn advance_clock(
 ) {
     let was_night = clock.0.is_night();
     let horde = clock.0.is_horde_night();
+    let blood = clock.0.is_blood_moon();
     clock.0.advance(time.delta_secs());
     let is_night = clock.0.is_night();
     if was_night == is_night {
@@ -36,6 +37,11 @@ fn advance_clock(
     }
     let text = if is_night && clock.0.is_horde_night() {
         format!("Nuit {} : LA GRANDE HORDE ARRIVE !", clock.0.day)
+    } else if is_night && clock.0.is_blood_moon() {
+        format!(
+            "Nuit {} : la lune se lève, rouge sang. Les morts sont plus nombreux et plus rapides…",
+            clock.0.day
+        )
     } else if is_night {
         format!("La nuit {} tombe. Les morts se réveillent…", clock.0.day)
     } else {
@@ -44,7 +50,16 @@ fn advance_clock(
     info!("{text}");
     // Chaque nuit traversée vivant rapporte de l'expérience (le double après une grande horde).
     if !is_night && let Some(mut lobby) = lobby {
-        let xp = shared::skills::NIGHT_SURVIVED_XP * if horde { 2 } else { 1 };
+        // Une nuit de lune de sang rapporte une fois et demie plus.
+        let xp = shared::skills::NIGHT_SURVIVED_XP
+            * if horde {
+                4
+            } else if blood {
+                3
+            } else {
+                2
+            }
+            / 2;
         for (id, player) in lobby.players.iter_mut().filter(|(_, p)| p.is_alive()) {
             player.progress.add_xp(xp);
             if let Some(server) = server.as_deref_mut() {

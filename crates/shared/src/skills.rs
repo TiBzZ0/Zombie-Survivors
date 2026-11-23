@@ -27,6 +27,9 @@ pub const fn zombie_xp(kind: ZombieKind) -> u32 {
         ZombieKind::Runner => 12,
         ZombieKind::Spitter => 20,
         ZombieKind::Brute => 40,
+        ZombieKind::Armored => 30,
+        ZombieKind::Howler => 25,
+        ZombieKind::Bloater => 18,
         ZombieKind::Colossus => 300,
     }
 }

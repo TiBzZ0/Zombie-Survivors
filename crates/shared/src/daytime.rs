@@ -6,6 +6,8 @@ pub const DAY_LENGTH_SECS: f32 = 16.0 * 60.0;
 pub const DAYLIGHT_FRACTION: f32 = 0.62;
 /// Une nuit sur `HORDE_EVERY` est une nuit de grande horde.
 pub const HORDE_EVERY: u32 = 7;
+/// Première nuit où la lune de sang peut se lever.
+pub const BLOOD_MOON_FROM: u32 = 4;
 
 /// Heure de la partie : nombre de jours écoulés et avancement dans la journée (0 à 1).
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -34,6 +36,19 @@ impl GameTime {
     /// Vrai si la nuit en cours (ou la prochaine) est une nuit de grande horde.
     pub fn is_horde_night(&self) -> bool {
         self.day.is_multiple_of(HORDE_EVERY)
+    }
+
+    /// Vrai si la nuit en cours (ou la prochaine) est une nuit de lune de sang : à partir de
+    /// la quatrième nuit, environ une nuit ordinaire sur cinq, imprévisible mais la même pour tous.
+    pub fn is_blood_moon(&self) -> bool {
+        if self.day < BLOOD_MOON_FROM || self.is_horde_night() {
+            return false;
+        }
+        let mut h = self.day.wrapping_add(0x7F4A_7C15);
+        h = (h ^ (h >> 16)).wrapping_mul(0x7FEB_352D);
+        h = (h ^ (h >> 15)).wrapping_mul(0x846C_A68B);
+        h ^= h >> 16;
+        h.is_multiple_of(5)
     }
 
     /// Secondes réelles avant la tombée de la nuit (0 s'il fait déjà nuit).
@@ -78,6 +93,17 @@ mod tests {
         };
         assert!(night.is_night());
         assert!(night.is_horde_night());
+        // La lune de sang ne tombe jamais une nuit de horde, ni avant la quatrième nuit,
+        // et revient de temps en temps.
+        let moons: Vec<u32> = (1..200)
+            .filter(|d| GameTime { day: *d, phase: 0.8 }.is_blood_moon())
+            .collect();
+        assert!(
+            moons
+                .iter()
+                .all(|d| *d >= BLOOD_MOON_FROM && !d.is_multiple_of(HORDE_EVERY))
+        );
+        assert!((20..70).contains(&moons.len()), "{} lunes de sang", moons.len());
         assert!(night.sun_height() < 0.0);
         assert!(!GameTime::START.is_night());
         assert!(GameTime::START.sun_height() > 0.0);

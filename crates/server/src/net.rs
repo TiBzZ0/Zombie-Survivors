@@ -560,7 +560,9 @@ fn handle_reliable(
                         && in_reach(&z, body)
                         && (ahead.dot(flat_look) > 0.5 || to.length() < 1.0));
                 if hit {
-                    z.health -= player.melee_damage(melee.damage, Some(z.kind)) * strength;
+                    // Les plaques du blindé arrêtent les lames, pas la masse ni le coup puissant.
+                    let armor = z.kind.armor_factor(power || melee.sweep);
+                    z.health -= player.melee_damage(melee.damage, Some(z.kind)) * strength * armor;
                     z.hurt_timer = 0.3;
                     z.knockback = flat_look * knockback + Vec3::Y * if power { 5.0 } else { 3.0 };
                     z.last_attacker = Some(client);
@@ -1327,7 +1329,7 @@ fn hitscan(
     for (zombie, i, t) in order {
         if zombie {
             let z = &mut hits[i].0;
-            z.health -= damage;
+            z.health -= damage * z.kind.armor_factor(false);
             z.hurt_timer = 0.3;
             z.knockback = push;
             z.last_attacker = Some(client);

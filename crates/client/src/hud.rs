@@ -415,7 +415,13 @@ fn update_status(
 ) {
     let t = clock.time;
     clock_text.0 = if t.is_night() {
-        let horde = if t.is_horde_night() { " · GRANDE HORDE" } else { "" };
+        let horde = if t.is_horde_night() {
+            " · GRANDE HORDE"
+        } else if t.is_blood_moon() {
+            " · LUNE DE SANG"
+        } else {
+            ""
+        };
         format!(
             "Nuit {}{horde}\nAube dans {}\nZombies : {}",
             t.day,

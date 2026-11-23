@@ -609,7 +609,7 @@ fn survivor_ai(
                     s.attacking = 0.3;
                     take_one(source, weapon.ammo, &mut lobby, &mut chests, server.as_deref_mut());
                     if let Some((mut z, _)) = zombies.iter_mut().find(|(z, _)| z.id == zombie_id) {
-                        z.health -= weapon.damage;
+                        z.health -= weapon.damage * z.kind.armor_factor(false);
                         z.hurt_timer = 0.3;
                         // L'expérience des zombies abattus revient au chef.
                         z.last_attacker = leader_id.or(z.last_attacker);
@@ -660,7 +660,7 @@ fn survivor_ai(
                             z.id == zombie_id
                         };
                         if hit {
-                            z.health -= damage;
+                            z.health -= damage * z.kind.armor_factor(melee.sweep);
                             z.hurt_timer = 0.3;
                             z.last_attacker = leader_id.or(z.last_attacker);
                             let push = to.normalize_or_zero() * melee.knockback * 0.8;

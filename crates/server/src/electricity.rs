@@ -317,6 +317,8 @@ mod tests {
                     last_attacker: None,
                     climb_from: None,
                     stuck: 0.0,
+                    frenzy: 0.0,
+                    fuse: None,
                 },
                 ZombieBody {
                     position: at,

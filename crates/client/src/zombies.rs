@@ -53,12 +53,25 @@ struct Arm(f32);
 #[derive(Component)]
 struct ZombieBodyPart(Handle<StandardMaterial>);
 
+/// Œil : terne d'habitude, rouge vif quand le zombie est enragé.
+#[derive(Component)]
+struct Eye;
+
 #[derive(Resource)]
 struct ZombieAssets {
     cube: Handle<Mesh>,
-    skin: [Handle<StandardMaterial>; 5],
-    clothes: [Handle<StandardMaterial>; 5],
+    skin: [Handle<StandardMaterial>; 8],
+    clothes: [Handle<StandardMaterial>; 8],
     hurt: Handle<StandardMaterial>,
+    /// Plaques du blindé.
+    metal: Handle<StandardMaterial>,
+    /// Bouche grande ouverte du hurleur.
+    mouth: Handle<StandardMaterial>,
+    /// Pustules du gonflé, et sa lueur quand la mèche brûle.
+    pustule: Handle<StandardMaterial>,
+    fuse: Handle<StandardMaterial>,
+    eye: Handle<StandardMaterial>,
+    rage: Handle<StandardMaterial>,
 }
 
 fn setup_assets(
@@ -66,6 +79,24 @@ fn setup_assets(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let mut glow = |r: f32, g: f32, b: f32, light: f32| {
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(r, g, b),
+            emissive: LinearRgba::rgb(r, g, b) * light,
+            perceptual_roughness: 1.0,
+            ..default()
+        })
+    };
+    let pustule = glow(0.85, 0.55, 0.15, 0.6);
+    let fuse = glow(1.0, 0.45, 0.1, 6.0);
+    let eye = glow(0.55, 0.5, 0.2, 0.4);
+    let rage = glow(1.0, 0.1, 0.05, 8.0);
+    let metal = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.5, 0.52, 0.55),
+        metallic: 0.8,
+        perceptual_roughness: 0.45,
+        ..default()
+    });
     let mut mat = |r, g, b| {
         materials.add(StandardMaterial {
             base_color: Color::srgb(r, g, b),
@@ -75,13 +106,17 @@ fn setup_assets(
     };
     commands.insert_resource(ZombieAssets {
         cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-        // Marcheur, coureur, brute, cracheur (verdâtre et gonflé), colosse (gris pâle).
+        // Marcheur, coureur, brute, cracheur (verdâtre), colosse (gris pâle), blindé,
+        // hurleur (blafard et décharné), gonflé (jaunâtre).
         skin: [
             mat(0.38, 0.55, 0.30),
             mat(0.55, 0.62, 0.36),
             mat(0.30, 0.40, 0.25),
             mat(0.62, 0.78, 0.20),
             mat(0.55, 0.55, 0.50),
+            mat(0.33, 0.45, 0.30),
+            mat(0.72, 0.74, 0.66),
+            mat(0.74, 0.76, 0.38),
         ],
         clothes: [
             mat(0.25, 0.22, 0.35),
@@ -89,8 +124,17 @@ fn setup_assets(
             mat(0.18, 0.16, 0.14),
             mat(0.30, 0.36, 0.12),
             mat(0.12, 0.10, 0.10),
+            mat(0.20, 0.22, 0.18),
+            mat(0.30, 0.26, 0.26),
+            mat(0.42, 0.36, 0.22),
         ],
         hurt: mat(0.9, 0.15, 0.1),
+        metal,
+        mouth: mat(0.12, 0.03, 0.03),
+        pustule,
+        fuse,
+        eye,
+        rage,
     });
 }
 
@@ -153,6 +197,83 @@ fn spawn_zombie(commands: &mut Commands, assets: &ZombieAssets, state: &ZombieSt
                 Vec3::new(0.42, 0.42, 0.42),
                 Vec3::new(0.0, 1.62, -0.02),
             ));
+            // Yeux.
+            for side in [-1.0f32, 1.0] {
+                z.spawn((
+                    Eye,
+                    part(
+                        &assets.eye,
+                        Vec3::new(0.08, 0.06, 0.04),
+                        Vec3::new(side * 0.1, 1.67, -0.24),
+                    ),
+                ));
+            }
+            // Détails propres à chaque type.
+            match kind {
+                ZombieKind::Armored => {
+                    // Plastron, dossière, casque et épaulières.
+                    z.spawn(part(
+                        &assets.metal,
+                        Vec3::new(0.6, 0.5, 0.06),
+                        Vec3::new(0.0, 1.15, -0.17),
+                    ));
+                    z.spawn(part(
+                        &assets.metal,
+                        Vec3::new(0.6, 0.5, 0.06),
+                        Vec3::new(0.0, 1.15, 0.17),
+                    ));
+                    z.spawn(part(
+                        &assets.metal,
+                        Vec3::new(0.48, 0.16, 0.48),
+                        Vec3::new(0.0, 1.88, -0.02),
+                    ));
+                    z.spawn(part(
+                        &assets.metal,
+                        Vec3::new(0.06, 0.12, 0.44),
+                        Vec3::new(0.0, 1.62, -0.22),
+                    ));
+                    for side in [-1.0f32, 1.0] {
+                        z.spawn(part(
+                            &assets.metal,
+                            Vec3::new(0.22, 0.1, 0.3),
+                            Vec3::new(side * 0.36, 1.5, 0.0),
+                        ));
+                    }
+                }
+                ZombieKind::Howler => {
+                    // Bouche béante et côtes saillantes.
+                    z.spawn(part(
+                        &assets.mouth,
+                        Vec3::new(0.2, 0.18, 0.04),
+                        Vec3::new(0.0, 1.5, -0.235),
+                    ));
+                    for rib in 0..3 {
+                        z.spawn(part(
+                            &assets.skin[i],
+                            Vec3::new(0.5, 0.04, 0.04),
+                            Vec3::new(0.0, 1.0 + rib as f32 * 0.12, -0.16),
+                        ));
+                    }
+                }
+                ZombieKind::Bloater => {
+                    // Ventre énorme couvert de pustules.
+                    z.spawn(part(
+                        &assets.skin[i],
+                        Vec3::new(0.8, 0.7, 0.7),
+                        Vec3::new(0.0, 1.05, -0.08),
+                    ));
+                    for (x, y, zz) in [
+                        (-0.2, 1.2, -0.44),
+                        (0.18, 0.95, -0.44),
+                        (0.42, 1.1, -0.1),
+                        (-0.42, 0.9, 0.0),
+                        (0.05, 1.32, -0.4),
+                    ] {
+                        z.spawn(part(&assets.pustule, Vec3::splat(0.12), Vec3::new(x, y, zz)));
+                    }
+                }
+                _ => {}
+            }
             // Bras tendus vers l'avant, pivot à l'épaule.
             for side in [-1.0f32, 1.0] {
                 z.spawn((
@@ -215,7 +336,7 @@ fn animate_zombies(
     assets: Res<ZombieAssets>,
     mut zombies: Query<(&mut ZombieView, &mut Transform, &Children), Without<Arm>>,
     mut arms: Query<(&Arm, &mut Transform), Without<ZombieView>>,
-    mut parts: Query<(&mut MeshMaterial3d<StandardMaterial>, &ZombieBodyPart)>,
+    mut parts: Query<(&mut MeshMaterial3d<StandardMaterial>, &ZombieBodyPart, Has<Eye>)>,
     children: Query<&Children>,
     camera: Query<&GlobalTransform, With<Camera3d>>,
 ) {
@@ -234,6 +355,16 @@ fn animate_zombies(
         }
         let attacking = view.flags & ZombieState::ATTACKING != 0;
         let hurt = view.flags & ZombieState::HURT != 0;
+        let frenzy = view.flags & ZombieState::FRENZY != 0;
+        // Mèche allumée : le gonflé gonfle et clignote de plus en plus vite.
+        let fuse = view.flags & ZombieState::FUSE != 0;
+        let blink = fuse && (time.elapsed_secs() * 18.0).sin() > 0.0;
+        let base = scale(view.kind);
+        transform.scale = if fuse {
+            base * (1.0 + 0.12 * (time.elapsed_secs() * 18.0).sin().abs())
+        } else {
+            base
+        };
         for kid in kids.iter() {
             if let Ok((arm, mut arm_transform)) = arms.get_mut(kid) {
                 let climbing = view.flags & ZombieState::CLIMBING != 0;
@@ -252,8 +383,16 @@ fn animate_zombies(
         for kid in kids.iter() {
             let grandchildren = children.get(kid).into_iter().flat_map(|c| c.iter());
             for e in std::iter::once(kid).chain(grandchildren) {
-                if let Ok((mut material, part)) = parts.get_mut(e) {
-                    let wanted = if hurt { &assets.hurt } else { &part.0 };
+                if let Ok((mut material, part, eye)) = parts.get_mut(e) {
+                    let wanted = if blink {
+                        &assets.fuse
+                    } else if hurt {
+                        &assets.hurt
+                    } else if eye && frenzy {
+                        &assets.rage
+                    } else {
+                        &part.0
+                    };
                     if material.0 != *wanted {
                         material.0 = wanted.clone();
                     }
