@@ -528,6 +528,14 @@ fn update_status(
         }
     } else if let Some((block, left)) = aimed_deposit {
         format!("{} : {left} récoltes restantes", block.name())
+    } else if let Some((_, bite)) = player.fishing {
+        if bite > 0.0 {
+            "ÇA MORD ! Clic droit pour ferrer !".into()
+        } else {
+            "Le bouchon flotte… attends qu'il plonge (clic droit : remonter la ligne)".into()
+        }
+    } else if player.held() == Some(shared::item::Item::FishingRod) {
+        "Clic droit vers l'eau : lancer la ligne".into()
     } else if player.inventory.is_empty() {
         String::new()
     } else if let Some((item, weapon)) = player.held().and_then(|i| i.ranged().map(|w| (i, w))) {

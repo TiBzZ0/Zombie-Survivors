@@ -410,6 +410,35 @@ pub fn draw(item: Item) -> Canvas {
             c.set(9, 8, rgb(0.5, 0.7, 0.3));
             c.set(7, 5, rgb(0.7, 0.7, 0.72));
         }
+        Item::FishingRod => {
+            c.thick((2, 14), (12, 2), rgb(0.55, 0.36, 0.18));
+            c.set(4, 12, rgb(0.3, 0.3, 0.32));
+            c.set(5, 12, rgb(0.3, 0.3, 0.32));
+            c.line((12, 2), (13, 10), rgb(0.85, 0.85, 0.88));
+            c.rect(12, 11, 14, 12, rgb(0.9, 0.15, 0.1));
+            c.rect(12, 13, 14, 13, rgb(0.95, 0.95, 0.92));
+        }
+        Item::RawFish | Item::CookedFish => {
+            let (body, belly, fin) = if item == Item::RawFish {
+                (rgb(0.45, 0.6, 0.72), rgb(0.82, 0.88, 0.9), rgb(0.35, 0.48, 0.6))
+            } else {
+                (rgb(0.72, 0.45, 0.2), rgb(0.88, 0.68, 0.4), rgb(0.55, 0.32, 0.14))
+            };
+            c.disc(8.5, 8.0, 3.8, body);
+            c.disc(10.0, 8.0, 3.0, body);
+            c.rect(6, 9, 11, 10, belly);
+            // Queue.
+            c.line((1, 4), (4, 8), fin);
+            c.line((1, 12), (4, 8), fin);
+            c.line((2, 5), (2, 11), fin);
+            c.line((3, 6), (3, 10), fin);
+            c.set(11, 7, rgb(0.05, 0.05, 0.05));
+            if item == Item::CookedFish {
+                // Marques du gril.
+                c.line((6, 5), (8, 11), rgb(0.3, 0.15, 0.05));
+                c.line((9, 5), (11, 11), rgb(0.3, 0.15, 0.05));
+            }
+        }
     }
     c.outline();
     c

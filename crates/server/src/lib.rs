@@ -21,6 +21,7 @@ pub mod electricity;
 pub mod events;
 pub mod explosives;
 pub mod farming;
+pub mod fishing;
 pub mod net;
 pub mod pathfind;
 pub mod save;
@@ -62,7 +63,7 @@ impl Plugin for ServerPlugin {
                 structure::StructurePlugin,
                 claims::ClaimsPlugin,
             ))
-            .add_plugins(trees::TreesPlugin)
+            .add_plugins((trees::TreesPlugin, fishing::FishingPlugin))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)
             .add_systems(Update, report_status)

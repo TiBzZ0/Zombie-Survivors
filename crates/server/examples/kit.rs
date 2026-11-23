@@ -58,6 +58,7 @@ fn main() {
         (Item::Beer, 2),
         (Item::HerbalTea, 2),
         (Item::Stew, 2),
+        (Item::FishingRod, 1),
     ] {
         inventory.add(item, n);
     }

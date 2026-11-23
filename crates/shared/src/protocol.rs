@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_001E;
+pub const PROTOCOL_ID: u64 = 0x5A53_001F;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -149,6 +149,12 @@ pub enum ClientMessage {
     Harvest {
         pos: IVec3,
     },
+    /// Lance la ligne (canne à pêche en main) dans l'eau visée.
+    Cast {
+        at: IVec3,
+    },
+    /// Ferre si le bouchon plonge ; sinon, remonte la ligne.
+    Reel,
 }
 
 /// Position compacte d'un survivant.
@@ -415,6 +421,12 @@ pub enum ServerMessage {
     /// Un hurleur a crié : les zombies alentour sont enragés.
     Howl {
         pos: Vec3,
+    },
+    /// Le bouchon plonge : il faut ferrer tout de suite.
+    Bite,
+    /// La ligne est remontée, avec une prise (objet et nombre) ou non.
+    Caught {
+        item: Option<(Item, u32)>,
     },
 }
 

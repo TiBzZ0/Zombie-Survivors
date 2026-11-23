@@ -78,6 +78,10 @@ pub enum Item {
     HerbalTea,
     /// Ragoût (viande et carottes) : rassasie longtemps.
     Stew,
+    /// Canne à pêche : clic droit vers l'eau pour lancer, puis pour ferrer.
+    FishingRod,
+    RawFish,
+    CookedFish,
 }
 
 /// Caractéristiques d'un explosif qu'on lance.
@@ -194,6 +198,9 @@ impl Item {
             Item::Beer => "Bière".into(),
             Item::HerbalTea => "Tisane".into(),
             Item::Stew => "Ragoût".into(),
+            Item::FishingRod => "Canne à pêche".into(),
+            Item::RawFish => "Poisson cru".into(),
+            Item::CookedFish => "Poisson grillé".into(),
         }
     }
 
@@ -348,6 +355,8 @@ impl Item {
             Item::Berries => Some((12.0, 2.0)),
             Item::Carrot => Some((22.0, 0.0)),
             Item::Stew => Some((70.0, 10.0)),
+            Item::RawFish => Some((10.0, 0.0)),
+            Item::CookedFish => Some((48.0, 6.0)),
             _ => None,
         }
     }
@@ -403,7 +412,7 @@ impl Item {
     }
 
     pub const fn is_tool(self) -> bool {
-        self.is_weapon() || matches!(self, Item::Pickaxe(_))
+        self.is_weapon() || matches!(self, Item::Pickaxe(_) | Item::FishingRod)
     }
 
     /// Caractéristiques de tir, si l'objet est une arme à distance.
