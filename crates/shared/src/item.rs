@@ -82,6 +82,8 @@ pub enum Item {
     FishingRod,
     RawFish,
     CookedFish,
+    /// Lingot d'acier (fer et charbon à la forge) : sert à améliorer armes, outils et armures.
+    SteelIngot,
 }
 
 /// Caractéristiques d'un explosif qu'on lance.
@@ -138,6 +140,8 @@ pub enum Tier {
     Wood,
     Stone,
     Iron,
+    /// Acier : le palier au-dessus du fer, fabriqué à la forge en améliorant un objet en fer.
+    Steel,
 }
 
 impl Tier {
@@ -146,6 +150,7 @@ impl Tier {
             Tier::Wood => "en bois",
             Tier::Stone => "en pierre",
             Tier::Iron => "en fer",
+            Tier::Steel => "en acier",
         }
     }
 }
@@ -201,6 +206,7 @@ impl Item {
             Item::FishingRod => "Canne à pêche".into(),
             Item::RawFish => "Poisson cru".into(),
             Item::CookedFish => "Poisson grillé".into(),
+            Item::SteelIngot => "Lingot d'acier".into(),
         }
     }
 
@@ -283,6 +289,8 @@ impl Item {
                 Tier::Wood => wood,
                 Tier::Stone => stone,
                 Tier::Iron => iron,
+                // L'acier frappe un tiers plus fort que le fer.
+                Tier::Steel => iron * 1.35,
             }
         }
         match held {
@@ -336,9 +344,11 @@ impl Item {
             Item::Helmet(Tier::Wood) => Some((ArmorSlot::Head, 0.06)),
             Item::Helmet(Tier::Stone) => Some((ArmorSlot::Head, 0.1)),
             Item::Helmet(Tier::Iron) => Some((ArmorSlot::Head, 0.15)),
+            Item::Helmet(Tier::Steel) => Some((ArmorSlot::Head, 0.2)),
             Item::BodyArmor(Tier::Wood) => Some((ArmorSlot::Body, 0.12)),
             Item::BodyArmor(Tier::Stone) => Some((ArmorSlot::Body, 0.2)),
             Item::BodyArmor(Tier::Iron) => Some((ArmorSlot::Body, 0.3)),
+            Item::BodyArmor(Tier::Steel) => Some((ArmorSlot::Body, 0.38)),
             _ => None,
         }
     }
@@ -553,6 +563,7 @@ pub fn mining_speed(block: Block, held: Option<Item>) -> f32 {
         Some(Item::Pickaxe(Tier::Wood)) => 2.0,
         Some(Item::Pickaxe(Tier::Stone)) => 3.5,
         Some(Item::Pickaxe(Tier::Iron)) => 5.0,
+        Some(Item::Pickaxe(Tier::Steel)) => 7.0,
         _ => 1.0,
     };
     let hard = matches!(
@@ -567,6 +578,7 @@ pub fn mining_speed(block: Block, held: Option<Item>) -> f32 {
         Some(Item::Axe(Tier::Wood)) => 2.0,
         Some(Item::Axe(Tier::Stone)) => 3.5,
         Some(Item::Axe(Tier::Iron)) => 5.0,
+        Some(Item::Axe(Tier::Steel)) => 7.0,
         _ => 1.0,
     };
     if hard {
@@ -590,6 +602,20 @@ pub fn break_time(block: Block, held: Option<Item>) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steel_outclasses_iron() {
+        for make in [Item::Sword, Item::Spear, Item::Axe] {
+            assert!(Item::melee(Some(make(Tier::Steel))).damage > Item::melee(Some(make(Tier::Iron))).damage);
+        }
+        assert!(
+            mining_speed(Block::Stone, Some(Item::Pickaxe(Tier::Steel)))
+                > mining_speed(Block::Stone, Some(Item::Pickaxe(Tier::Iron)))
+        );
+        let steel = armor_reduction([Some(Item::Helmet(Tier::Steel)), Some(Item::BodyArmor(Tier::Steel))]);
+        let iron = armor_reduction([Some(Item::Helmet(Tier::Iron)), Some(Item::BodyArmor(Tier::Iron))]);
+        assert!(steel > iron && steel <= 0.6, "{steel}");
+    }
 
     #[test]
     fn inventory_add_and_remove() {
