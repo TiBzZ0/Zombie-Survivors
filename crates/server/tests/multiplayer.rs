@@ -532,7 +532,11 @@ fn bow_shoots_and_uses_arrows() {
         true,
     );
     eve.send(&ClientMessage::Throw { direction: Vec3::X }, true);
+    // Le délai entre deux tirs se compte en temps de jeu : sur une machine lente, le serveur
+    // peut être en retard sur l'horloge murale. On relance tant que la grenade n'est pas partie.
+    let mut tries = 0;
     pump_until(&mut [&mut eve], "grenade lancée", |c| {
+        tries += 1;
         let thrown = c[0]
             .find(|m| {
                 matches!(
@@ -545,6 +549,9 @@ fn bow_shoots_and_uses_arrows() {
                 .then_some(())
             })
             .is_some();
+        if !thrown && tries % 25 == 0 {
+            c[0].send(&ClientMessage::Throw { direction: Vec3::X }, true);
+        }
         let used = c[0]
             .find(|m| match m {
                 ServerMessage::Inventory(inv) if inv.count(Item::Grenade) == 1 => Some(()),
