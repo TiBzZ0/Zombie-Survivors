@@ -38,6 +38,8 @@ pub struct WorldState {
     removals: Option<Vec<BlockPos>>,
     /// Troncs disparus depuis le dernier `take_felled`, si le suivi est activé.
     felled: Option<Vec<BlockPos>>,
+    /// Cases de machine (`Block::Part`) disparues, suivies avec les blocs porteurs.
+    lost_parts: Vec<BlockPos>,
 }
 
 impl WorldState {
@@ -49,6 +51,7 @@ impl WorldState {
             changes: None,
             removals: None,
             felled: None,
+            lost_parts: Vec::new(),
         }
     }
 
@@ -80,6 +83,16 @@ impl WorldState {
     /// Blocs porteurs disparus depuis le dernier appel (cassés, explosés, portes ouvertes...).
     pub fn take_removals(&mut self) -> Vec<BlockPos> {
         self.removals.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    /// Blocs porteurs disparus, sans les retirer de la liste.
+    pub fn peek_removals(&self) -> &[BlockPos] {
+        self.removals.as_deref().unwrap_or_default()
+    }
+
+    /// Cases de machine disparues depuis le dernier appel (si le suivi des disparitions est activé).
+    pub fn take_lost_parts(&mut self) -> Vec<BlockPos> {
+        std::mem::take(&mut self.lost_parts)
     }
 
     pub fn config(&self) -> &WorldConfig {
@@ -148,6 +161,9 @@ impl WorldState {
             && let Some(removals) = self.removals.as_mut()
         {
             removals.push(pos);
+        }
+        if self.removals.is_some() && self.block(pos) == Block::Part && block != Block::Part {
+            self.lost_parts.push(pos);
         }
         if self.felled.is_some()
             && self.block(pos).is_log()

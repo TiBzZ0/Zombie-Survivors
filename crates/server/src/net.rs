@@ -1151,6 +1151,29 @@ fn handle_reliable(
                 .players
                 .values()
                 .any(|p| overlaps_solid(p.state.position, PLAYER_SIZE, &|b| b == pos));
+            // Grande machine : ses autres cases doivent être libres, dans un sens ou dans l'autre.
+            let multi = shared::multiblock::is_multiblock(block);
+            let free = |cells: &[IVec3]| {
+                cells.iter().all(|c| {
+                    world.block(*c).is_replaceable()
+                        && world.in_bounds(*c)
+                        && !lobby
+                            .players
+                            .values()
+                            .any(|p| overlaps_solid(p.state.position, PLAYER_SIZE, &|b| b == *c))
+                })
+            };
+            let extra: Option<Vec<IVec3>> = if multi {
+                let yaw = lobby.players.get(&client).map_or(0.0, |p| p.state.yaw);
+                // Couchée en travers du regard, face au joueur.
+                let looks_along_x = yaw.sin().abs() > yaw.cos().abs();
+                [looks_along_x, !looks_along_x]
+                    .into_iter()
+                    .map(|z| shared::multiblock::cells(pos, block, z))
+                    .find(|cells| free(cells))
+            } else {
+                Some(Vec::new())
+            };
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
             };
@@ -1200,10 +1223,29 @@ fn handle_reliable(
                 }
                 Ok(()) => {}
             }
-            if allowed && holds && plant.is_ok() && world.set_block(pos, block) {
+            if allowed && extra.is_none() {
+                notify(server, client, format!("Pas assez de place pour : {}.", block.name()));
+            }
+            if allowed
+                && holds
+                && plant.is_ok()
+                && let Some(extra) = extra
+                && world.set_block(pos, block)
+            {
                 player.inventory.remove(cost, 1);
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block });
+                for cell in extra {
+                    if world.set_block(cell, Block::Part) {
+                        broadcast(
+                            server,
+                            &ServerMessage::BlockChanged {
+                                pos: cell,
+                                block: Block::Part,
+                            },
+                        );
+                    }
+                }
                 if block == Block::Banner {
                     claims.0.insert(pos, player.name.clone());
                     broadcast(server, &claims.message());

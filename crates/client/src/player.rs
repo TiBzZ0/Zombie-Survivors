@@ -530,6 +530,17 @@ fn interact(
     let dt = time.delta_secs();
     player.target = raycast(player.eye(), player.look_direction(), REACH, |p| {
         world.block(p).is_targetable()
+    })
+    .map(|hit| {
+        // Une case de grande machine renvoie à la machine elle-même (casser, ouvrir, piloter) ;
+        // poser un bloc contre elle se fait toujours sur la case touchée.
+        match shared::multiblock::origin_of(hit.block, |p| world.block(p)) {
+            Some(origin) if origin != hit.block => shared::raycast::RayHit {
+                block: origin,
+                normal: hit.block + hit.normal - origin,
+            },
+            _ => hit,
+        }
     });
     // L'eau ne se vise pas comme un bloc (on pose et on casse à travers), mais on y boit.
     player.aimed_water = raycast(player.eye(), player.look_direction(), REACH, |p| {

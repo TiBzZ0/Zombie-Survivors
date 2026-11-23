@@ -104,6 +104,9 @@ pub enum Block {
     RipeCarrot,
     /// Sac de couchage : posé au sol, il devient le point de réapparition de son dormeur.
     Bedroll,
+    /// Case occupée par une grande machine (établi, tourelle...) posée à côté : on ne la voit
+    /// pas, la machine la recouvre, et la casser casse toute la machine.
+    Part,
 }
 
 /// Rayon (à l'horizontale, sur toute la hauteur) de la base protégée par une bannière.
@@ -294,6 +297,7 @@ impl Block {
                 | Block::RipeFruitLeaves
                 | Block::FallenFruit
                 | Block::RottenFruit
+                | Block::Part
         )
     }
 
@@ -392,6 +396,7 @@ impl Block {
             Block::BirchSapling => [0.45, 0.65, 0.3],
             Block::PineSapling => [0.15, 0.38, 0.2],
             Block::Bedroll => [0.78, 0.36, 0.30],
+            Block::Part => [0.45, 0.45, 0.45],
         }
     }
 
@@ -450,6 +455,7 @@ impl Block {
             Block::CarrotPlant => "Carotte",
             Block::RipeCarrot => "Carotte mûre",
             Block::Bedroll => "Sac de couchage",
+            Block::Part => "Machine",
         }
     }
 
@@ -492,6 +498,7 @@ impl Block {
             Block::Snow => 30,
             Block::Cactus => 30,
             Block::Bedroll => 8,
+            Block::Part => 200,
         }
     }
 }

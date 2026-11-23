@@ -108,6 +108,30 @@ fn main() {
     {
         edits.push((block_at(-2.0, -1.0 - 2.0 * i as f32), gun));
     }
+    // Les autres machines en rangée sur la droite (modèles 3D, machines sur plusieurs cases).
+    for (i, machine) in [
+        Block::Workbench,
+        Block::Forge,
+        Block::Chest,
+        Block::Generator,
+        Block::Floodlight,
+        Block::TeslaCoil,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        edits.push((
+            block_at(4.0 + 2.5 * (i % 3) as f32, -2.0 - 2.5 * (i / 3) as f32),
+            machine,
+        ));
+    }
+    // Chaque grande machine occupe aussi ses autres cases.
+    let parts: Vec<_> = edits
+        .iter()
+        .flat_map(|(pos, block)| shared::multiblock::cells(*pos, *block, false))
+        .map(|p| (p, Block::Part))
+        .collect();
+    edits.extend(parts);
     let mut ammo = Inventory::default();
     ammo.add(Item::Arrow, 20);
     let save = SaveFile {
