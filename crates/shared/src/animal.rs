@@ -1,4 +1,4 @@
-//! Gibier : lapins, cerfs et sangliers, chassés pour leur viande.
+//! Gibier : lapins, cerfs, sangliers, renards, ours et volailles, chassés pour leur viande.
 
 use bevy_math::Vec3;
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,12 @@ pub enum AnimalKind {
     Deer,
     /// Charge quand on l'attaque, trois viandes.
     Boar,
+    /// Renard : rusé et rapide, fuit ; une viande et une belle peau.
+    Fox,
+    /// Ours : grand et dangereux, charge fort ; beaucoup de viande et deux peaux.
+    Bear,
+    /// Volaille : minuscule, commune dans les plaines ; une viande.
+    Fowl,
 }
 
 /// Caractéristiques d'une espèce.
@@ -28,11 +34,20 @@ pub struct AnimalStats {
     pub meat: (u32, u32),
     /// Dégâts d'une charge (0 : l'animal ne se défend pas).
     pub damage: f32,
+    /// Peaux données à la mort.
+    pub hides: u32,
     pub size: BodySize,
 }
 
 impl AnimalKind {
-    pub const ALL: [AnimalKind; 3] = [AnimalKind::Rabbit, AnimalKind::Deer, AnimalKind::Boar];
+    pub const ALL: [AnimalKind; 6] = [
+        AnimalKind::Rabbit,
+        AnimalKind::Deer,
+        AnimalKind::Boar,
+        AnimalKind::Fox,
+        AnimalKind::Bear,
+        AnimalKind::Fowl,
+    ];
 
     pub const fn stats(self) -> AnimalStats {
         match self {
@@ -42,6 +57,7 @@ impl AnimalKind {
                 run_speed: 6.0,
                 meat: (1, 1),
                 damage: 0.0,
+                hides: 1,
                 size: BodySize {
                     half_width: 0.2,
                     height: 0.4,
@@ -53,6 +69,7 @@ impl AnimalKind {
                 run_speed: 7.0,
                 meat: (2, 3),
                 damage: 0.0,
+                hides: 1,
                 size: BodySize {
                     half_width: 0.4,
                     height: 1.4,
@@ -64,11 +81,60 @@ impl AnimalKind {
                 run_speed: 5.0,
                 meat: (3, 3),
                 damage: 9.0,
+                hides: 1,
                 size: BodySize {
                     half_width: 0.45,
                     height: 0.9,
                 },
             },
+            AnimalKind::Fox => AnimalStats {
+                health: 18.0,
+                speed: 1.8,
+                run_speed: 7.5,
+                meat: (1, 1),
+                damage: 0.0,
+                hides: 1,
+                size: BodySize {
+                    half_width: 0.25,
+                    height: 0.5,
+                },
+            },
+            AnimalKind::Bear => AnimalStats {
+                health: 110.0,
+                speed: 1.2,
+                run_speed: 6.5,
+                meat: (4, 5),
+                damage: 18.0,
+                hides: 2,
+                size: BodySize {
+                    half_width: 0.6,
+                    height: 1.3,
+                },
+            },
+            AnimalKind::Fowl => AnimalStats {
+                health: 6.0,
+                speed: 1.2,
+                run_speed: 4.0,
+                meat: (1, 1),
+                damage: 0.0,
+                hides: 0,
+                size: BodySize {
+                    half_width: 0.18,
+                    height: 0.35,
+                },
+            },
+        }
+    }
+
+    /// Couleurs du pelage et du détail (ventre, bois, défenses...), en RVB.
+    pub const fn colors(self) -> ([f32; 3], [f32; 3]) {
+        match self {
+            AnimalKind::Rabbit => ([0.62, 0.55, 0.48], [0.92, 0.90, 0.86]),
+            AnimalKind::Deer => ([0.55, 0.36, 0.20], [0.85, 0.78, 0.62]),
+            AnimalKind::Boar => ([0.30, 0.24, 0.20], [0.88, 0.85, 0.75]),
+            AnimalKind::Fox => ([0.82, 0.38, 0.12], [0.96, 0.94, 0.9]),
+            AnimalKind::Bear => ([0.28, 0.20, 0.15], [0.5, 0.42, 0.35]),
+            AnimalKind::Fowl => ([0.9, 0.88, 0.82], [0.9, 0.35, 0.2]),
         }
     }
 
@@ -76,6 +142,9 @@ impl AnimalKind {
         match value {
             1 => AnimalKind::Deer,
             2 => AnimalKind::Boar,
+            3 => AnimalKind::Fox,
+            4 => AnimalKind::Bear,
+            5 => AnimalKind::Fowl,
             _ => AnimalKind::Rabbit,
         }
     }
@@ -85,6 +154,9 @@ impl AnimalKind {
             AnimalKind::Rabbit => "Lapin",
             AnimalKind::Deer => "Cerf",
             AnimalKind::Boar => "Sanglier",
+            AnimalKind::Fox => "Renard",
+            AnimalKind::Bear => "Ours",
+            AnimalKind::Fowl => "Volaille",
         }
     }
 }
@@ -151,5 +223,18 @@ mod tests {
         assert!(s.position().distance(Vec3::new(10.5, 20.25, 30.0)) < 0.05);
         assert_eq!(s.kind(), AnimalKind::Boar);
         assert!((s.yaw() - 1.0).abs() < 0.03);
+    }
+
+    #[test]
+    fn every_kind_round_trips_and_has_meat() {
+        for kind in AnimalKind::ALL {
+            assert_eq!(AnimalKind::from_u8(kind as u8), kind, "{}", kind.name());
+            let stats = kind.stats();
+            assert!(stats.meat.0 >= 1 && stats.meat.1 >= stats.meat.0);
+            assert!(!kind.name().is_empty());
+        }
+        // L'ours est le plus coriace et le plus dangereux.
+        assert!(AnimalKind::Bear.stats().damage > AnimalKind::Boar.stats().damage);
+        assert!(AnimalKind::Bear.stats().hides >= 2);
     }
 }

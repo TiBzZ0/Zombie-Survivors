@@ -109,11 +109,35 @@ impl Animal {
     }
 }
 
-fn random_kind() -> AnimalKind {
-    match fastrand::u32(0..100) {
-        0..50 => AnimalKind::Rabbit,
-        50..80 => AnimalKind::Deer,
-        _ => AnimalKind::Boar,
+/// Espèce tirée au sort selon le biome du lieu.
+fn random_kind(world: &GameWorld, pos: Vec3) -> AnimalKind {
+    use shared::worldgen::Biome;
+    let biome = world.generator().biome(pos.x.floor() as i32, pos.z.floor() as i32);
+    let roll = fastrand::u32(0..100);
+    match biome {
+        // Plaines : beaucoup de volailles et de lapins, quelques cerfs.
+        Biome::Plains => match roll {
+            0..35 => AnimalKind::Fowl,
+            35..65 => AnimalKind::Rabbit,
+            65..88 => AnimalKind::Deer,
+            _ => AnimalKind::Boar,
+        },
+        // Forêts : cerfs, sangliers, renards, et de rares ours.
+        Biome::Forest => match roll {
+            0..25 => AnimalKind::Deer,
+            25..45 => AnimalKind::Rabbit,
+            45..65 => AnimalKind::Boar,
+            65..85 => AnimalKind::Fox,
+            _ => AnimalKind::Bear,
+        },
+        // Montagne enneigée : renards, ours et quelques cerfs.
+        Biome::Snow => match roll {
+            0..40 => AnimalKind::Fox,
+            40..70 => AnimalKind::Deer,
+            _ => AnimalKind::Bear,
+        },
+        // Désert : rien (traité par le sol : pas d'herbe).
+        Biome::Desert => AnimalKind::Rabbit,
     }
 }
 
@@ -153,7 +177,7 @@ fn spawn_animals(
             && world.block(spot.floor().as_ivec3() - IVec3::Y) == Block::Grass
         {
             ids.0 = ids.0.wrapping_add(1);
-            commands.spawn(Animal::new(ids.0, random_kind(), spot));
+            commands.spawn(Animal::new(ids.0, random_kind(&world, spot), spot));
         }
     }
 }
@@ -258,7 +282,10 @@ fn animal_deaths(
             && let Some(player) = lobby.players.get_mut(&id)
         {
             player.inventory.add(Item::RawMeat, fastrand::u32(min..=max));
-            player.inventory.add(Item::Hide, 1);
+            let hides = a.kind.stats().hides;
+            if hides > 0 {
+                player.inventory.add(Item::Hide, hides);
+            }
             if let Some(server) = server.as_deref_mut() {
                 send_inventory(server, id, player);
             }
