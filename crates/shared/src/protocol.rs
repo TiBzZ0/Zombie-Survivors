@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_001C;
+pub const PROTOCOL_ID: u64 = 0x5A53_001D;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -51,9 +51,11 @@ pub enum ClientMessage {
         pos: IVec3,
         block: Block,
     },
-    /// Coup porté à un zombie visé.
+    /// Coup porté à un zombie visé, avec sa force (endurance : 0,5 à bout de souffle,
+    /// 1 normal, 1,8 pour un coup puissant porté depuis la garde).
     Attack {
         zombie: u32,
+        strength: f32,
     },
     /// Demande de réapparition après la mort.
     Respawn,

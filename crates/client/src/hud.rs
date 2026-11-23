@@ -560,7 +560,7 @@ fn update_status(
     } else if player.held() == Some(shared::item::Item::Seeds) {
         "Clic droit sur la terre ou l'herbe : semer (le blé mûrit en quelques minutes)".into()
     } else if player.guarding {
-        "Garde levée".into()
+        "Garde levée · clic gauche : coup puissant".into()
     } else if player.held().is_some_and(|i| i.is_melee_weapon()) {
         "Clic droit maintenu : garde (levée juste avant le coup, elle le pare)".into()
     } else {

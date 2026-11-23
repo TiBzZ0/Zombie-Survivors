@@ -32,6 +32,7 @@ mod settings;
 mod skills;
 mod sky;
 mod sound;
+mod stamina;
 mod survivors;
 mod swim;
 mod terrain;
@@ -148,6 +149,7 @@ fn main() {
             wind::WindPlugin,
             particles::ParticlesPlugin,
             skills::SkillsPlugin,
+            stamina::StaminaUiPlugin,
             swim::SwimUiPlugin,
         ))
         .add_systems(PreStartup, install_font)
