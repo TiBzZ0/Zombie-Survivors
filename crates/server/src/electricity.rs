@@ -319,6 +319,7 @@ mod tests {
                     stuck: 0.0,
                     frenzy: 0.0,
                     fuse: None,
+                    trapped: 0.0,
                 },
                 ZombieBody {
                     position: at,

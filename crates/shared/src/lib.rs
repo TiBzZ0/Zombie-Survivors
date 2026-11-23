@@ -25,6 +25,7 @@ pub mod stamina;
 pub mod structure;
 pub mod survivor;
 pub mod swim;
+pub mod traps;
 pub mod trees;
 pub mod weather;
 pub mod world;

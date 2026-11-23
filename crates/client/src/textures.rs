@@ -281,6 +281,32 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
                 gray(1.0 + 0.08 * n)
             }
         }
+        Block::Landmine => {
+            // Disque de métal sombre, détonateur rouge au centre.
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            let r = (dx * dx + dy * dy).sqrt();
+            if r < 2.0 {
+                [3.0, 0.5, 0.45]
+            } else if (r - 5.0).abs() < 0.7 {
+                gray(0.7)
+            } else {
+                gray(0.9 + 0.15 * n)
+            }
+        }
+        Block::BearTrap => {
+            // Mâchoires dentées autour d'une plaque.
+            let edge = !(3..=12).contains(&x);
+            let tooth = edge && y.is_multiple_of(3);
+            if tooth {
+                gray(1.5)
+            } else if edge {
+                gray(1.1 + 0.1 * n)
+            } else if (5..=10).contains(&x) && (5..=10).contains(&y) {
+                [1.2, 0.95, 0.7]
+            } else {
+                gray(0.6 + 0.1 * n)
+            }
+        }
         Block::Air => gray(1.0),
     }
 }
@@ -393,7 +419,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 55] = [
+const ALL_BLOCKS: [Block; 57] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -449,6 +475,8 @@ const ALL_BLOCKS: [Block; 55] = [
     Block::RipeCarrot,
     Block::Bedroll,
     Block::Part,
+    Block::Landmine,
+    Block::BearTrap,
 ];
 
 #[cfg(test)]

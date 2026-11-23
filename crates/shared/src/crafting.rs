@@ -161,6 +161,18 @@ pub const RECIPES: &[Recipe] = &[
         station: Some(Block::Workbench),
     },
     Recipe {
+        output: b(Block::BearTrap),
+        count: 1,
+        inputs: &[(Item::IronIngot, 2)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: b(Block::Landmine),
+        count: 2,
+        inputs: &[(Item::IronIngot, 1), (Item::Grenade, 1)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
         output: b(Block::Generator),
         count: 1,
         inputs: &[(Item::IronIngot, 6), (Item::Coal, 4)],
@@ -466,6 +478,8 @@ impl Category {
                 Block::Spikes
                 | Block::Turret
                 | Block::BarbedWire
+                | Block::Landmine
+                | Block::BearTrap
                 | Block::MachineGun
                 | Block::Cannon
                 | Block::Catapult

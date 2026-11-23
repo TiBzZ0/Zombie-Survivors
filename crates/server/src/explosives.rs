@@ -47,6 +47,8 @@ pub struct Projectile {
     pub impact: bool,
     /// Part de la gravité subie (projectiles à impact seulement).
     pub gravity: f32,
+    /// Explosif d'un joueur (ou de ses pièges) : il épargne en partie les alliés.
+    pub friendly: bool,
 }
 
 impl Projectile {
@@ -67,6 +69,7 @@ impl Projectile {
             blast,
             impact: false,
             gravity: 1.0,
+            friendly: true,
         }
     }
 
@@ -87,6 +90,7 @@ impl Projectile {
             },
             impact: true,
             gravity: gun.gravity,
+            friendly: true,
         }
     }
 
@@ -107,6 +111,27 @@ impl Projectile {
             },
             impact: false,
             gravity: 0.0,
+            friendly: owner.is_some(),
+        }
+    }
+
+    /// Explosion d'une mine sous un zombie.
+    pub fn mine(position: Vec3) -> Self {
+        Self {
+            owner: None,
+            item: Item::Grenade,
+            position,
+            velocity: Vec3::ZERO,
+            fuse: 0.0,
+            blast: Throwable {
+                fuse: 0.0,
+                radius: shared::traps::MINE_RADIUS,
+                damage: shared::traps::MINE_DAMAGE,
+                blast_blocks: 0.0,
+            },
+            impact: false,
+            gravity: 0.0,
+            friendly: true,
         }
     }
 
@@ -192,7 +217,7 @@ fn update_projectiles(
             let d = (player.state.position + Vec3::Y).distance(p.position);
             if d < blast.radius {
                 // Un explosif de joueur épargne ses alliés ; celui d'un gonflé, non.
-                let friendly = if p.owner.is_some() { FRIENDLY_FACTOR } else { 1.0 };
+                let friendly = if p.friendly { FRIENDLY_FACTOR } else { 1.0 };
                 let amount = falloff(d) * friendly * (1.0 - player.inventory.armor_reduction());
                 hurt_player(*id, player, amount, "Pris dans une explosion", server.as_deref_mut());
             }
@@ -310,6 +335,7 @@ mod tests {
                 blast: Item::Dynamite.throwable().unwrap(),
                 impact: false,
                 gravity: 1.0,
+                friendly: true,
             }]));
         let zombie = |id: u32, offset: f32| {
             (
@@ -326,6 +352,7 @@ mod tests {
                     stuck: 0.0,
                     frenzy: 0.0,
                     fuse: None,
+                    trapped: 0.0,
                 },
                 ZombieBody {
                     position: center.as_vec3() + Vec3::new(0.5, -0.5, 0.5 + offset),
@@ -387,6 +414,7 @@ mod tests {
                 stuck: 0.0,
                 frenzy: 0.0,
                 fuse: None,
+                trapped: 0.0,
             },
             ZombieBody {
                 position: Vec3::new(42.5, y, 40.5),
