@@ -25,12 +25,16 @@ use crate::zombies::ZombieView;
 const WALK_SPEED: f32 = 4.5;
 const SPRINT_SPEED: f32 = 7.0;
 const JUMP_SPEED: f32 = 8.5;
-/// Vitesse de nage, en part de la vitesse de marche.
-const SWIM_FACTOR: f32 = 0.6;
-/// Vitesse de remontée à la nage (assez pour se hisser sur la rive).
+/// Brasse tranquille.
+const SWIM_SPEED: f32 = 2.8;
+/// Crawl (Maj) : plus rapide.
+const CRAWL_SPEED: f32 = 4.6;
+/// Vitesse verticale sous l'eau (Espace pour monter, Ctrl pour descendre).
+const DIVE_SPEED: f32 = 3.2;
+/// Vitesse de remontée pour se hisser sur la rive.
 const SWIM_UP_SPEED: f32 = 5.5;
-/// Vitesse maximale à laquelle on coule.
-const SINK_SPEED: f32 = 2.0;
+/// Dans l'eau jusqu'aux genoux : on marche un peu moins vite.
+const WADE_FACTOR: f32 = 0.8;
 const MOUSE_SENSITIVITY: f32 = 0.0025;
 /// Délai entre deux poses de blocs quand le bouton reste enfoncé.
 const ACTION_COOLDOWN: f32 = 0.22;
@@ -109,8 +113,12 @@ pub struct LocalPlayer {
     pub target: Option<shared::raycast::RayHit>,
     /// Eau visée, à portée pour boire.
     pub aimed_water: Option<IVec3>,
-    /// Le joueur nage (le milieu du corps est dans l'eau).
+    /// Le joueur nage (en surface ou sous l'eau).
     pub swimming: bool,
+    /// Position du corps par rapport à l'eau.
+    pub immersion: shared::swim::Immersion,
+    /// Souffle restant sous l'eau, en secondes (le serveur fait foi).
+    pub breath: f32,
     /// Survivant visé, assez près pour lui parler.
     pub aimed_survivor: Option<u32>,
     /// Indication à afficher sur le survivant visé.
@@ -202,6 +210,7 @@ fn spawn_player(mut player: ResMut<LocalPlayer>, session: Res<Session>) {
         health: 100.0,
         hunger: 100.0,
         thirst: 100.0,
+        breath: shared::swim::BREATH_SECS,
         body_temp: shared::climate::BODY_NORMAL,
         felt: 18.0,
         position: session.spawn,
@@ -343,7 +352,9 @@ fn apply_teleports(
                 body_temp,
                 felt,
                 infection,
+                breath,
             } => {
+                player.breath = *breath;
                 player.body_temp = *body_temp;
                 player.felt = *felt;
                 player.infection = *infection;
@@ -421,39 +432,67 @@ fn move_player(
     } else {
         speed
     };
-    // Dans l'eau : on avance plus lentement, on coule doucement, Espace fait remonter.
-    let wet = |y: f32| {
-        world
-            .block((player.position + Vec3::Y * y).floor().as_ivec3())
-            .is_water()
-    };
-    player.swimming = wet(0.6) || wet(0.05);
+    // Dans l'eau : on marche ralenti dans les hauts-fonds, on nage en surface (la tête dehors),
+    // on plonge avec Ctrl et on nage alors dans la direction du regard.
+    use shared::swim::{FLOAT_HEIGHT, Immersion, immersion, surface_above};
+    let water = immersion(player.position, |p| world.block(p));
+    player.immersion = water;
+    player.swimming = water.swimming();
     let skills = player.skills();
-    let speed = if player.swimming {
-        speed * SWIM_FACTOR * skills.swim_speed
-    } else {
-        speed
-    };
     let health_part = player.health / skills.max_health;
-    let speed = speed * player.buffs.effects().speed * skills.move_speed(health_part);
-    let wish = Quat::from_rotation_y(player.yaw) * wish.normalize_or_zero() * speed;
-
+    let boost = player.buffs.effects().speed * skills.move_speed(health_part);
     let dt = time.delta_secs().min(0.05);
-    let control = if player.on_ground || player.swimming { 1.0 } else { 0.25 };
-    let horizontal = Vec3::new(player.velocity.x, 0.0, player.velocity.z);
-    let target = Vec3::new(wish.x, 0.0, wish.z);
-    let new_horizontal = horizontal.lerp(target, (control * 15.0 * dt).min(1.0));
-    let mut velocity = Vec3::new(new_horizontal.x, player.velocity.y, new_horizontal.z);
-    if player.swimming {
-        // La poussée d'Archimède compense presque la gravité appliquée par `step_body`.
-        velocity.y += GRAVITY * 0.85 * dt;
-        velocity.y = if pressed(KeyCode::Space) {
-            SWIM_UP_SPEED
+    let mut velocity = player.velocity;
+    if player.swimming && player.mounted.is_none() {
+        let crawl = pressed(KeyCode::ShiftLeft);
+        let speed = if crawl { CRAWL_SPEED } else { SWIM_SPEED } * skills.swim_speed * boost;
+        let up = pressed(KeyCode::Space);
+        let down = pressed(KeyCode::ControlLeft) || pressed(KeyCode::ControlRight);
+        // Sous l'eau, on avance là où l'on regarde ; en surface, à plat.
+        let pitch = if water == Immersion::Under { player.pitch } else { 0.0 };
+        let forward = Quat::from_euler(EulerRot::YXZ, player.yaw, pitch, 0.0) * Vec3::NEG_Z;
+        let right = Quat::from_rotation_y(player.yaw) * Vec3::X;
+        let mut target = (forward * -wish.z + right * wish.x).normalize_or_zero() * speed;
+        let surface = surface_above(player.position, |p| world.block(p));
+        target.y += if up {
+            DIVE_SPEED
+        } else if down {
+            -DIVE_SPEED
+        } else if let Some(top) = surface.filter(|_| water == Immersion::Surface) {
+            // Flotte : le menton reste à fleur d'eau, avec un léger roulis.
+            let bob = (time.elapsed_secs() * 2.2).sin() * 0.06;
+            ((top - FLOAT_HEIGHT + bob - player.position.y) * 4.0).clamp(-2.0, 2.0)
         } else {
-            velocity.y.clamp(-SINK_SPEED, SWIM_UP_SPEED)
+            // Les poumons pleins font doucement remonter.
+            0.5
         };
-    } else if player.on_ground && pressed(KeyCode::Space) {
-        velocity.y = JUMP_SPEED * skills.jump.sqrt();
+        // Se hisser sur la rive : en surface, en poussant vers un bord d'un bloc.
+        if water != Immersion::Under && wish.z < 0.0 {
+            let ahead = player.position + Quat::from_rotation_y(player.yaw) * Vec3::NEG_Z * 0.6;
+            let bank = (ahead + Vec3::Y * 1.0).floor().as_ivec3();
+            if world.is_solid(bank) && !world.is_solid(bank + IVec3::Y) && !world.is_solid(bank + IVec3::Y * 2) {
+                target.y = SWIM_UP_SPEED;
+            }
+        }
+        // L'eau freine : la vitesse rejoint la cible en douceur (et compense la gravité).
+        let k = (6.0 * dt).min(1.0);
+        velocity = velocity.lerp(target, k);
+        velocity.y += GRAVITY * dt;
+    } else {
+        let speed = if water == Immersion::Wading {
+            speed * WADE_FACTOR
+        } else {
+            speed
+        } * boost;
+        let wish = Quat::from_rotation_y(player.yaw) * wish.normalize_or_zero() * speed;
+        let control = if player.on_ground { 1.0 } else { 0.25 };
+        let horizontal = Vec3::new(velocity.x, 0.0, velocity.z);
+        let target = Vec3::new(wish.x, 0.0, wish.z);
+        let new_horizontal = horizontal.lerp(target, (control * 15.0 * dt).min(1.0));
+        velocity = Vec3::new(new_horizontal.x, velocity.y, new_horizontal.z);
+        if player.on_ground && pressed(KeyCode::Space) {
+            velocity.y = JUMP_SPEED * skills.jump.sqrt();
+        }
     }
 
     // Tant que le terrain sous le joueur n'est pas connu, il ne tombe pas dans le vide.

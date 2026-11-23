@@ -1025,6 +1025,7 @@ fn player_survival(
         let temp_before = (player.body_temp * 10.0).round();
         let felt_before = player.felt.round();
         let infection_before = player.infection.ceil();
+        let breath_before = player.breath.ceil();
 
         // Température : l'air autour, les vêtements, puis le corps qui suit lentement.
         let around = surroundings(&world, player.state.position, clock.0.is_night());
@@ -1038,6 +1039,12 @@ fn player_survival(
         let (warmth, cooling) = player.inventory.clothing();
         player.felt = felt(air, warmth, cooling);
         player.body_temp = shared::climate::step_body(player.body_temp, player.felt, dt);
+
+        // Souffle : il baisse la tête sous l'eau, revient vite à l'air libre.
+        let under =
+            shared::swim::immersion(player.state.position, |p| world.block(p)) == shared::swim::Immersion::Under;
+        let capacity = shared::swim::BREATH_SECS * skills.breath;
+        player.breath = shared::swim::step_breath(player.breath.min(capacity), under, capacity, dt);
 
         if player.infection > 0.0 {
             player.infection =
@@ -1056,7 +1063,9 @@ fn player_survival(
         } else {
             0.0
         };
-        let deprived = if player.hunger <= 0.0 {
+        let deprived = if under && player.breath <= 0.0 {
+            Some((shared::swim::DROWN_DPS, "Noyé"))
+        } else if player.hunger <= 0.0 {
             Some((STARVATION_DPS, "Mort de faim"))
         } else if player.thirst <= 0.0 {
             Some((DEHYDRATION_DPS, "Mort de soif"))
@@ -1075,6 +1084,7 @@ fn player_survival(
                 || (p.body_temp * 10.0).round() != temp_before
                 || p.felt.round() != felt_before
                 || p.infection.ceil() != infection_before
+                || p.breath.ceil() != breath_before
         };
         if let Some((dps, cause)) = deprived {
             let since_hit = player.since_hit;
@@ -1381,6 +1391,36 @@ mod climate_tests {
             app.update();
         }
         app.world().resource::<Lobby>().players[&1].clone()
+    }
+
+    #[test]
+    fn a_player_held_underwater_runs_out_of_breath_and_drowns() {
+        let world = GameWorld(WorldState::new(WorldConfig::default()));
+        let g = world.generator();
+        let level = g.water_level().expect("le monde par défaut a des lacs");
+        let size = g.config().size_blocks();
+        let (x, z) = (8..size - 8)
+            .step_by(3)
+            .flat_map(|x| (8..size - 8).step_by(3).map(move |z| (x, z)))
+            .find(|(x, z)| g.surface_height(*x, *z) + 4 < level)
+            .expect("un lac assez profond");
+        let position = Vec3::new(x as f32 + 0.5, g.surface_height(x, z) as f32, z as f32 + 0.5);
+        let mut player = ConnectedPlayer::new(position);
+        player.name = "Alice".into();
+        let mut lobby = Lobby::default();
+        lobby.players.insert(1, player);
+        let mut app = App::new();
+        app.insert_resource(world)
+            .insert_resource(lobby)
+            .insert_resource(Clock(GameTime { day: 1, phase: 0.3 }))
+            .init_resource::<Time>()
+            .add_systems(Update, player_survival);
+        let player = run(&mut app, 15.0);
+        assert!(player.breath > 0.0 && player.breath < shared::swim::BREATH_SECS);
+        assert_eq!(player.health, crate::net::MAX_HEALTH);
+        let player = run(&mut app, 10.0);
+        assert_eq!(player.breath, 0.0);
+        assert!(player.health < crate::net::MAX_HEALTH);
     }
 
     #[test]

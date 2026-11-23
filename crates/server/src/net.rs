@@ -88,6 +88,8 @@ pub struct ConnectedPlayer {
     pub progress: shared::skills::Progress,
     /// Temps avant que « Second souffle » puisse de nouveau sauver le joueur.
     pub second_wind: f32,
+    /// Souffle restant sous l'eau, en secondes.
+    pub breath: f32,
 }
 
 /// Durée après avoir levé la garde pendant laquelle un coup est paré.
@@ -150,6 +152,7 @@ impl ConnectedPlayer {
             home: None,
             progress: shared::skills::Progress::default(),
             second_wind: 0.0,
+            breath: shared::swim::BREATH_SECS,
         }
     }
 
@@ -224,6 +227,7 @@ pub fn send_vitals(server: &mut RenetServer, client: ClientId, player: &Connecte
             body_temp: player.body_temp,
             felt: player.felt,
             infection: player.infection,
+            breath: player.breath,
         },
     );
 }
@@ -754,6 +758,7 @@ fn handle_reliable(
                 player.thirst = player.thirst.max(MAX_THIRST * 0.5);
                 player.body_temp = shared::climate::BODY_NORMAL;
                 player.infection = 0.0;
+                player.breath = shared::swim::BREATH_SECS;
                 player.since_hit = 0.0;
                 player.state.position = at;
                 send(server, client, &ServerMessage::Teleport { position: at });

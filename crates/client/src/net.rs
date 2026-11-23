@@ -106,6 +106,7 @@ pub enum NetEvent {
         body_temp: f32,
         felt: f32,
         infection: f32,
+        breath: f32,
     },
     Inventory(shared::item::Inventory),
     Deposit {
@@ -395,6 +396,7 @@ fn receive_messages(
                 body_temp,
                 felt,
                 infection,
+                breath,
             } => {
                 events.write(NetEvent::Vitals {
                     health,
@@ -403,6 +405,7 @@ fn receive_messages(
                     body_temp,
                     felt,
                     infection,
+                    breath,
                 });
             }
             ServerMessage::Buffs(buffs) => {

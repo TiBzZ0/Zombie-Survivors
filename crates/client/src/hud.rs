@@ -546,8 +546,10 @@ fn update_status(
     } else if player.aimed_water.is_some() && !player.held().is_some_and(|i| matches!(i, shared::item::Item::Block(_)))
     {
         "Clic droit : boire".into()
+    } else if player.immersion == shared::swim::Immersion::Under {
+        "Sous l'eau · Espace : remonter · Ctrl : descendre · Maj : nager vite".into()
     } else if player.swimming {
-        "Vous nagez · Espace : remonter".into()
+        "Vous nagez · Maj : crawl · Ctrl : plonger · avancer vers la rive pour sortir".into()
     } else if let Some(t) = player.held().and_then(|i| i.throwable()) {
         let blocks = if t.blast_blocks > 0.0 {
             ", détruit les blocs"
