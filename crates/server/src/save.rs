@@ -19,9 +19,20 @@ use crate::daynight::Clock;
 use crate::net::{ConnectedPlayer, Lobby, WorldVersion};
 use crate::world::{Chests, Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
+use shared::skills::Progress;
 
 /// Change si le format du fichier change de façon incompatible.
-pub const SAVE_VERSION: u32 = 9;
+pub const SAVE_VERSION: u32 = 10;
+/// Expérience donnée aux joueurs des sauvegardes d'avant les compétences (niveau 6).
+pub const LEGACY_XP: u32 = {
+    let mut xp = 0;
+    let mut level = 1;
+    while level < 6 {
+        xp += shared::skills::xp_for_next(level);
+        level += 1;
+    }
+    xp
+};
 /// Intervalle entre deux sauvegardes automatiques, en secondes.
 const AUTOSAVE_SECS: f32 = 60.0;
 const FILE_NAME: &str = "world.sav";
@@ -48,6 +59,9 @@ pub struct SavedPlayer {
     /// Infection : enregistrée à part, à la fin du fichier (depuis la version 8).
     #[serde(skip)]
     pub infection: f32,
+    /// Expérience et compétences : enregistrées à part, à la fin du fichier (depuis la version 10).
+    #[serde(skip)]
+    pub progress: Progress,
 }
 
 impl SavedPlayer {
@@ -59,6 +73,7 @@ impl SavedPlayer {
             inventory: player.inventory.clone(),
             thirst: player.thirst,
             infection: player.infection,
+            progress: player.progress.clone(),
         }
     }
 }
@@ -81,6 +96,7 @@ impl From<SavedPlayerV6> for SavedPlayer {
             inventory: p.inventory,
             thirst: crate::net::MAX_THIRST,
             infection: 0.0,
+            progress: Progress::default(),
         }
     }
 }
@@ -204,6 +220,8 @@ pub struct SaveFile {
     pub infections: Vec<(String, f32)>,
     /// Bannières plantées et leur propriétaire (depuis la version 9).
     pub claims: Vec<(IVec3, String)>,
+    /// Expérience et compétences des joueurs (depuis la version 10).
+    pub progress: Vec<(String, Progress)>,
 }
 
 pub fn save_path(data_dir: &Path) -> PathBuf {
@@ -257,7 +275,12 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
     } else {
         (Vec::new(), rest)
     };
-    let claims: Vec<(IVec3, String)> = if version >= 9 {
+    let (claims, rest): (Vec<(IVec3, String)>, &[u8]) = if version >= 9 {
+        postcard::take_from_bytes(rest).map_err(invalid)?
+    } else {
+        (Vec::new(), rest)
+    };
+    let progress: Vec<(String, Progress)> = if version >= 10 {
         postcard::take_from_bytes(rest).map_err(invalid)?.0
     } else {
         Vec::new()
@@ -267,6 +290,12 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
         if let Some((_, amount)) = infections.iter().find(|(n, _)| n == name) {
             player.infection = *amount;
         }
+        if let Some((_, p)) = progress.iter().find(|(n, _)| n == name) {
+            player.progress = p.clone();
+        } else if version < 10 {
+            // Les joueurs d'avant les compétences repartent avec de quoi débloquer l'essentiel.
+            player.progress.xp = LEGACY_XP;
+        }
     }
     if version > SAVE_VERSION {
         return Err(io::Error::new(
@@ -274,6 +303,7 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
             format!("sauvegarde de version {version}, plus récente que ce serveur"),
         ));
     }
+    let progress = players.iter().map(|(n, p)| (n.clone(), p.progress.clone())).collect();
     let save = SaveFile {
         version: SAVE_VERSION,
         world,
@@ -285,6 +315,7 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
         survivors,
         infections,
         claims,
+        progress,
     };
     Ok(Some(save))
 }
@@ -318,6 +349,11 @@ fn snapshot(
     edits.sort_by_key(|(p, _)| (p.x, p.y, p.z));
     let mut players: Vec<_> = players.into_iter().collect();
     players.sort_by(|a, b| a.0.cmp(&b.0));
+    let progress = players
+        .iter()
+        .filter(|(_, p)| p.progress != Progress::default())
+        .map(|(name, p)| (name.clone(), p.progress.clone()))
+        .collect();
     let infections = players
         .iter()
         .filter(|(_, p)| p.infection > 0.0)
@@ -342,6 +378,7 @@ fn snapshot(
             claims.sort_by_key(|(p, _)| (p.x, p.y, p.z));
             claims
         },
+        progress,
     }
 }
 
@@ -428,6 +465,7 @@ fn save_on_shutdown(
 mod tests {
     use super::*;
     use shared::item::Item;
+    use shared::skills::Skill;
 
     fn loaded_fields(dir: &Path) -> SaveFile {
         load(dir).unwrap().unwrap()
@@ -454,6 +492,10 @@ mod tests {
                     inventory,
                     thirst: 40.0,
                     infection: 30.0,
+                    progress: Progress {
+                        xp: 500,
+                        skills: [(Skill::Brawler, 2)].into_iter().collect(),
+                    },
                 },
             )],
             deposits: vec![(IVec3::new(4, 5, 6), 7)],
@@ -471,6 +513,13 @@ mod tests {
             }],
             infections: vec![("Alice".into(), 30.0)],
             claims: vec![(IVec3::new(5, 40, 5), "Alice".into())],
+            progress: vec![(
+                "Alice".into(),
+                Progress {
+                    xp: 500,
+                    skills: [(Skill::Brawler, 2)].into_iter().collect(),
+                },
+            )],
         };
         write(&dir, &save).unwrap();
         assert_eq!(load(&dir).unwrap(), Some(save));

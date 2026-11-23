@@ -45,7 +45,8 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | F11 | Plein écran |
 | `T` | Écrire dans la discussion (Entrée pour envoyer) |
 | `1` à `9`, molette | Choisir l'objet en main |
-| `C` ou `Tab` | Fabrication et inventaire : survoler une icône pour le détail, cliquer pour fabriquer ou ranger l'objet dans la case choisie |
+| `C` ou `Tab` | Fabrication par rubriques (composants, atelier et palier technologique requis) et inventaire : glisser un objet sur la barre, ou le survoler et presser 1 à 9 |
+| `K` | Arbre de compétences : 28 compétences en 5 branches et 4 paliers, un point par niveau (l'expérience vient des zombies tués et des nuits survécues) |
 | Entrée | Réapparaître après la mort |
 
 ### Survivre

@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0019;
+pub const PROTOCOL_ID: u64 = 0x5A53_001A;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -77,6 +77,12 @@ pub enum ClientMessage {
     Rest {
         pos: IVec3,
     },
+    /// Dépense un point de compétence.
+    LearnSkill {
+        skill: crate::skills::Skill,
+    },
+    /// Rend tous les points de compétence pour les répartir autrement.
+    ResetSkills,
     /// Ouvre un coffre : le serveur répond avec son contenu et le tient à jour.
     OpenChest {
         pos: IVec3,
@@ -306,6 +312,8 @@ pub enum ServerMessage {
     },
     /// Effets temporaires actifs du joueur (café, bière...).
     Buffs(crate::buff::Buffs),
+    /// Expérience et compétences du joueur.
+    Progress(crate::skills::Progress),
     /// Contenu complet de l'inventaire après un changement.
     Inventory(Inventory),
     /// Contenu d'un coffre ouvert, après chaque changement.

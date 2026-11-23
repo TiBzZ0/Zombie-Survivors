@@ -481,6 +481,11 @@ impl Recipe {
         Category::of(self.output)
     }
 
+    /// Palier technologique à avoir débloqué pour fabriquer la recette.
+    pub fn tech(&self) -> crate::skills::Tech {
+        crate::skills::Tech::of(self.output)
+    }
+
     pub fn can_craft(&self, inventory: &Inventory) -> bool {
         self.inputs.iter().all(|(item, n)| inventory.has(*item, *n))
     }

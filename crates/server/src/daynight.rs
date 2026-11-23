@@ -21,8 +21,14 @@ impl Plugin for DayNightPlugin {
 #[derive(Resource, Debug, Clone, Copy, Deref)]
 pub struct Clock(pub GameTime);
 
-fn advance_clock(time: Res<Time>, mut clock: ResMut<Clock>, server: Option<ResMut<RenetServer>>) {
+fn advance_clock(
+    time: Res<Time>,
+    mut clock: ResMut<Clock>,
+    mut server: Option<ResMut<RenetServer>>,
+    lobby: Option<ResMut<crate::net::Lobby>>,
+) {
     let was_night = clock.0.is_night();
+    let horde = clock.0.is_horde_night();
     clock.0.advance(time.delta_secs());
     let is_night = clock.0.is_night();
     if was_night == is_night {
@@ -36,7 +42,17 @@ fn advance_clock(time: Res<Time>, mut clock: ResMut<Clock>, server: Option<ResMu
         format!("L'aube du jour {} se lève. Les zombies brûlent.", clock.0.day)
     };
     info!("{text}");
-    if let Some(mut server) = server {
+    // Chaque nuit traversée vivant rapporte de l'expérience (le double après une grande horde).
+    if !is_night && let Some(mut lobby) = lobby {
+        let xp = shared::skills::NIGHT_SURVIVED_XP * if horde { 2 } else { 1 };
+        for (id, player) in lobby.players.iter_mut().filter(|(_, p)| p.is_alive()) {
+            player.progress.add_xp(xp);
+            if let Some(server) = server.as_deref_mut() {
+                crate::net::send_progress(server, *id, player);
+            }
+        }
+    }
+    if let Some(server) = server.as_deref_mut() {
         server.broadcast_message(
             DefaultChannel::ReliableOrdered,
             encode(&ServerMessage::Chat {

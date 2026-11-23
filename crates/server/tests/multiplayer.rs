@@ -466,6 +466,7 @@ fn bow_shoots_and_uses_arrows() {
                 inventory,
                 thirst: 30.0,
                 infection: 0.0,
+                progress: Default::default(),
             },
         )],
         deposits: Vec::new(),
@@ -473,6 +474,7 @@ fn bow_shoots_and_uses_arrows() {
         survivors: Vec::new(),
         infections: Vec::new(),
         claims: Vec::new(),
+        progress: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
 
@@ -600,6 +602,7 @@ fn doors_chests_and_chat() {
                 inventory,
                 thirst: 100.0,
                 infection: 0.0,
+                progress: Default::default(),
             },
         )],
         deposits: Vec::new(),
@@ -607,6 +610,7 @@ fn doors_chests_and_chat() {
         survivors: Vec::new(),
         infections: Vec::new(),
         claims: Vec::new(),
+        progress: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {
@@ -748,6 +752,7 @@ fn survivors_are_recruited_and_given_orders() {
                 inventory,
                 thirst: 100.0,
                 infection: 0.0,
+                progress: Default::default(),
             },
         )],
         deposits: Vec::new(),
@@ -755,6 +760,7 @@ fn survivors_are_recruited_and_given_orders() {
         survivors: vec![wild("Marie"), wild("Lucas")],
         infections: Vec::new(),
         claims: Vec::new(),
+        progress: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {
@@ -950,6 +956,7 @@ fn pvp_hurts_other_players_except_at_home() {
                 inventory,
                 thirst: 100.0,
                 infection: 0.0,
+                progress: Default::default(),
             },
         )],
         deposits: Vec::new(),
@@ -957,6 +964,7 @@ fn pvp_hurts_other_players_except_at_home() {
         survivors: Vec::new(),
         infections: Vec::new(),
         claims: Vec::new(),
+        progress: Vec::new(),
     };
     server::save::write(&data_dir, &save).unwrap();
     let config = ServerConfig {

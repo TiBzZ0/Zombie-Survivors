@@ -80,6 +80,10 @@ struct ComponentText(usize);
 #[derive(Component)]
 struct StationText;
 
+/// Palier technologique de la recette choisie.
+#[derive(Component)]
+struct TechText;
+
 /// Bouton « Fabriquer » (1) ou « ×5 » (5).
 #[derive(Component)]
 struct CraftButton(u32);
@@ -131,7 +135,7 @@ fn station_ok(recipe: &Recipe, player: &LocalPlayer, world: Option<&ClientWorld>
 }
 
 fn craftable(recipe: &Recipe, player: &LocalPlayer, world: Option<&ClientWorld>) -> bool {
-    recipe.can_craft(&player.inventory) && station_ok(recipe, player, world)
+    recipe.can_craft(&player.inventory) && station_ok(recipe, player, world) && player.progress.has_tech(recipe.tech())
 }
 
 /// Combien de fois on peut fabriquer la recette avec l'inventaire actuel.
@@ -386,6 +390,7 @@ fn spawn_panel(mut commands: Commands, mut icons: ResMut<ItemIcons>, mut images:
         StationText,
         ChildOf(detail),
     ));
+    commands.spawn((label("", 15.0), TechText, ChildOf(detail)));
     commands.spawn((
         Node {
             column_gap: px(8),
@@ -486,8 +491,15 @@ fn update_panel(
         });
     }
     for (icon, mut image) in &mut icons {
-        let ok = craftable(&RECIPES[icon.0], &player, world.as_deref());
-        image.color = Color::srgba(1.0, 1.0, 1.0, if ok { 1.0 } else { 0.4 });
+        let recipe = &RECIPES[icon.0];
+        // Recette d'un palier technologique pas encore appris : icône rougie.
+        image.color = if !player.progress.has_tech(recipe.tech()) {
+            Color::srgba(0.9, 0.35, 0.3, 0.35)
+        } else if craftable(recipe, &player, world.as_deref()) {
+            Color::WHITE
+        } else {
+            Color::srgba(1.0, 1.0, 1.0, 0.4)
+        };
     }
     for (tab, over, mut color, mut border) in &mut tabs {
         let current = tab.0 == view.category;
@@ -515,6 +527,7 @@ fn update_detail(
         Single<&mut Text, With<DetailText>>,
         Single<(&mut Text, &mut TextColor), With<StationText>>,
         Query<(&ComponentText, &mut Text, &mut TextColor)>,
+        Single<(&mut Text, &mut TextColor), With<TechText>>,
     )>,
     mut rows: Query<(&ComponentRow, &mut Node)>,
     mut component_icons: Query<(&ComponentIcon, &mut ImageNode), Without<DetailIcon>>,
@@ -552,6 +565,26 @@ fn update_detail(
             }
             None => {
                 text.0 = "À la main, sans atelier".into();
+                color.0 = DIM;
+            }
+        }
+    }
+    {
+        // Palier technologique : une compétence de la branche Technologie à apprendre.
+        let mut tech_text = texts.p4();
+        let (text, color) = &mut *tech_text;
+        let tech = recipe.tech();
+        match tech.skill() {
+            Some(_) if player.progress.has_tech(tech) => {
+                text.0 = format!("Palier {} : maîtrisé", tech.name());
+                color.0 = GOOD;
+            }
+            Some(skill) => {
+                text.0 = format!("Palier {} : apprenez « {} » (K)", tech.name(), skill.info().name);
+                color.0 = BAD;
+            }
+            None => {
+                text.0 = "Palier primitif".into();
                 color.0 = DIM;
             }
         }
