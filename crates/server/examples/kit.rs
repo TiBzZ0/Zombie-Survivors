@@ -48,6 +48,14 @@ fn main() {
         (Item::Ration, 5),
         (Item::Flask, 1),
         (Item::WaterFlask, 2),
+        (Item::Berries, 6),
+        (Item::Herb, 6),
+        (Item::CarrotSeeds, 8),
+        (Item::Carrot, 4),
+        (Item::Coffee, 2),
+        (Item::Beer, 2),
+        (Item::HerbalTea, 2),
+        (Item::Stew, 2),
     ] {
         inventory.add(item, n);
     }

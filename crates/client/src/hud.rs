@@ -17,7 +17,15 @@ impl Plugin for HudPlugin {
             .add_systems(OnExit(AppState::Playing), despawn_hud)
             .add_systems(
                 Update,
-                (collect_chat, update_hud, update_condition, update_status, draw_target)
+                (
+                    collect_chat,
+                    update_hud,
+                    update_condition,
+                    update_status,
+                    update_buffs,
+                    update_buff_labels,
+                    draw_target,
+                )
                     .run_if(in_state(AppState::Playing)),
             );
     }
@@ -25,6 +33,14 @@ impl Plugin for HudPlugin {
 
 #[derive(Component)]
 struct HudRoot;
+
+/// Rangée des pastilles d'effets temporaires.
+#[derive(Component)]
+struct BuffBar;
+
+/// Une pastille déjà affichée (pour la rafraîchir).
+#[derive(Component)]
+struct BuffPip(shared::buff::Buff);
 
 /// Température et infection, au-dessus de la barre de vie.
 #[derive(Component)]
@@ -71,13 +87,17 @@ struct DeathText;
 struct ChatLog(Vec<(f32, String)>);
 
 fn text(value: &str, size: f32) -> impl Bundle {
+    colored_text(value, size, Color::WHITE)
+}
+
+fn colored_text(value: &str, size: f32, color: Color) -> impl Bundle {
     (
         Text::new(value),
         TextFont {
             font_size: FontSize::Px(size),
             ..default()
         },
-        TextColor(Color::WHITE),
+        TextColor(color),
         TextShadow::default(),
     )
 }
@@ -229,6 +249,20 @@ fn spawn_hud(mut commands: Commands, mut chat: ResMut<ChatLog>) {
                 },
                 Pickable::IGNORE,
                 children![(text("", 16.0), HintText)],
+            ),
+            // Effets temporaires (café, bière...), en bas à droite au-dessus de la barre.
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: px(16),
+                    bottom: px(84),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::FlexEnd,
+                    row_gap: px(4),
+                    ..default()
+                },
+                Pickable::IGNORE,
+                BuffBar,
             ),
             // Voile rouge quand on est touché.
             (
@@ -571,5 +605,62 @@ fn update_condition(player: Res<LocalPlayer>, mut text: Single<(&mut Text, &mut 
     }
     if text.1.0 != color {
         text.1.0 = color;
+    }
+}
+
+/// Affiche une pastille par effet actif, avec son nom et le temps restant.
+fn update_buffs(
+    mut commands: Commands,
+    player: Res<LocalPlayer>,
+    bar: Single<Entity, With<BuffBar>>,
+    pips: Query<(Entity, &BuffPip)>,
+) {
+    use std::collections::HashSet;
+    let active: HashSet<shared::buff::Buff> = player.buffs.0.iter().map(|(b, _)| *b).collect();
+    // Retire les pastilles des effets expirés.
+    for (entity, pip) in &pips {
+        if !active.contains(&pip.0) {
+            commands.entity(entity).despawn();
+        }
+    }
+    // Ajoute celles qui manquent, dans l'ordre fixe.
+    let shown: HashSet<shared::buff::Buff> = pips.iter().map(|(_, p)| p.0).collect();
+    for buff in shared::buff::ALL_BUFFS {
+        if active.contains(&buff) && !shown.contains(&buff) {
+            let [r, g, b] = buff.color();
+            commands.spawn((
+                BuffPip(buff),
+                Node {
+                    padding: UiRect::axes(px(8), px(3)),
+                    border: px(2).all(),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+                BorderColor::from(Color::srgb(r, g, b)),
+                Pickable::IGNORE,
+                children![(colored_text("", 14.0, Color::srgb(r, g, b)), BuffLabel(buff))],
+                ChildOf(*bar),
+            ));
+        }
+    }
+}
+
+#[derive(Component)]
+struct BuffLabel(shared::buff::Buff);
+
+/// Met à jour le texte de chaque pastille (nom et secondes restantes).
+fn update_buff_labels(player: Res<LocalPlayer>, mut labels: Query<(&BuffLabel, &mut Text)>) {
+    for (label, mut text) in &mut labels {
+        let left = player
+            .buffs
+            .0
+            .iter()
+            .find(|(b, _)| *b == label.0)
+            .map(|(_, t)| *t)
+            .unwrap_or(0.0);
+        let value = format!("{} · {}s", label.0.name(), left.ceil() as i32);
+        if text.0 != value {
+            text.0 = value;
+        }
     }
 }

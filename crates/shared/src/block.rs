@@ -96,6 +96,12 @@ pub enum Block {
     BirchSapling,
     PineSapling,
     AppleSapling,
+    /// Jeune carotte, semée (première étape).
+    CarrotSprout,
+    /// Carotte en croissance.
+    CarrotPlant,
+    /// Carotte mûre, à récolter.
+    RipeCarrot,
 }
 
 /// Rayon (à l'horizontale, sur toute la hauteur) de la base protégée par une bannière.
@@ -186,7 +192,20 @@ impl Block {
 
     /// Culture qui pousse sur la terre.
     pub const fn is_crop(self) -> bool {
-        matches!(self, Block::Sprout | Block::YoungWheat | Block::RipeWheat)
+        matches!(
+            self,
+            Block::Sprout
+                | Block::YoungWheat
+                | Block::RipeWheat
+                | Block::CarrotSprout
+                | Block::CarrotPlant
+                | Block::RipeCarrot
+        )
+    }
+
+    /// Culture arrivée à maturité, prête à récolter.
+    pub const fn is_ripe_crop(self) -> bool {
+        matches!(self, Block::RipeWheat | Block::RipeCarrot)
     }
 
     /// Un bloc opaque est un cube plein : il cache les faces de ses voisins.
@@ -294,6 +313,8 @@ impl Block {
             Block::Sprout => Some(([0.2, 0.0, 0.2], [0.8, 0.25, 0.8])),
             Block::FallenFruit | Block::RottenFruit => Some(([0.35, 0.0, 0.35], [0.65, 0.3, 0.65])),
             Block::YoungWheat => Some(([0.12, 0.0, 0.12], [0.88, 0.55, 0.88])),
+            Block::CarrotSprout => Some(([0.25, 0.0, 0.25], [0.75, 0.3, 0.75])),
+            Block::CarrotPlant | Block::RipeCarrot => Some(([0.15, 0.0, 0.15], [0.85, 0.5, 0.85])),
             Block::RipeWheat => Some(([0.08, 0.0, 0.08], [0.92, 0.85, 0.92])),
             Block::Campfire => Some(([0.1, 0.0, 0.1], [0.9, 0.4, 0.9])),
             _ => None,
@@ -354,6 +375,9 @@ impl Block {
             Block::FallenFruit => [0.8, 0.15, 0.12],
             Block::RottenFruit => [0.35, 0.25, 0.12],
             Block::OakSapling | Block::AppleSapling => [0.3, 0.55, 0.22],
+            Block::CarrotSprout => [0.4, 0.7, 0.3],
+            Block::CarrotPlant => [0.45, 0.7, 0.3],
+            Block::RipeCarrot => [0.5, 0.68, 0.28],
             Block::BirchSapling => [0.45, 0.65, 0.3],
             Block::PineSapling => [0.15, 0.38, 0.2],
         }
@@ -410,6 +434,9 @@ impl Block {
             Block::BirchSapling => "Pousse de bouleau",
             Block::PineSapling => "Pousse de sapin",
             Block::AppleSapling => "Pousse de pommier",
+            Block::CarrotSprout => "Jeune carotte",
+            Block::CarrotPlant => "Carotte",
+            Block::RipeCarrot => "Carotte mûre",
         }
     }
 
@@ -442,6 +469,7 @@ impl Block {
             Block::Cannon => 400,
             Block::Catapult => 260,
             Block::Sprout | Block::YoungWheat | Block::RipeWheat => 4,
+            Block::CarrotSprout | Block::CarrotPlant | Block::RipeCarrot => 4,
             Block::TallGrass | Block::FallenFruit | Block::RottenFruit => 2,
             Block::BirchWood | Block::PineWood => 80,
             Block::BirchLeaves | Block::PineLeaves | Block::FruitLeaves | Block::RipeFruitLeaves => 10,
