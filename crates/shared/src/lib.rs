@@ -19,6 +19,7 @@ pub mod physics;
 pub mod protocol;
 pub mod raycast;
 pub mod skills;
+pub mod stamina;
 pub mod structure;
 pub mod survivor;
 pub mod swim;

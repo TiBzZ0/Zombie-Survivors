@@ -135,6 +135,8 @@ pub struct LocalPlayer {
     pub progress: shared::skills::Progress,
     /// Arbre de compétences ouvert (touche K).
     pub skills_open: bool,
+    /// Endurance : course, sauts et coups la consomment.
+    pub stamina: shared::stamina::Stamina,
     /// Objets déjà vus dans l'inventaire : seuls les nouveaux venus prennent une case libre
     /// de la barre (une case vidée à la main le reste).
     known: std::collections::BTreeSet<Item>,
@@ -164,6 +166,11 @@ impl LocalPlayer {
     /// Santé maximale, compétences comprises.
     pub fn max_health(&self) -> f32 {
         self.skills().max_health
+    }
+
+    /// Endurance maximale : la compétence Vitesse l'agrandit.
+    pub fn max_stamina(&self) -> f32 {
+        shared::stamina::MAX_STAMINA * (1.0 + (self.skills().speed - 1.0) * 2.5)
     }
 
     /// Objet de la case sélectionnée, s'il en reste.
@@ -419,11 +426,11 @@ fn move_player(
     if pressed(KeyCode::KeyD) {
         wish.x += 1.0;
     }
-    let speed = if pressed(KeyCode::ShiftLeft) {
-        SPRINT_SPEED
-    } else {
-        WALK_SPEED
-    };
+    use shared::stamina::{JUMP_COST, SPRINT_COST};
+    let dt = time.delta_secs().min(0.05);
+    let moving = wish != Vec3::ZERO;
+    let sprinting = pressed(KeyCode::ShiftLeft) && moving && player.stamina.can(SPRINT_COST * dt);
+    let speed = if sprinting { SPRINT_SPEED } else { WALK_SPEED };
     // Garde levée : on avance à petits pas ; aux commandes d'une arme fixe, on ne bouge plus.
     let speed = if player.mounted.is_some() {
         0.0
@@ -441,10 +448,16 @@ fn move_player(
     let skills = player.skills();
     let health_part = player.health / skills.max_health;
     let boost = player.buffs.effects().speed * skills.move_speed(health_part);
-    let dt = time.delta_secs().min(0.05);
+    // L'endurance remonte au repos, moins vite en nageant ; la compétence Vitesse l'agrandit.
+    let max_stamina = player.max_stamina();
+    let spent = sprinting && player.mounted.is_none() && player.stamina.spend(SPRINT_COST * dt);
+    if !spent {
+        let rate = if player.swimming { 0.5 } else { 1.0 };
+        player.stamina.recover(dt, max_stamina, rate);
+    }
     let mut velocity = player.velocity;
     if player.swimming && player.mounted.is_none() {
-        let crawl = pressed(KeyCode::ShiftLeft);
+        let crawl = sprinting;
         let speed = if crawl { CRAWL_SPEED } else { SWIM_SPEED } * skills.swim_speed * boost;
         let up = pressed(KeyCode::Space);
         let down = pressed(KeyCode::ControlLeft) || pressed(KeyCode::ControlRight);
@@ -491,7 +504,9 @@ fn move_player(
         let new_horizontal = horizontal.lerp(target, (control * 15.0 * dt).min(1.0));
         velocity = Vec3::new(new_horizontal.x, velocity.y, new_horizontal.z);
         if player.on_ground && pressed(KeyCode::Space) {
-            velocity.y = JUMP_SPEED * skills.jump.sqrt();
+            // Épuisé, le saut est plus court.
+            let tired = if player.stamina.spend(JUMP_COST) { 1.0 } else { 0.8 };
+            velocity.y = JUMP_SPEED * skills.jump.sqrt() * tired;
         }
     }
 
@@ -600,6 +615,23 @@ fn interact(
     }
     if guard {
         player.mining = None;
+        // Coup puissant depuis la garde : clic gauche, il coûte beaucoup d'endurance.
+        use shared::stamina::{POWER_COST, POWER_STRENGTH};
+        let melee = Item::melee(player.held());
+        if mouse.just_pressed(MouseButton::Left)
+            && player.cooldown <= 0.0
+            && let Some((id, _)) = aimed_zombie(player.eye(), player.look_direction(), melee.reach, &zombies)
+            && player.stamina.spend(POWER_COST)
+        {
+            send_reliable(
+                &mut client,
+                &ClientMessage::Attack {
+                    zombie: id,
+                    strength: POWER_STRENGTH,
+                },
+            );
+            player.cooldown = melee.cooldown * 1.4;
+        }
         return;
     }
     if !cursor_locked(&cursor) || player.dead.is_some() || !mouse.pressed(MouseButton::Left) {
@@ -647,7 +679,14 @@ fn interact(
         {
             player.mining = None;
             if player.cooldown <= 0.0 {
-                send_reliable(&mut client, &ClientMessage::Attack { zombie: id });
+                // À bout de souffle, les coups portent moins.
+                use shared::stamina::{ATTACK_COST, TIRED_STRENGTH};
+                let strength = if player.stamina.spend(ATTACK_COST) {
+                    1.0
+                } else {
+                    TIRED_STRENGTH
+                };
+                send_reliable(&mut client, &ClientMessage::Attack { zombie: id, strength });
                 player.cooldown = melee.cooldown;
             }
             return;

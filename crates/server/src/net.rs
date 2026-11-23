@@ -515,12 +515,22 @@ fn handle_reliable(
         }
         _ if !ready => {}
         ClientMessage::Hello { .. } | ClientMessage::State(_) => {}
-        ClientMessage::Attack { zombie } => {
+        ClientMessage::Attack { zombie, strength } => {
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
             };
-            if !player.is_alive() || player.attack_cooldown > 0.0 || player.guard_time().is_some() {
+            // Le coup puissant part de la garde levée ; un coup normal, non.
+            let strength = if strength.is_finite() {
+                strength.clamp(shared::stamina::TIRED_STRENGTH, shared::stamina::POWER_STRENGTH)
+            } else {
+                1.0
+            };
+            let power = strength > 1.0;
+            if !player.is_alive() || player.attack_cooldown > 0.0 || (player.guard_time().is_some() && !power) {
                 return;
+            }
+            if power {
+                player.guarding = None;
             }
             let melee = Item::melee(player.held_item());
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
@@ -538,20 +548,21 @@ fn handle_reliable(
                 return;
             };
             // Petite marge : le client et le serveur ne mesurent pas le temps tout à fait pareil.
-            player.attack_cooldown = melee.cooldown * 0.85;
+            player.attack_cooldown = melee.cooldown * 0.85 * if power { 1.4 } else { 1.0 };
+            let knockback = melee.knockback * if power { shared::stamina::POWER_KNOCKBACK } else { 1.0 };
             for (mut z, body) in zombies.iter_mut() {
                 // La masse balaie tous les zombies devant le joueur.
                 let to = Vec3::new(body.position.x - target.x, 0.0, body.position.z - target.z);
                 let ahead = Vec3::new(body.position.x - eye.x, 0.0, body.position.z - eye.z).normalize_or_zero();
                 let hit = z.id == zombie
-                    || (melee.sweep
+                    || ((melee.sweep || power)
                         && z.health > 0.0
                         && in_reach(&z, body)
                         && (ahead.dot(flat_look) > 0.5 || to.length() < 1.0));
                 if hit {
-                    z.health -= player.melee_damage(melee.damage, Some(z.kind));
+                    z.health -= player.melee_damage(melee.damage, Some(z.kind)) * strength;
                     z.hurt_timer = 0.3;
-                    z.knockback = flat_look * melee.knockback + Vec3::Y * 3.0;
+                    z.knockback = flat_look * knockback + Vec3::Y * if power { 5.0 } else { 3.0 };
                     z.last_attacker = Some(client);
                 }
             }
