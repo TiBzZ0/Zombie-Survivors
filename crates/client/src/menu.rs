@@ -221,7 +221,7 @@ fn spawn_menu(mut commands: Commands, options: Res<LaunchOptions>, mut notice: R
                 setting_row(SettingLine::ViewDistance),
                 setting_row(SettingLine::Shadows),
                 label(
-                    "ZQSD/WASD : se déplacer · Espace : sauter · Clic gauche : frapper / miner / tirer · Clic droit : parler, ouvrir, poser, manger · 1-9, molette : objet · C : fabriquer · T : discuter · M : carte · H : objectifs",
+                    "ZQSD/WASD : se déplacer · Espace : sauter · Clic gauche : frapper / miner / tirer · Clic droit : parler, ouvrir, poser, manger · 1-9, molette : objet · C : fabriquer · T : discuter · J : carnet · M : carte du monde · Maj+M : mini-carte · H : objectifs",
                     14.0,
                     Color::srgb(0.6, 0.6, 0.6)
                 ),

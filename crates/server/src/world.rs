@@ -133,6 +133,7 @@ fn setup_world(mut commands: Commands, mut config: ResMut<ServerConfig>) {
     commands.insert_resource(Chests(save.chests.into_iter().collect()));
     commands.insert_resource(save::SavedSurvivors(save.survivors));
     commands.insert_resource(crate::claims::Claims(save.claims.into_iter().collect()));
+    commands.insert_resource(crate::rescue::Rescue(save.rescue));
     commands.insert_resource(SpawnPoint(find_spawn(&world)));
     world.track_changes();
     world.track_removals();

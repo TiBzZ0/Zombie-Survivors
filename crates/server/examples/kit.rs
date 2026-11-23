@@ -48,6 +48,8 @@ fn main() {
         (Item::Helmet(Tier::Iron), 1),
         (Item::BodyArmor(Tier::Wood), 1),
         (Item::Ration, 5),
+        (Item::SteelIngot, 4),
+        (Item::Sword(Tier::Steel), 1),
         (Item::Flask, 1),
         (Item::WaterFlask, 2),
         (Item::Berries, 6),
@@ -128,6 +130,9 @@ fn main() {
             machine,
         ));
     }
+    // La radio d'évacuation, un peu à l'écart (KIT_RESCUE=1 : l'hélicoptère vient de se poser).
+    let radio = block_at(0.0, -22.0);
+    edits.push((radio, Block::Radio));
     // Chaque grande machine occupe aussi ses autres cases.
     let parts: Vec<_> = edits
         .iter()
@@ -176,6 +181,24 @@ fn main() {
                     xp: std::env::var("KIT_XP").ok().and_then(|x| x.parse().ok()).unwrap_or(0),
                     ..Default::default()
                 },
+                // KIT_RECORD=1 : un joueur qui a déjà bien vécu (pour voir le carnet et les succès).
+                record: if std::env::var("KIT_RECORD").is_ok() {
+                    shared::achievements::Record {
+                        kills: vec![38, 6, 2, 3, 0, 4, 1, 1],
+                        nights: 6,
+                        streak: 4,
+                        crafted: 31,
+                        placed: 140,
+                        mined: 260,
+                        fish: 3,
+                        recruited: 2,
+                        animals: 5,
+                        damage: 4200,
+                        ..Default::default()
+                    }
+                } else {
+                    Default::default()
+                },
             },
         )],
         deposits: Vec::new(),
@@ -184,8 +207,21 @@ fn main() {
         infections: Vec::new(),
         claims: Vec::new(),
         progress: Vec::new(),
+        records: Vec::new(),
+        rescue: std::env::var("KIT_RESCUE")
+            .is_ok()
+            .then_some(shared::rescue::RescueState {
+                radio,
+                day: 1,
+                landed: Some(shared::rescue::WAIT_SECS),
+            }),
     };
     let mut save = save;
+    save.records = save
+        .players
+        .iter()
+        .map(|(n, p)| (n.clone(), p.record.clone()))
+        .collect();
     save.progress = save
         .players
         .iter()

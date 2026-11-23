@@ -135,6 +135,12 @@ pub struct LocalPlayer {
     pub progress: shared::skills::Progress,
     /// Arbre de compétences ouvert (touche K).
     pub skills_open: bool,
+    /// Carte du monde ouverte (touche M).
+    pub map_open: bool,
+    /// Carnet (statistiques et succès) ouvert (touche J).
+    pub journal_open: bool,
+    /// Statistiques et succès, tenus par le serveur.
+    pub record: shared::achievements::Record,
     /// Endurance : course, sauts et coups la consomment.
     pub stamina: shared::stamina::Stamina,
     /// Secondes de saignement et d'entorse restantes (le serveur fait foi).
@@ -160,7 +166,7 @@ impl LocalPlayer {
 
     /// Un panneau (fabrication, coffre) libère la souris.
     pub fn panel_open(&self) -> bool {
-        self.crafting_open || self.chest.is_some() || self.skills_open
+        self.crafting_open || self.chest.is_some() || self.skills_open || self.map_open || self.journal_open
     }
 
     /// Effets des compétences apprises.
@@ -248,6 +254,8 @@ fn grab_cursor(
     let was_open = player.panel_open();
     if keys.just_pressed(KeyCode::KeyC) || keys.just_pressed(KeyCode::Tab) {
         player.skills_open = false;
+        player.map_open = false;
+        player.journal_open = false;
         if player.chest.is_some() {
             close_chest(&mut player, &mut client);
         } else {
@@ -257,12 +265,32 @@ fn grab_cursor(
     if keys.just_pressed(KeyCode::KeyK) {
         close_chest(&mut player, &mut client);
         player.crafting_open = false;
+        player.map_open = false;
+        player.journal_open = false;
         player.skills_open = !player.skills_open;
+    }
+    if keys.just_pressed(KeyCode::KeyJ) {
+        close_chest(&mut player, &mut client);
+        player.crafting_open = false;
+        player.skills_open = false;
+        player.map_open = false;
+        player.journal_open = !player.journal_open;
+    }
+    // M : carte du monde. Maj+M masque ou affiche la mini-carte.
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if keys.just_pressed(KeyCode::KeyM) && !shift {
+        close_chest(&mut player, &mut client);
+        player.crafting_open = false;
+        player.skills_open = false;
+        player.journal_open = false;
+        player.map_open = !player.map_open;
     }
     if keys.just_pressed(KeyCode::Escape) {
         let any_panel = player.panel_open();
         player.crafting_open = false;
         player.skills_open = false;
+        player.map_open = false;
+        player.journal_open = false;
         close_chest(&mut player, &mut client);
         if !any_panel {
             cursor.visible = true;
@@ -356,6 +384,9 @@ fn apply_teleports(
             }
             NetEvent::Progress(progress) => {
                 player.progress = progress.clone();
+            }
+            NetEvent::Record(record) => {
+                player.record = record.clone();
             }
             NetEvent::Vitals {
                 health,
@@ -791,6 +822,14 @@ fn interact(
     }
     if let Some(hit) = player.target {
         let block = world.block(hit.block);
+        if mouse.just_pressed(MouseButton::Right)
+            && let Some(origin) = shared::multiblock::origin_of(hit.block, |p| world.block(p))
+            && world.block(origin) == Block::Radio
+        {
+            send_reliable(&mut client, &ClientMessage::Radio { pos: origin });
+            player.cooldown = 0.35;
+            return;
+        }
         if block.is_door() {
             send_reliable(&mut client, &ClientMessage::ToggleDoor { pos: hit.block });
             player.cooldown = 0.35;

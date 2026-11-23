@@ -413,7 +413,9 @@ impl Tech {
         use crate::item::Tier;
         match item {
             Item::Block(block) => match block {
-                Block::Generator | Block::Floodlight | Block::ElectricDoor | Block::TeslaCoil => Tech::Electricity,
+                Block::Generator | Block::Floodlight | Block::ElectricDoor | Block::TeslaCoil | Block::Radio => {
+                    Tech::Electricity
+                }
                 Block::Cannon | Block::MachineGun | Block::Landmine => Tech::Gunpowder,
                 Block::Turret | Block::Catapult => Tech::Mechanics,
                 Block::Forge | Block::ReinforcedWall | Block::BarbedWire | Block::BearTrap => Tech::Metallurgy,
@@ -422,12 +424,13 @@ impl Tech {
             Item::Rifle | Item::Ammo | Item::Grenade | Item::Dynamite | Item::CannonBall => Tech::Gunpowder,
             Item::Crossbow | Item::Bolt | Item::Mace | Item::Bucket => Tech::Mechanics,
             Item::IronIngot
-            | Item::Sword(Tier::Iron)
-            | Item::Pickaxe(Tier::Iron)
-            | Item::Spear(Tier::Iron)
-            | Item::Axe(Tier::Iron)
-            | Item::Helmet(Tier::Iron)
-            | Item::BodyArmor(Tier::Iron) => Tech::Metallurgy,
+            | Item::SteelIngot
+            | Item::Sword(Tier::Iron | Tier::Steel)
+            | Item::Pickaxe(Tier::Iron | Tier::Steel)
+            | Item::Spear(Tier::Iron | Tier::Steel)
+            | Item::Axe(Tier::Iron | Tier::Steel)
+            | Item::Helmet(Tier::Iron | Tier::Steel)
+            | Item::BodyArmor(Tier::Iron | Tier::Steel) => Tech::Metallurgy,
             _ => Tech::Primitive,
         }
     }

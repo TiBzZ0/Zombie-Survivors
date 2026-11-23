@@ -11,7 +11,7 @@ pub const fn footprint(block: Block) -> &'static [IVec3] {
     const UP: &[IVec3] = &[IVec3::new(0, 1, 0)];
     match block {
         Block::Workbench | Block::Cannon | Block::Catapult => EAST,
-        Block::Forge | Block::Turret | Block::Floodlight | Block::TeslaCoil => UP,
+        Block::Forge | Block::Turret | Block::Floodlight | Block::TeslaCoil | Block::Radio => UP,
         _ => &[],
     }
 }

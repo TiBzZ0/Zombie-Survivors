@@ -171,6 +171,14 @@ pub enum NetEvent {
     Bite,
     /// La ligne est remontée.
     Caught(Option<(shared::item::Item, u32)>),
+    /// Statistiques et succès du joueur.
+    Record(shared::achievements::Record),
+    /// Succès débloqué à l'instant.
+    Achievement(shared::achievements::Achievement),
+    /// Appel de détresse en cours (ou aucun).
+    Rescue(Option<shared::rescue::RescueState>),
+    /// Monté dans l'hélicoptère : partie gagnée.
+    Evacuated(u32),
     Collapse {
         pos: Vec3,
         blocks: u16,
@@ -495,6 +503,18 @@ fn receive_messages(
             }
             ServerMessage::Caught { item } => {
                 events.write(NetEvent::Caught(item));
+            }
+            ServerMessage::Record(record) => {
+                events.write(NetEvent::Record(record));
+            }
+            ServerMessage::Achievement(achievement) => {
+                events.write(NetEvent::Achievement(achievement));
+            }
+            ServerMessage::Rescue(state) => {
+                events.write(NetEvent::Rescue(state));
+            }
+            ServerMessage::Evacuated { day } => {
+                events.write(NetEvent::Evacuated(day));
             }
             ServerMessage::Collapse { pos, blocks } => {
                 events.write(NetEvent::Collapse { pos, blocks });

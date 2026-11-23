@@ -293,6 +293,11 @@ fn spawn_zombie(commands: &mut Commands, assets: &ZombieAssets, state: &ZombieSt
         .id()
 }
 
+/// Hauteur où naissent les chiffres de dégâts, juste au-dessus de la tête.
+fn popup_height(kind: ZombieKind) -> f32 {
+    2.1 * scale(kind).y
+}
+
 fn receive_zombies(
     mut commands: Commands,
     mut events: MessageReader<NetEvent>,
@@ -300,6 +305,7 @@ fn receive_zombies(
     mut views: Query<&mut ZombieView>,
     assets: Res<ZombieAssets>,
     time: Res<Time>,
+    mut popups: MessageWriter<crate::damage::DamagePopup>,
 ) {
     let now = time.elapsed_secs();
     for event in events.read() {
@@ -308,6 +314,14 @@ fn receive_zombies(
                 for state in states {
                     match registry.entities.get(&state.id).and_then(|e| views.get_mut(*e).ok()) {
                         Some(mut view) => {
+                            let health = state.health_fraction();
+                            if health < view.health - 0.001 {
+                                popups.write(crate::damage::DamagePopup {
+                                    pos: view.target + Vec3::Y * popup_height(view.kind),
+                                    amount: (view.health - health) * view.kind.stats().health,
+                                    kill: false,
+                                });
+                            }
                             view.target = state.position();
                             view.target_yaw = state.yaw();
                             view.flags = state.flags;
@@ -323,6 +337,13 @@ fn receive_zombies(
             }
             NetEvent::ZombieKilled(id) => {
                 if let Some(entity) = registry.entities.remove(id) {
+                    if let Ok(view) = views.get(entity) {
+                        popups.write(crate::damage::DamagePopup {
+                            pos: view.target + Vec3::Y * popup_height(view.kind),
+                            amount: view.health * view.kind.stats().health,
+                            kill: true,
+                        });
+                    }
                     commands.entity(entity).despawn();
                 }
             }

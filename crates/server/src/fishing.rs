@@ -54,6 +54,7 @@ pub fn reel(client: ClientId, player: &mut ConnectedPlayer, mut server: Option<&
     if let Some((item, n)) = item {
         player.inventory.add(item, n);
         player.progress.add_xp(FISH_XP);
+        player.record.fish += 1;
         if let Some(server) = server.as_deref_mut() {
             send_inventory(server, client, player);
             send_progress(server, client, player);

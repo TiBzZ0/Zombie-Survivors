@@ -19,10 +19,14 @@ use crate::daynight::Clock;
 use crate::net::{ConnectedPlayer, Lobby, WorldVersion};
 use crate::world::{Chests, Deposits, GameWorld};
 use crate::{ServerConfig, ShutdownFlag};
+use shared::achievements::Record;
+use shared::rescue::RescueState;
+
+use crate::rescue::Rescue;
 use shared::skills::Progress;
 
 /// Change si le format du fichier change de façon incompatible.
-pub const SAVE_VERSION: u32 = 10;
+pub const SAVE_VERSION: u32 = 12;
 /// Expérience donnée aux joueurs des sauvegardes d'avant les compétences (niveau 6).
 pub const LEGACY_XP: u32 = {
     let mut xp = 0;
@@ -62,6 +66,9 @@ pub struct SavedPlayer {
     /// Expérience et compétences : enregistrées à part, à la fin du fichier (depuis la version 10).
     #[serde(skip)]
     pub progress: Progress,
+    /// Statistiques et succès : enregistrés à part, à la fin du fichier (depuis la version 11).
+    #[serde(skip)]
+    pub record: Record,
 }
 
 impl SavedPlayer {
@@ -74,6 +81,7 @@ impl SavedPlayer {
             thirst: player.thirst,
             infection: player.infection,
             progress: player.progress.clone(),
+            record: player.record.clone(),
         }
     }
 }
@@ -97,6 +105,7 @@ impl From<SavedPlayerV6> for SavedPlayer {
             thirst: crate::net::MAX_THIRST,
             infection: 0.0,
             progress: Progress::default(),
+            record: Record::default(),
         }
     }
 }
@@ -222,6 +231,10 @@ pub struct SaveFile {
     pub claims: Vec<(IVec3, String)>,
     /// Expérience et compétences des joueurs (depuis la version 10).
     pub progress: Vec<(String, Progress)>,
+    /// Statistiques et succès des joueurs (depuis la version 11).
+    pub records: Vec<(String, Record)>,
+    /// Appel de détresse en cours (depuis la version 12).
+    pub rescue: Option<RescueState>,
 }
 
 pub fn save_path(data_dir: &Path) -> PathBuf {
@@ -280,10 +293,20 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
     } else {
         (Vec::new(), rest)
     };
-    let progress: Vec<(String, Progress)> = if version >= 10 {
+    let (progress, rest): (Vec<(String, Progress)>, &[u8]) = if version >= 10 {
+        postcard::take_from_bytes(rest).map_err(invalid)?
+    } else {
+        (Vec::new(), rest)
+    };
+    let (records, rest): (Vec<(String, Record)>, &[u8]) = if version >= 11 {
+        postcard::take_from_bytes(rest).map_err(invalid)?
+    } else {
+        (Vec::new(), rest)
+    };
+    let rescue: Option<RescueState> = if version >= 12 {
         postcard::take_from_bytes(rest).map_err(invalid)?.0
     } else {
-        Vec::new()
+        None
     };
     let mut players = players;
     for (name, player) in &mut players {
@@ -296,6 +319,9 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
             // Les joueurs d'avant les compétences repartent avec de quoi débloquer l'essentiel.
             player.progress.xp = LEGACY_XP;
         }
+        if let Some((_, r)) = records.iter().find(|(n, _)| n == name) {
+            player.record = r.clone();
+        }
     }
     if version > SAVE_VERSION {
         return Err(io::Error::new(
@@ -304,6 +330,11 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
         ));
     }
     let progress = players.iter().map(|(n, p)| (n.clone(), p.progress.clone())).collect();
+    let records = players
+        .iter()
+        .filter(|(_, p)| p.record != Record::default())
+        .map(|(n, p)| (n.clone(), p.record.clone()))
+        .collect();
     let save = SaveFile {
         version: SAVE_VERSION,
         world,
@@ -316,6 +347,8 @@ pub fn load(data_dir: &Path) -> io::Result<Option<SaveFile>> {
         infections,
         claims,
         progress,
+        records,
+        rescue,
     };
     Ok(Some(save))
 }
@@ -340,6 +373,7 @@ fn snapshot(
     chests: &Chests,
     survivors: &SavedSurvivors,
     claims: &Claims,
+    rescue: &Rescue,
 ) -> SaveFile {
     let mut players = saved.0.clone();
     for player in lobby.players.values().filter(|p| p.is_ready()) {
@@ -353,6 +387,11 @@ fn snapshot(
         .iter()
         .filter(|(_, p)| p.progress != Progress::default())
         .map(|(name, p)| (name.clone(), p.progress.clone()))
+        .collect();
+    let records = players
+        .iter()
+        .filter(|(_, p)| p.record != Record::default())
+        .map(|(name, p)| (name.clone(), p.record.clone()))
         .collect();
     let infections = players
         .iter()
@@ -379,6 +418,8 @@ fn snapshot(
             claims
         },
         progress,
+        records,
+        rescue: rescue.0,
     }
 }
 
@@ -393,8 +434,9 @@ fn save_now(
     chests: &Chests,
     survivors: &SavedSurvivors,
     claims: &Claims,
+    rescue: &Rescue,
 ) {
-    let save = snapshot(world, clock, lobby, saved, deposits, chests, survivors, claims);
+    let save = snapshot(world, clock, lobby, saved, deposits, chests, survivors, claims, rescue);
     match write(&config.data_dir, &save) {
         Ok(()) => debug!(
             "Partie sauvegardée : {} blocs modifiés, {} joueurs",
@@ -420,6 +462,7 @@ fn autosave(
     chests: Res<Chests>,
     survivors: Res<SavedSurvivors>,
     claims: Res<Claims>,
+    rescue: Res<Rescue>,
     mut since: Local<f32>,
     mut last_version: Local<u64>,
 ) {
@@ -435,7 +478,7 @@ fn autosave(
     }
     *last_version = version.0;
     save_now(
-        &config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors, &claims,
+        &config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors, &claims, &rescue,
     );
 }
 
@@ -450,12 +493,13 @@ fn save_on_shutdown(
     chests: Res<Chests>,
     survivors: Res<SavedSurvivors>,
     claims: Res<Claims>,
+    rescue: Res<Rescue>,
     mut done: Local<bool>,
 ) {
     if flag.0.load(Ordering::Relaxed) && !*done {
         *done = true;
         save_now(
-            &config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors, &claims,
+            &config, &world, &clock, &lobby, &saved, &deposits, &chests, &survivors, &claims, &rescue,
         );
         info!("Partie sauvegardée dans {}", save_path(&config.data_dir).display());
     }
@@ -496,6 +540,12 @@ mod tests {
                         xp: 500,
                         skills: [(Skill::Brawler, 2)].into_iter().collect(),
                     },
+                    record: Record {
+                        nights: 3,
+                        kills: vec![4, 1],
+                        unlocked: vec![shared::achievements::Achievement::FirstBlood],
+                        ..default()
+                    },
                 },
             )],
             deposits: vec![(IVec3::new(4, 5, 6), 7)],
@@ -520,6 +570,16 @@ mod tests {
                     skills: [(Skill::Brawler, 2)].into_iter().collect(),
                 },
             )],
+            records: vec![(
+                "Alice".into(),
+                Record {
+                    nights: 3,
+                    kills: vec![4, 1],
+                    unlocked: vec![shared::achievements::Achievement::FirstBlood],
+                    ..default()
+                },
+            )],
+            rescue: Some(RescueState::new(IVec3::new(7, 40, 7), 4)),
         };
         write(&dir, &save).unwrap();
         assert_eq!(load(&dir).unwrap(), Some(save));

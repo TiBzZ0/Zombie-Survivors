@@ -376,6 +376,7 @@ fn handle_talk(
                     s.leader = Some(player.name.clone());
                     s.order = Order::Follow;
                     s.post = s.position;
+                    player.record.recruited += 1;
                     changed = true;
                     info!("{} recrute {}", player.name, s.name);
                     let food = if *n > 1 { "ces pommes" } else { "la ration" };
@@ -476,6 +477,7 @@ fn survivor_ai(
 ) {
     let dt = time.delta_secs();
     let horde = clock.is_night() && clock.is_horde_night();
+    let mut medics: Vec<(Vec3, f32)> = Vec::new();
     for mut s in &mut survivors {
         let s = &mut *s;
         s.attack_cooldown -= dt;
@@ -826,10 +828,132 @@ fn survivor_ai(
                         None => goal = wander(s, 10.0, dt),
                     }
                 }
+                Order::Heal => {
+                    if s.post.distance(s.position) > 1.5 {
+                        goal = Some(s.post);
+                    }
+                    medics.push((s.post, work_speed));
+                    let mut jobs = Jobs {
+                        world: &mut world,
+                        version: &mut version,
+                        chests: &mut chests,
+                        lobby: &mut lobby,
+                        server: server.as_deref_mut(),
+                    };
+                    // Entre deux soins, il roule des bandages avec les herbes du coffre.
+                    if let Some(chest) = jobs.chest_with(s, Item::Herb, 2) {
+                        s.working = true;
+                        s.work += dt * work_speed;
+                        if s.work >= BANDAGE_SECS {
+                            s.work = 0.0;
+                            jobs.take(chest, Item::Herb, 2);
+                            jobs.deliver(s, leader.map(|(id, _)| id), Item::Bandage, 1);
+                        }
+                    }
+                }
+                Order::Engineer => {
+                    let jobs = Jobs {
+                        world: &mut world,
+                        version: &mut version,
+                        chests: &mut chests,
+                        lobby: &mut lobby,
+                        server: server.as_deref_mut(),
+                    };
+                    goal = engineer(s, work_speed, dt, jobs, &mut face);
+                }
             }
         }
         step(s, goal, face, speed, dt, &world);
     }
+    // Les médecins soignent les joueurs et les survivants proches de leur poste.
+    for (post, work_speed) in medics {
+        let heal = MEDIC_HEAL * work_speed * dt;
+        for (id, player) in lobby.players.iter_mut() {
+            if !player.is_alive() || player.state.position.distance(post) > MEDIC_RADIUS {
+                continue;
+            }
+            let before = (player.health.ceil(), player.bleeding > 0.0);
+            player.health = (player.health + heal).min(player.max_health());
+            player.bleeding = 0.0;
+            if before != (player.health.ceil(), false)
+                && let Some(server) = server.as_deref_mut()
+            {
+                crate::net::send_vitals(server, *id, player);
+            }
+        }
+        for mut s in &mut survivors {
+            if s.position.distance(post) < MEDIC_RADIUS {
+                s.health = (s.health + heal).min(s.stats.max_health());
+            }
+        }
+    }
+}
+
+/// Le médecin soigne dans ce rayon autour de son poste, de tant de points par seconde.
+const MEDIC_RADIUS: f32 = 8.0;
+const MEDIC_HEAL: f32 = 2.5;
+/// Temps pour rouler un bandage.
+const BANDAGE_SECS: f32 = 20.0;
+/// Temps pour recharger une machine, et ce qu'il y met.
+const ENGINEER_SECS: f32 = 3.0;
+const TURRET_LOAD: u32 = 6;
+const TURRET_FULL: u32 = 12;
+const GENERATOR_LOAD: u32 = 2;
+const GENERATOR_FULL: u32 = 4;
+
+/// Ingénieur : recharge les tourelles (cartouches ou flèches) et les générateurs (charbon)
+/// proches de son poste avec le contenu des coffres. Renvoie où il veut aller.
+fn engineer(s: &mut Survivor, work_speed: f32, dt: f32, mut jobs: Jobs, face: &mut Option<Vec3>) -> Option<Vec3> {
+    // Machine à recharger et ce qu'il faut y mettre.
+    let post = s.post;
+    let need = |pos: IVec3, jobs: &Jobs| -> Option<(Item, u32)> {
+        let inv = jobs.chests.0.get(&pos);
+        let count = |item: Item| inv.map_or(0, |i| i.count(item));
+        match jobs.world.block(pos) {
+            Block::Turret if count(Item::Ammo) + count(Item::Arrow) < TURRET_FULL => [Item::Ammo, Item::Arrow]
+                .into_iter()
+                .find(|item| jobs.chest_near(post, *item, 1).is_some())
+                .map(|item| (item, TURRET_LOAD)),
+            Block::Generator if count(Item::Coal) < GENERATOR_FULL => jobs
+                .chest_near(post, Item::Coal, 1)
+                .map(|_| (Item::Coal, GENERATOR_LOAD)),
+            _ => None,
+        }
+    };
+    if s.job_target.is_some_and(|p| need(p, &jobs).is_none()) {
+        s.job_target = None;
+    }
+    if s.job_target.is_none() {
+        s.job_target = jobs
+            .chests
+            .0
+            .keys()
+            .copied()
+            .filter(|pos| (pos.as_vec3() + Vec3::splat(0.5)).distance(s.post) < WORK_RADIUS)
+            .find(|pos| need(*pos, &jobs).is_some());
+    }
+    let Some(target) = s.job_target else {
+        return (s.post.distance(s.position) > 1.5).then_some(s.post);
+    };
+    let center = target.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+    if Vec2::new(center.x - s.position.x, center.z - s.position.z).length() > 2.2 {
+        return Some(center);
+    }
+    *face = Some(center);
+    s.working = true;
+    s.work += dt * work_speed;
+    if s.work < ENGINEER_SECS {
+        return None;
+    }
+    s.work = 0.0;
+    if let Some((item, n)) = need(target, &jobs)
+        && let Some(chest) = jobs.chest_with(s, item, 1)
+    {
+        let n = n.min(jobs.chests.0.get(&chest).map_or(0, |i| i.count(item)));
+        jobs.take(chest, item, n);
+        jobs.chests.0.entry(target).or_default().add(item, n);
+    }
+    None
 }
 
 /// Portée maximale d'un survivant armé d'un arc ou d'un fusil.
@@ -1233,13 +1357,17 @@ impl Jobs<'_> {
 
     /// Coffre près du poste qui contient au moins `n` exemplaires de l'objet.
     fn chest_with(&self, s: &Survivor, item: Item, n: u32) -> Option<IVec3> {
+        self.chest_near(s.post, item, n)
+    }
+
+    fn chest_near(&self, post: Vec3, item: Item, n: u32) -> Option<IVec3> {
         self.chests
             .0
             .iter()
             .filter(|(pos, inv)| {
                 inv.has(item, n)
                     && self.world.block(**pos) == Block::Chest
-                    && (pos.as_vec3() + Vec3::splat(0.5)).distance(s.post) < WORK_RADIUS
+                    && (pos.as_vec3() + Vec3::splat(0.5)).distance(post) < WORK_RADIUS
             })
             .map(|(pos, _)| *pos)
             .next()
@@ -1577,6 +1705,43 @@ mod tests {
         let inv = chest(&app, chest_pos);
         assert!(inv.has(Item::CookedMeat, 1), "{inv:?}");
         assert!(!inv.has(Item::RawMeat, 2));
+    }
+
+    #[test]
+    fn the_medic_heals_the_wounded_and_rolls_bandages() {
+        let (mut app, _, chest_pos) = camp(Order::Heal);
+        {
+            let mut q = app.world_mut().query::<&mut Survivor>();
+            let mut s = q.single_mut(app.world_mut()).unwrap();
+            s.health = 10.0;
+        }
+        app.world_mut()
+            .resource_mut::<Chests>()
+            .0
+            .get_mut(&chest_pos)
+            .unwrap()
+            .add(Item::Herb, 2);
+        run(&mut app, 45.0);
+        let s = survivor(&mut app);
+        assert!(s.health > 30.0, "{}", s.health);
+        let inv = chest(&app, chest_pos);
+        assert!(inv.has(Item::Bandage, 1) && !inv.has(Item::Herb, 1), "{inv:?}");
+    }
+
+    #[test]
+    fn the_engineer_refills_turrets_from_the_chest() {
+        let (mut app, post, chest_pos) = camp(Order::Engineer);
+        let turret = post + IVec3::new(-3, 0, 1);
+        app.world_mut()
+            .resource_mut::<GameWorld>()
+            .set_block(turret, Block::Turret);
+        let mut chests = app.world_mut().resource_mut::<Chests>();
+        chests.0.insert(turret, shared::item::Inventory::default());
+        chests.0.get_mut(&chest_pos).unwrap().add(Item::Ammo, 20);
+        run(&mut app, 30.0);
+        let loaded = chest(&app, turret).count(Item::Ammo);
+        assert!((TURRET_FULL..=TURRET_FULL + TURRET_LOAD).contains(&loaded), "{loaded}");
+        assert_eq!(chest(&app, chest_pos).count(Item::Ammo), 20 - loaded);
     }
 
     #[test]

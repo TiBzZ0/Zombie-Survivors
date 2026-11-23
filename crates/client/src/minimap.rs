@@ -1,5 +1,5 @@
 //! Carte en haut à droite : le terrain vu de dessus autour du joueur (nord en haut),
-//! avec les zombies, les survivants, le gibier et les autres joueurs. Touche M pour la masquer.
+//! avec les zombies, les survivants, le gibier et les autres joueurs. Maj+M pour la masquer.
 //!
 //! Les couleurs du terrain sont calculées en tâche de fond, colonne par colonne, et gardées
 //! en cache ; seule une colonne modifiée (bloc posé ou cassé) est recalculée.
@@ -27,7 +27,7 @@ use crate::zombies::ZombieView;
 /// Côté de la carte, en pixels de l'image.
 const SIZE: u32 = 96;
 /// Blocs par pixel.
-const SCALE: i32 = 2;
+pub(crate) const SCALE: i32 = 2;
 /// Taille affichée à l'écran.
 const DISPLAY: f32 = 192.0;
 /// Intervalle entre deux mises à jour de l'image, en secondes.
@@ -58,14 +58,14 @@ impl Plugin for MinimapPlugin {
 
 /// Couleurs des colonnes déjà calculées, par position (x, z) d'un coin de pixel.
 #[derive(Resource, Default)]
-struct Columns {
-    colors: HashMap<(i32, i32), [u8; 3]>,
+pub(crate) struct Columns {
+    pub(crate) colors: HashMap<(i32, i32), [u8; 3]>,
     /// Colonnes en cours de calcul.
-    pending: HashSet<(i32, i32)>,
+    pub(crate) pending: HashSet<(i32, i32)>,
 }
 
 #[derive(Component)]
-struct ColumnTask(Task<Vec<((i32, i32), [u8; 3])>>);
+pub(crate) struct ColumnTask(pub(crate) Task<Vec<((i32, i32), [u8; 3])>>);
 
 #[derive(Component)]
 struct MinimapRoot;
@@ -149,9 +149,17 @@ fn spawn_minimap(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut 
 #[derive(Component)]
 struct MinimapCoords;
 
-fn update_coords(player: Res<LocalPlayer>, mut text: Single<&mut Text, With<MinimapCoords>>) {
+fn update_coords(
+    player: Res<LocalPlayer>,
+    waypoint: Res<crate::worldmap::Waypoint>,
+    mut text: Single<&mut Text, With<MinimapCoords>>,
+) {
     let p = player.position.floor().as_ivec3();
-    let label = format!("X {} · Z {} · alt. {}", p.x, p.z, p.y);
+    let mut label = format!("X {} · Z {} · alt. {}", p.x, p.z, p.y);
+    if let Some(w) = waypoint.0 {
+        let d = w.distance(Vec2::new(player.position.x, player.position.z));
+        label.push_str(&format!("\nRepère à {d:.0} m"));
+    }
     if text.0 != label {
         text.0 = label;
     }
@@ -173,7 +181,8 @@ fn toggle_minimap(
     mut settings: ResMut<Settings>,
     mut root: Single<&mut Visibility, With<MinimapRoot>>,
 ) {
-    if keys.just_pressed(KeyCode::KeyM) && !player.typing {
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    if keys.just_pressed(KeyCode::KeyM) && shift && !player.typing {
         settings.minimap = !settings.minimap;
         settings.save();
     }
@@ -211,7 +220,7 @@ fn finish_columns(mut commands: Commands, mut columns: ResMut<Columns>, mut task
 }
 
 /// Couleur d'une colonne vue de dessus : le premier bloc visible, plus sombre s'il est bas.
-fn column_color(
+pub(crate) fn column_color(
     generator: &WorldGenerator,
     edits: &HashMap<IVec3, Block>,
     top_edit: Option<i32>,
@@ -242,46 +251,13 @@ fn column_color(
     [20, 20, 25]
 }
 
-fn put(data: &mut [u8], x: i32, y: i32, color: [u8; 3]) {
-    if (0..SIZE as i32).contains(&x) && (0..SIZE as i32).contains(&y) {
-        let i = ((y as u32 * SIZE + x as u32) * 4) as usize;
-        data[i..i + 4].copy_from_slice(&[color[0], color[1], color[2], 255]);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn draw_minimap(
-    mut commands: Commands,
-    time: Res<Time>,
-    settings: Res<Settings>,
-    world: Res<ClientWorld>,
-    player: Res<LocalPlayer>,
-    mut columns: ResMut<Columns>,
-    image: Res<MinimapImage>,
-    mut images: ResMut<Assets<Image>>,
-    zombies: Query<&Transform, With<ZombieView>>,
-    survivors: Query<&Transform, With<SurvivorView>>,
-    animals: Query<&Transform, With<AnimalView>>,
-    remote: Res<RemotePlayers>,
-    transforms: Query<&Transform>,
-    mut since: Local<f32>,
+/// Lance le calcul en tâche de fond des colonnes manquantes.
+pub(crate) fn request_columns(
+    commands: &mut Commands,
+    world: &ClientWorld,
+    columns: &mut Columns,
+    missing: Vec<(i32, i32)>,
 ) {
-    *since += time.delta_secs();
-    if !settings.minimap || *since < REFRESH {
-        return;
-    }
-    *since = 0.0;
-    let half = SIZE as i32 / 2;
-    let center = player.position.as_ivec3();
-    let (cx, cz) = (center.x.div_euclid(SCALE) * SCALE, center.z.div_euclid(SCALE) * SCALE);
-    let key_at = |px: i32, py: i32| (cx + (px - half) * SCALE, cz + (py - half) * SCALE);
-
-    // Colonnes manquantes : calculées en tâche de fond.
-    let missing: Vec<(i32, i32)> = (0..SIZE as i32)
-        .flat_map(|py| (0..SIZE as i32).map(move |px| (px, py)))
-        .map(|(px, py)| key_at(px, py))
-        .filter(|k| !columns.colors.contains_key(k) && !columns.pending.contains(k))
-        .collect();
     if !missing.is_empty() {
         columns.pending.extend(missing.iter().copied());
         let generator: Arc<WorldGenerator> = world.generator().clone();
@@ -304,6 +280,50 @@ fn draw_minimap(
         });
         commands.spawn(ColumnTask(task));
     }
+}
+
+fn put(data: &mut [u8], x: i32, y: i32, color: [u8; 3]) {
+    if (0..SIZE as i32).contains(&x) && (0..SIZE as i32).contains(&y) {
+        let i = ((y as u32 * SIZE + x as u32) * 4) as usize;
+        data[i..i + 4].copy_from_slice(&[color[0], color[1], color[2], 255]);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_minimap(
+    mut commands: Commands,
+    time: Res<Time>,
+    settings: Res<Settings>,
+    world: Res<ClientWorld>,
+    player: Res<LocalPlayer>,
+    mut columns: ResMut<Columns>,
+    image: Res<MinimapImage>,
+    mut images: ResMut<Assets<Image>>,
+    zombies: Query<&Transform, With<ZombieView>>,
+    survivors: Query<&Transform, With<SurvivorView>>,
+    animals: Query<&Transform, With<AnimalView>>,
+    remote: Res<RemotePlayers>,
+    transforms: Query<&Transform>,
+    waypoint: Res<crate::worldmap::Waypoint>,
+    mut since: Local<f32>,
+) {
+    *since += time.delta_secs();
+    if !settings.minimap || *since < REFRESH {
+        return;
+    }
+    *since = 0.0;
+    let half = SIZE as i32 / 2;
+    let center = player.position.as_ivec3();
+    let (cx, cz) = (center.x.div_euclid(SCALE) * SCALE, center.z.div_euclid(SCALE) * SCALE);
+    let key_at = |px: i32, py: i32| (cx + (px - half) * SCALE, cz + (py - half) * SCALE);
+
+    // Colonnes manquantes : calculées en tâche de fond.
+    let missing: Vec<(i32, i32)> = (0..SIZE as i32)
+        .flat_map(|py| (0..SIZE as i32).map(move |px| (px, py)))
+        .map(|(px, py)| key_at(px, py))
+        .filter(|k| !columns.colors.contains_key(k) && !columns.pending.contains(k))
+        .collect();
+    request_columns(&mut commands, &world, &mut columns, missing);
 
     let Some(mut image) = images.get_mut(&image.0) else {
         return;
@@ -346,6 +366,13 @@ fn draw_minimap(
         if let Ok(t) = transforms.get(*entity) {
             dot(data, t.translation, [80, 160, 255], true);
         }
+    }
+    // Le repère, ramené au bord de la carte s'il est loin.
+    if let Some(w) = waypoint.0 {
+        let edge = (half - 2) as f32 * SCALE as f32;
+        let offset = Vec2::new(w.x - cx as f32, w.y - cz as f32).clamp(Vec2::splat(-edge), Vec2::splat(edge));
+        let at = Vec3::new(cx as f32 + offset.x, 0.0, cz as f32 + offset.y);
+        dot(data, at, [255, 80, 200], true);
     }
     // Le joueur, et la direction de son regard.
     let look = Quat::from_rotation_y(player.yaw) * Vec3::NEG_Z;

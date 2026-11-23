@@ -121,6 +121,16 @@ const GENERATOR: &[Piece] = &[
     p([0.0, 0.1, 0.2], [0.05, 0.5, 0.8], ReinforcedWall, 0.7),
 ];
 
+const RADIO: &[Piece] = &[
+    // Petite table, poste kaki, combiné, mât d'antenne haubané et feu rouge au sommet.
+    p([0.08, 0.0, 0.12], [0.92, 0.55, 0.88], Planks, 0.8),
+    p([0.12, 0.55, 0.18], [0.88, 0.98, 0.72], Radio, 1.0),
+    p([0.66, 0.98, 0.3], [0.84, 1.06, 0.62], Cannon, 0.5),
+    p([0.18, 0.98, 0.55], [0.24, 1.95, 0.61], ReinforcedWall, 0.75),
+    p([0.12, 1.4, 0.49], [0.3, 1.44, 0.67], ReinforcedWall, 0.9),
+    p([0.15, 1.95, 0.52], [0.27, 2.05, 0.64], Banner, 1.4),
+];
+
 /// Modèle d'un bloc dessiné autrement qu'en cube.
 pub fn model(block: Block) -> Option<&'static [Piece]> {
     Some(match block {
@@ -134,6 +144,7 @@ pub fn model(block: Block) -> Option<&'static [Piece]> {
         MachineGun => MACHINE_GUN,
         Chest => CHEST,
         Generator => GENERATOR,
+        Radio => RADIO,
         _ => return None,
     })
 }

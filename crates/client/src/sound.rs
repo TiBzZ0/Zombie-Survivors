@@ -71,6 +71,7 @@ enum Sfx {
     Rumble,
     Howl,
     Thunder,
+    Fanfare,
 }
 
 #[derive(Resource)]
@@ -320,6 +321,19 @@ fn synth(sfx: Sfx) -> Vec<f32> {
                 ((crack * 0.9 + roll) * (k * 40.0).min(1.0) * (1.0 - k).powf(1.2)).clamp(-1.0, 1.0)
             })
         }
+        // Succès : trois notes montantes, claires, comme un petit carillon.
+        Sfx::Fanfare => samples(1.4, |t, _| {
+            let notes = [(0.0, 523.25), (0.14, 659.25), (0.28, 783.99), (0.42, 1046.5)];
+            notes
+                .iter()
+                .filter(|(start, _)| t >= *start)
+                .map(|(start, f)| {
+                    let dt = t - start;
+                    let env = (dt * 80.0).min(1.0) * (-dt * 3.5).exp();
+                    ((dt * f * TAU).sin() + 0.3 * (dt * f * 2.0 * TAU).sin()) * env * 0.25
+                })
+                .sum()
+        }),
         Sfx::Horn => samples(2.5, |t, k| {
             let env = (k * 6.0).min(1.0) * (1.0 - k).powf(0.5);
             ((t * 82.0 * TAU).sin() + 0.5 * (t * 123.0 * TAU).sin() + 0.25 * (t * 164.0 * TAU).sin()) * env * 0.4
@@ -354,6 +368,7 @@ fn build_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>
         Sfx::Rumble,
         Sfx::Howl,
         Sfx::Thunder,
+        Sfx::Fanfare,
     ];
     all.extend((0..3).map(Sfx::Groan));
     let map = all
@@ -432,6 +447,7 @@ fn world_sounds(
             NetEvent::Collapse { pos, .. } => play(&mut commands, &sounds, Sfx::Rumble, Some(*pos), 1.0),
             NetEvent::Howl { pos } => play(&mut commands, &sounds, Sfx::Howl, Some(*pos + Vec3::Y * 1.8), 1.0),
             NetEvent::Bite => play(&mut commands, &sounds, Sfx::Splash, None, 0.5),
+            NetEvent::Achievement(_) => play(&mut commands, &sounds, Sfx::Fanfare, None, 0.8),
             NetEvent::Lightning { pos } => play(&mut commands, &sounds, Sfx::Thunder, Some(*pos + Vec3::Y * 10.0), 1.0),
             _ => {}
         }

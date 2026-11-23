@@ -120,6 +120,7 @@ fn tier_color(tier: Tier) -> Rgba {
         Tier::Wood => rgb(0.62, 0.43, 0.22),
         Tier::Stone => rgb(0.58, 0.58, 0.6),
         Tier::Iron => rgb(0.86, 0.88, 0.92),
+        Tier::Steel => rgb(0.55, 0.66, 0.82),
     }
 }
 
@@ -409,6 +410,11 @@ pub fn draw(item: Item) -> Canvas {
             c.set(6, 7, rgb(1.0, 0.6, 0.2));
             c.set(9, 8, rgb(0.5, 0.7, 0.3));
             c.set(7, 5, rgb(0.7, 0.7, 0.72));
+        }
+        Item::SteelIngot => {
+            c.rect(3, 7, 12, 11, rgb(0.45, 0.55, 0.7));
+            c.rect(5, 5, 10, 6, rgb(0.65, 0.75, 0.9));
+            c.set(11, 8, rgb(0.9, 0.95, 1.0));
         }
         Item::FishingRod => {
             c.thick((2, 14), (12, 2), rgb(0.55, 0.36, 0.18));

@@ -14,6 +14,7 @@ mod animals;
 mod chat;
 mod chest;
 mod crafting;
+mod damage;
 mod effects;
 mod electricity;
 mod fishing;
@@ -21,6 +22,7 @@ mod held;
 mod hud;
 mod icons;
 mod inventory_ui;
+mod journal;
 mod menu;
 mod meshing;
 mod minimap;
@@ -30,6 +32,7 @@ mod particles;
 mod player;
 mod rain;
 mod remote;
+mod rescue;
 mod settings;
 mod skills;
 mod sky;
@@ -42,6 +45,7 @@ mod textures;
 mod tutorial;
 mod viewmodel;
 mod wind;
+mod worldmap;
 mod zombies;
 
 use bevy::prelude::*;
@@ -155,7 +159,10 @@ fn main() {
             fishing::FishingPlugin,
             rain::RainPlugin,
             swim::SwimUiPlugin,
+            worldmap::WorldMapPlugin,
+            damage::DamagePlugin,
         ))
+        .add_plugins((journal::JournalPlugin, rescue::RescuePlugin))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
         .add_systems(OnExit(AppState::Playing), release_cursor)

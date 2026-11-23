@@ -77,19 +77,25 @@ pub enum Order {
     Cook,
     /// Chasseur : traque le gibier autour de son poste le jour et rapporte viande et peaux.
     Hunt,
+    /// Médecin : soigne les blessés autour de son poste et fait des bandages avec les herbes du coffre.
+    Heal,
+    /// Ingénieur : recharge les tourelles et le générateur proches avec le coffre du poste.
+    Engineer,
 }
 
 impl Order {
     /// Ordre suivant quand le chef parle au survivant.
     pub fn next(self) -> Self {
         match self {
-            Order::Idle | Order::Hunt => Order::Follow,
+            Order::Idle | Order::Engineer => Order::Follow,
             Order::Follow => Order::Guard,
             Order::Guard => Order::Gather,
             Order::Gather => Order::Repair,
             Order::Repair => Order::Farm,
             Order::Farm => Order::Cook,
             Order::Cook => Order::Hunt,
+            Order::Hunt => Order::Heal,
+            Order::Heal => Order::Engineer,
         }
     }
 
@@ -103,6 +109,8 @@ impl Order {
             Order::Farm => "cultive les champs",
             Order::Cook => "fait la cuisine",
             Order::Hunt => "chasse",
+            Order::Heal => "soigne les blessés",
+            Order::Engineer => "entretient les défenses",
         }
     }
 
@@ -117,6 +125,10 @@ impl Order {
             Order::Farm => "Je m'occupe du blé. Laisse des graines dans le coffre, je sèmerai sur la terre nue.",
             Order::Cook => "Il me faut un feu de camp près d'ici, et de la viande ou du blé dans le coffre.",
             Order::Hunt => "Je pars chasser le jour. Je rapporterai la viande et les peaux au coffre.",
+            Order::Heal => {
+                "Je soigne ceux qui passent près de moi. Laisse des herbes dans le coffre, j'en ferai des bandages."
+            }
+            Order::Engineer => "Je recharge les tourelles et le générateur d'ici avec ce qu'il y a dans le coffre.",
         }
     }
 
@@ -124,7 +136,7 @@ impl Order {
     pub const fn is_job(self) -> bool {
         matches!(
             self,
-            Order::Gather | Order::Repair | Order::Farm | Order::Cook | Order::Hunt
+            Order::Gather | Order::Repair | Order::Farm | Order::Cook | Order::Hunt | Order::Heal | Order::Engineer
         )
     }
 
@@ -137,6 +149,8 @@ impl Order {
             5 => Order::Farm,
             6 => Order::Cook,
             7 => Order::Hunt,
+            8 => Order::Heal,
+            9 => Order::Engineer,
             _ => Order::Idle,
         }
     }
@@ -328,7 +342,7 @@ mod tests {
     fn orders_cycle_through_all_jobs() {
         let mut order = Order::Idle;
         let mut seen = Vec::new();
-        for _ in 0..7 {
+        for _ in 0..9 {
             order = order.next();
             seen.push(order);
             assert_eq!(Order::from_u8(order as u8), order);
@@ -342,7 +356,9 @@ mod tests {
                 Order::Repair,
                 Order::Farm,
                 Order::Cook,
-                Order::Hunt
+                Order::Hunt,
+                Order::Heal,
+                Order::Engineer
             ]
         );
         assert_eq!(order.next(), Order::Follow);

@@ -83,6 +83,54 @@ pub const RECIPES: &[Recipe] = &[
         station: Some(Block::Forge),
     },
     Recipe {
+        output: Item::SteelIngot,
+        count: 1,
+        inputs: &[(Item::IronIngot, 2), (Item::Coal, 2)],
+        station: Some(Block::Forge),
+    },
+    // Amélioration : l'objet en fer, retrempé avec de l'acier.
+    Recipe {
+        output: Item::Pickaxe(Tier::Steel),
+        count: 1,
+        inputs: &[(Item::Pickaxe(Tier::Iron), 1), (Item::SteelIngot, 2)],
+        station: Some(Block::Forge),
+    },
+    // Amélioration : l'objet en fer, retrempé avec de l'acier.
+    Recipe {
+        output: Item::Sword(Tier::Steel),
+        count: 1,
+        inputs: &[(Item::Sword(Tier::Iron), 1), (Item::SteelIngot, 2)],
+        station: Some(Block::Forge),
+    },
+    // Amélioration : l'objet en fer, retrempé avec de l'acier.
+    Recipe {
+        output: Item::Spear(Tier::Steel),
+        count: 1,
+        inputs: &[(Item::Spear(Tier::Iron), 1), (Item::SteelIngot, 2)],
+        station: Some(Block::Forge),
+    },
+    // Amélioration : l'objet en fer, retrempé avec de l'acier.
+    Recipe {
+        output: Item::Axe(Tier::Steel),
+        count: 1,
+        inputs: &[(Item::Axe(Tier::Iron), 1), (Item::SteelIngot, 2)],
+        station: Some(Block::Forge),
+    },
+    // Amélioration : l'objet en fer, retrempé avec de l'acier.
+    Recipe {
+        output: Item::Helmet(Tier::Steel),
+        count: 1,
+        inputs: &[(Item::Helmet(Tier::Iron), 1), (Item::SteelIngot, 3)],
+        station: Some(Block::Forge),
+    },
+    // Amélioration : l'objet en fer, retrempé avec de l'acier.
+    Recipe {
+        output: Item::BodyArmor(Tier::Steel),
+        count: 1,
+        inputs: &[(Item::BodyArmor(Tier::Iron), 1), (Item::SteelIngot, 5)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
         output: Item::Pickaxe(Tier::Iron),
         count: 1,
         inputs: &[(Item::IronIngot, 3), (Item::Stick, 2)],
@@ -170,6 +218,17 @@ pub const RECIPES: &[Recipe] = &[
         output: b(Block::Landmine),
         count: 2,
         inputs: &[(Item::IronIngot, 1), (Item::Grenade, 1)],
+        station: Some(Block::Forge),
+    },
+    Recipe {
+        output: b(Block::Radio),
+        count: 1,
+        inputs: &[
+            (Item::IronIngot, 6),
+            (Item::Coal, 2),
+            (b(Block::Sand), 4),
+            (Item::Bandage, 1),
+        ],
         station: Some(Block::Forge),
     },
     Recipe {
@@ -490,7 +549,9 @@ impl Category {
                 Block::Planks => Category::Materials,
                 _ => Category::Building,
             },
-            Item::Stick | Item::IronIngot | Item::Coal | Item::Flask | Item::Hide => Category::Materials,
+            Item::Stick | Item::IronIngot | Item::SteelIngot | Item::Coal | Item::Flask | Item::Hide => {
+                Category::Materials
+            }
             Item::Pickaxe(_)
             | Item::Bucket
             | Item::WaterBucket
@@ -567,6 +628,20 @@ mod tests {
         assert_eq!(inv.count(Item::Pickaxe(Tier::Wood)), 1);
         assert_eq!(inv.count(b(Block::Planks)), 3);
         assert!(!recipe(Item::Pickaxe(Tier::Iron)).craft(&mut inv), "pas de fer");
+    }
+
+    #[test]
+    fn upgrading_to_steel_consumes_the_iron_item() {
+        let mut inv = Inventory::default();
+        inv.add(Item::IronIngot, 4);
+        inv.add(Item::Coal, 4);
+        inv.add(Item::Sword(Tier::Iron), 1);
+        let ingot = recipe(Item::SteelIngot);
+        assert!(ingot.craft(&mut inv) && ingot.craft(&mut inv));
+        assert!(recipe(Item::Sword(Tier::Steel)).craft(&mut inv));
+        assert_eq!(inv.count(Item::Sword(Tier::Iron)), 0);
+        assert_eq!(inv.count(Item::Sword(Tier::Steel)), 1);
+        assert!(!recipe(Item::Sword(Tier::Steel)).craft(&mut inv), "plus d'épée en fer");
     }
 
     #[test]

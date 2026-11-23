@@ -89,6 +89,7 @@ fn tier_rgb(tier: Tier) -> [f32; 3] {
         Tier::Wood => [0.62, 0.43, 0.22],
         Tier::Stone => [0.58, 0.58, 0.6],
         Tier::Iron => [0.86, 0.88, 0.92],
+        Tier::Steel => [0.55, 0.66, 0.82],
     }
 }
 

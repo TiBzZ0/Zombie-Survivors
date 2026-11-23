@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0021;
+pub const PROTOCOL_ID: u64 = 0x5A53_0024;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -158,6 +158,10 @@ pub enum ClientMessage {
     /// Le joueur vient de retomber au sol après une chute de `height` blocs.
     Fell {
         height: f32,
+    },
+    /// Lance l'appel de détresse depuis cette radio.
+    Radio {
+        pos: IVec3,
     },
 }
 
@@ -439,6 +443,16 @@ pub enum ServerMessage {
     /// La ligne est remontée, avec une prise (objet et nombre) ou non.
     Caught {
         item: Option<(Item, u32)>,
+    },
+    /// Statistiques et succès du joueur.
+    Record(crate::achievements::Record),
+    /// Un succès vient d'être débloqué.
+    Achievement(crate::achievements::Achievement),
+    /// Appel de détresse en cours (ou aucun).
+    Rescue(Option<crate::rescue::RescueState>),
+    /// Le joueur est monté dans l'hélicoptère : partie gagnée, au jour donné.
+    Evacuated {
+        day: u32,
     },
 }
 
