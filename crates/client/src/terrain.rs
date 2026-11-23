@@ -257,6 +257,10 @@ fn finish_chunks(
                 Mesh3d(meshes.add(mesh)),
                 Transform::from_xyz(ox as f32, oy as f32, oz as f32),
             ));
+            // L'eau laisse passer la lumière : elle ne projette pas d'ombre.
+            if block.is_water() {
+                entity.insert(bevy::light::NotShadowCaster);
+            }
             match material {
                 TerrainMaterial::Plain(handle) => entity.insert(MeshMaterial3d(handle.clone())),
                 TerrainMaterial::Wind(handle) => entity.insert(MeshMaterial3d(handle.clone())),
