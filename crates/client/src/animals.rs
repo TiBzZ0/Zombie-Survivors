@@ -46,9 +46,17 @@ struct Leg(f32);
 #[derive(Resource)]
 struct AnimalAssets {
     cube: Handle<Mesh>,
-    /// Pelage, ventre (ou bois, défenses) par espèce.
-    fur: [Handle<StandardMaterial>; 3],
-    detail: [Handle<StandardMaterial>; 3],
+    /// Pelage et détail (ventre, bois, défenses...) par espèce.
+    materials: std::collections::HashMap<AnimalKind, (Handle<StandardMaterial>, Handle<StandardMaterial>)>,
+}
+
+impl AnimalAssets {
+    fn fur(&self, kind: AnimalKind) -> &Handle<StandardMaterial> {
+        &self.materials[&kind].0
+    }
+    fn detail(&self, kind: AnimalKind) -> &Handle<StandardMaterial> {
+        &self.materials[&kind].1
+    }
 }
 
 fn setup_assets(
@@ -56,23 +64,28 @@ fn setup_assets(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mut mat = |r, g, b| {
+    let mut mat = |[r, g, b]: [f32; 3]| {
         materials.add(StandardMaterial {
             base_color: Color::srgb(r, g, b),
             perceptual_roughness: 1.0,
             ..default()
         })
     };
+    let materials = AnimalKind::ALL
+        .into_iter()
+        .map(|kind| {
+            let (fur, detail) = kind.colors();
+            (kind, (mat(fur), mat(detail)))
+        })
+        .collect();
     commands.insert_resource(AnimalAssets {
         cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-        fur: [mat(0.62, 0.55, 0.48), mat(0.55, 0.36, 0.20), mat(0.30, 0.24, 0.20)],
-        detail: [mat(0.92, 0.90, 0.86), mat(0.85, 0.78, 0.62), mat(0.88, 0.85, 0.75)],
+        materials,
     });
 }
 
 fn spawn_animal(commands: &mut Commands, assets: &AnimalAssets, state: &AnimalState) -> Entity {
     let kind = state.kind();
-    let i = kind as usize;
     let size = kind.stats().size;
     let (w, h) = (size.half_width * 2.0, size.height);
     let part = |mat: &Handle<StandardMaterial>, scale: Vec3, at: Vec3| {
@@ -98,25 +111,29 @@ fn spawn_animal(commands: &mut Commands, assets: &AnimalAssets, state: &AnimalSt
         ))
         .with_children(|a| {
             // Corps allongé vers -Z, tête devant.
-            let body_h = h * if kind == AnimalKind::Deer { 0.35 } else { 0.5 };
+            let body_h = h * if matches!(kind, AnimalKind::Deer | AnimalKind::Bear) {
+                0.35
+            } else {
+                0.5
+            };
             a.spawn(part(
-                &assets.fur[i],
+                assets.fur(kind),
                 Vec3::new(w * 0.8, body_h, w * 1.6),
                 Vec3::new(0.0, leg_h + body_h * 0.5, 0.0),
             ));
             let head = Vec3::new(0.0, leg_h + body_h * 1.1, -w * 0.9);
-            a.spawn(part(&assets.fur[i], Vec3::splat(w * 0.5), head));
+            a.spawn(part(assets.fur(kind), Vec3::splat(w * 0.5), head));
             match kind {
                 AnimalKind::Rabbit => {
                     for side in [-1.0, 1.0] {
                         a.spawn(part(
-                            &assets.fur[i],
+                            assets.fur(kind),
                             Vec3::new(w * 0.1, w * 0.5, w * 0.1),
                             head + Vec3::new(side * w * 0.12, w * 0.45, w * 0.05),
                         ));
                     }
                     a.spawn(part(
-                        &assets.detail[i],
+                        assets.detail(kind),
                         Vec3::splat(w * 0.25),
                         Vec3::new(0.0, leg_h + body_h * 0.7, w * 0.8),
                     ));
@@ -124,7 +141,7 @@ fn spawn_animal(commands: &mut Commands, assets: &AnimalAssets, state: &AnimalSt
                 AnimalKind::Deer => {
                     for side in [-1.0, 1.0] {
                         a.spawn(part(
-                            &assets.detail[i],
+                            assets.detail(kind),
                             Vec3::new(w * 0.06, w * 0.6, w * 0.06),
                             head + Vec3::new(side * w * 0.18, w * 0.5, 0.0),
                         ));
@@ -133,11 +150,54 @@ fn spawn_animal(commands: &mut Commands, assets: &AnimalAssets, state: &AnimalSt
                 AnimalKind::Boar => {
                     for side in [-1.0, 1.0] {
                         a.spawn(part(
-                            &assets.detail[i],
+                            assets.detail(kind),
                             Vec3::new(w * 0.06, w * 0.06, w * 0.2),
                             head + Vec3::new(side * w * 0.2, -w * 0.12, -w * 0.3),
                         ));
                     }
+                }
+                AnimalKind::Fox => {
+                    // Oreilles pointues et une queue touffue.
+                    for side in [-1.0, 1.0] {
+                        a.spawn(part(
+                            assets.fur(kind),
+                            Vec3::new(w * 0.14, w * 0.35, w * 0.1),
+                            head + Vec3::new(side * w * 0.2, w * 0.4, 0.0),
+                        ));
+                    }
+                    a.spawn(part(
+                        assets.detail(kind),
+                        Vec3::new(w * 0.4, w * 0.4, w * 0.9),
+                        Vec3::new(0.0, leg_h + body_h * 0.6, w * 1.1),
+                    ));
+                }
+                AnimalKind::Bear => {
+                    // Petites oreilles rondes et un museau.
+                    for side in [-1.0, 1.0] {
+                        a.spawn(part(
+                            assets.fur(kind),
+                            Vec3::splat(w * 0.18),
+                            head + Vec3::new(side * w * 0.22, w * 0.35, w * 0.1),
+                        ));
+                    }
+                    a.spawn(part(
+                        assets.detail(kind),
+                        Vec3::new(w * 0.3, w * 0.25, w * 0.25),
+                        head + Vec3::new(0.0, -w * 0.1, -w * 0.4),
+                    ));
+                }
+                AnimalKind::Fowl => {
+                    // Bec et crête.
+                    a.spawn(part(
+                        assets.detail(kind),
+                        Vec3::new(w * 0.2, w * 0.15, w * 0.3),
+                        head + Vec3::new(0.0, 0.0, -w * 0.4),
+                    ));
+                    a.spawn(part(
+                        assets.detail(kind),
+                        Vec3::new(w * 0.12, w * 0.25, w * 0.2),
+                        head + Vec3::new(0.0, w * 0.4, 0.0),
+                    ));
                 }
             }
             for (x, z) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
@@ -148,7 +208,7 @@ fn spawn_animal(commands: &mut Commands, assets: &AnimalAssets, state: &AnimalSt
                 ))
                 .with_children(|leg| {
                     leg.spawn(part(
-                        &assets.fur[i],
+                        assets.fur(kind),
                         Vec3::new(w * 0.18, leg_h, w * 0.18),
                         Vec3::new(0.0, -leg_h * 0.5, 0.0),
                     ));
