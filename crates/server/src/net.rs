@@ -356,6 +356,7 @@ fn receive_messages(
     mut animals: Query<&mut Animal>,
     mut claims: ResMut<Claims>,
     config: Res<ServerConfig>,
+    mut radio: ResMut<crate::rescue::RadioCalls>,
 ) {
     for client in server.clients_id() {
         while let Some(bytes) = server.receive_message(client, DefaultChannel::ReliableOrdered) {
@@ -378,6 +379,7 @@ fn receive_messages(
                 projectiles: &mut projectiles,
                 claims: &mut claims,
                 pvp: config.pvp,
+                radio: &mut radio,
             };
             handle_reliable(client, message, &mut ctx, &mut zombies, &mut animals);
         }
@@ -403,6 +405,7 @@ struct Context<'a> {
     projectiles: &'a mut Projectiles,
     claims: &'a mut Claims,
     pvp: bool,
+    radio: &'a mut crate::rescue::RadioCalls,
 }
 
 fn handle_reliable(
@@ -426,6 +429,7 @@ fn handle_reliable(
         projectiles,
         claims,
         pvp,
+        radio,
     } = ctx;
     let (spawn, now, pvp) = (*spawn, *now, *pvp);
     let ready = lobby.players.get(&client).is_some_and(ConnectedPlayer::is_ready);
@@ -1016,6 +1020,9 @@ fn handle_reliable(
                 player.fishing = Some(crate::fishing::Line::cast(at));
             }
         }
+        ClientMessage::Radio { pos } => {
+            radio.0.push((client, pos));
+        }
         ClientMessage::Fell { height } => {
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
@@ -1407,7 +1414,7 @@ fn hitscan(
 }
 
 /// Message du serveur à un seul joueur.
-fn notify(server: &mut RenetServer, client: ClientId, text: String) {
+pub(crate) fn notify(server: &mut RenetServer, client: ClientId, text: String) {
     send(
         server,
         client,

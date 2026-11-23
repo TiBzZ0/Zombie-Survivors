@@ -128,6 +128,9 @@ fn main() {
             machine,
         ));
     }
+    // La radio d'évacuation, un peu à l'écart (KIT_RESCUE=1 : l'hélicoptère vient de se poser).
+    let radio = block_at(0.0, -22.0);
+    edits.push((radio, Block::Radio));
     // Chaque grande machine occupe aussi ses autres cases.
     let parts: Vec<_> = edits
         .iter()
@@ -203,6 +206,13 @@ fn main() {
         claims: Vec::new(),
         progress: Vec::new(),
         records: Vec::new(),
+        rescue: std::env::var("KIT_RESCUE")
+            .is_ok()
+            .then_some(shared::rescue::RescueState {
+                radio,
+                day: 1,
+                landed: Some(shared::rescue::WAIT_SECS),
+            }),
     };
     let mut save = save;
     save.records = save

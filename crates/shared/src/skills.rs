@@ -413,7 +413,9 @@ impl Tech {
         use crate::item::Tier;
         match item {
             Item::Block(block) => match block {
-                Block::Generator | Block::Floodlight | Block::ElectricDoor | Block::TeslaCoil => Tech::Electricity,
+                Block::Generator | Block::Floodlight | Block::ElectricDoor | Block::TeslaCoil | Block::Radio => {
+                    Tech::Electricity
+                }
                 Block::Cannon | Block::MachineGun | Block::Landmine => Tech::Gunpowder,
                 Block::Turret | Block::Catapult => Tech::Mechanics,
                 Block::Forge | Block::ReinforcedWall | Block::BarbedWire | Block::BearTrap => Tech::Metallurgy,

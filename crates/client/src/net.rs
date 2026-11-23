@@ -175,6 +175,10 @@ pub enum NetEvent {
     Record(shared::achievements::Record),
     /// Succès débloqué à l'instant.
     Achievement(shared::achievements::Achievement),
+    /// Appel de détresse en cours (ou aucun).
+    Rescue(Option<shared::rescue::RescueState>),
+    /// Monté dans l'hélicoptère : partie gagnée.
+    Evacuated(u32),
     Collapse {
         pos: Vec3,
         blocks: u16,
@@ -505,6 +509,12 @@ fn receive_messages(
             }
             ServerMessage::Achievement(achievement) => {
                 events.write(NetEvent::Achievement(achievement));
+            }
+            ServerMessage::Rescue(state) => {
+                events.write(NetEvent::Rescue(state));
+            }
+            ServerMessage::Evacuated { day } => {
+                events.write(NetEvent::Evacuated(day));
             }
             ServerMessage::Collapse { pos, blocks } => {
                 events.write(NetEvent::Collapse { pos, blocks });

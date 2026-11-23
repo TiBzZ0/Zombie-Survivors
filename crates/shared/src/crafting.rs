@@ -173,6 +173,17 @@ pub const RECIPES: &[Recipe] = &[
         station: Some(Block::Forge),
     },
     Recipe {
+        output: b(Block::Radio),
+        count: 1,
+        inputs: &[
+            (Item::IronIngot, 6),
+            (Item::Coal, 2),
+            (b(Block::Sand), 4),
+            (Item::Bandage, 1),
+        ],
+        station: Some(Block::Forge),
+    },
+    Recipe {
         output: b(Block::Generator),
         count: 1,
         inputs: &[(Item::IronIngot, 6), (Item::Coal, 4)],

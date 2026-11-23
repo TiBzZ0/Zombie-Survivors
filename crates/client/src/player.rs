@@ -822,6 +822,14 @@ fn interact(
     }
     if let Some(hit) = player.target {
         let block = world.block(hit.block);
+        if mouse.just_pressed(MouseButton::Right)
+            && let Some(origin) = shared::multiblock::origin_of(hit.block, |p| world.block(p))
+            && world.block(origin) == Block::Radio
+        {
+            send_reliable(&mut client, &ClientMessage::Radio { pos: origin });
+            player.cooldown = 0.35;
+            return;
+        }
         if block.is_door() {
             send_reliable(&mut client, &ClientMessage::ToggleDoor { pos: hit.block });
             player.cooldown = 0.35;

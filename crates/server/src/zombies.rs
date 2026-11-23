@@ -396,6 +396,7 @@ fn spawn_waves(
     zombies: Query<(), With<Zombie>>,
     mut server: Option<ResMut<RenetServer>>,
     weather: Option<Res<crate::events::Weather>>,
+    rescue: Option<Res<crate::rescue::Rescue>>,
 ) {
     let fog = weather.is_some_and(|w| w.fog);
     if !clock.is_night() && !fog {
@@ -448,6 +449,12 @@ fn spawn_waves(
     }
     let budget = night_budget(clock.day, n, horde);
     let budget = if blood { budget * 3 / 2 } else { budget };
+    // L'appel de détresse attire les morts.
+    let budget = if rescue.is_some_and(|r| r.0.is_some()) {
+        (budget as f32 * shared::rescue::SIGNAL_SPAWNS) as u32
+    } else {
+        budget
+    };
     let left = budget.saturating_sub(waves.spawned);
     if alive >= cap || left == 0 {
         return;

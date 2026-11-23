@@ -25,6 +25,7 @@ pub mod farming;
 pub mod fishing;
 pub mod net;
 pub mod pathfind;
+pub mod rescue;
 pub mod save;
 pub mod structure;
 pub mod survivors;
@@ -68,6 +69,7 @@ impl Plugin for ServerPlugin {
                 trees::TreesPlugin,
                 fishing::FishingPlugin,
                 achievements::AchievementsPlugin,
+                rescue::RescuePlugin,
             ))
             .add_systems(Startup, announce)
             .add_systems(FixedUpdate, count_ticks)

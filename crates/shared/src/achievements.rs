@@ -29,6 +29,8 @@ pub struct Record {
     pub animals: u32,
     /// Dégâts infligés aux zombies.
     pub damage: u32,
+    /// Évacuations réussies.
+    pub evacuations: u32,
     /// Succès débloqués.
     pub unlocked: Vec<Achievement>,
 }
@@ -89,6 +91,7 @@ pub enum Achievement {
     Hunter,
     Butcher,
     Phoenix,
+    Rescued,
 }
 
 /// Comment un succès s'affiche et ce qu'il rapporte.
@@ -99,7 +102,7 @@ pub struct AchievementInfo {
 }
 
 impl Achievement {
-    pub const ALL: [Achievement; 23] = [
+    pub const ALL: [Achievement; 24] = [
         Achievement::FirstBlood,
         Achievement::Slayer,
         Achievement::Exterminator,
@@ -123,6 +126,7 @@ impl Achievement {
         Achievement::Leader,
         Achievement::Warlord,
         Achievement::Phoenix,
+        Achievement::Rescued,
     ];
 
     pub fn info(self) -> AchievementInfo {
@@ -150,6 +154,7 @@ impl Achievement {
             Achievement::Leader => ("Chef de camp", "Recruter 3 survivants", 30),
             Achievement::Warlord => ("Seigneur de guerre", "Recruter 10 survivants", 80),
             Achievement::Phoenix => ("Phénix", "Mourir 5 fois et revenir", 10),
+            Achievement::Rescued => ("Évacué", "Monter dans l'hélicoptère de secours", 200),
         };
         AchievementInfo { title, description, xp }
     }
@@ -180,6 +185,7 @@ impl Achievement {
             Achievement::Leader => r.recruited >= 3,
             Achievement::Warlord => r.recruited >= 10,
             Achievement::Phoenix => r.deaths >= 5,
+            Achievement::Rescued => r.evacuations >= 1,
         }
     }
 
@@ -210,6 +216,7 @@ impl Achievement {
             Achievement::Leader => goal(r.recruited, 3),
             Achievement::Warlord => goal(r.recruited, 10),
             Achievement::Phoenix => goal(r.deaths, 5),
+            Achievement::Rescued => goal(r.evacuations, 1),
         }
     }
 }

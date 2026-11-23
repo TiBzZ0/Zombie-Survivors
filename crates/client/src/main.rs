@@ -32,6 +32,7 @@ mod particles;
 mod player;
 mod rain;
 mod remote;
+mod rescue;
 mod settings;
 mod skills;
 mod sky;
@@ -161,7 +162,7 @@ fn main() {
             worldmap::WorldMapPlugin,
             damage::DamagePlugin,
         ))
-        .add_plugins(journal::JournalPlugin)
+        .add_plugins((journal::JournalPlugin, rescue::RescuePlugin))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
         .add_systems(OnExit(AppState::Playing), release_cursor)

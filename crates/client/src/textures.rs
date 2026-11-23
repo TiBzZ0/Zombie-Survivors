@@ -134,6 +134,23 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
             }
             gray(0.85 + 0.1 * n)
         }
+        Block::Radio => {
+            // Façade kaki : haut-parleur grillagé à gauche, cadran éclairé et deux boutons.
+            if (2..7).contains(&x) && (4..12).contains(&y) {
+                return gray(if (x + y).is_multiple_of(2) { 0.35 } else { 0.6 });
+            }
+            if (9..14).contains(&x) && (4..7).contains(&y) {
+                return [2.4, 2.0, 0.9];
+            }
+            if (y == 10 || y == 11) && (x == 9 || x == 10 || x == 12 || x == 13) {
+                return gray(0.25);
+            }
+            gray(if x == 0 || y == 0 || x == 15 || y == 15 {
+                0.6
+            } else {
+                0.85 + 0.1 * n
+            })
+        }
         Block::TeslaCoil => {
             // Bobinage cuivré.
             gray(if y.is_multiple_of(2) { 1.0 } else { 0.65 + 0.1 * n })
@@ -419,7 +436,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 57] = [
+const ALL_BLOCKS: [Block; 58] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -476,6 +493,7 @@ const ALL_BLOCKS: [Block; 57] = [
     Block::Bedroll,
     Block::Part,
     Block::Landmine,
+    Block::Radio,
     Block::BearTrap,
 ];
 

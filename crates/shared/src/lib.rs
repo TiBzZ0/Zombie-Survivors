@@ -21,6 +21,7 @@ pub mod pathfinding;
 pub mod physics;
 pub mod protocol;
 pub mod raycast;
+pub mod rescue;
 pub mod skills;
 pub mod stamina;
 pub mod structure;

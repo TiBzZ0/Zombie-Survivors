@@ -111,6 +111,8 @@ pub enum Block {
     Landmine,
     /// Piège à mâchoires : happe et retient le zombie qui marche dessus (et s'use).
     BearTrap,
+    /// Radio : alimentée, elle lance l'appel de détresse qui fait venir l'hélicoptère.
+    Radio,
 }
 
 /// Rayon (à l'horizontale, sur toute la hauteur) de la base protégée par une bannière.
@@ -256,7 +258,7 @@ impl Block {
     pub const fn is_electric(self) -> bool {
         matches!(
             self,
-            Block::Floodlight | Block::ElectricDoor | Block::ElectricDoorOpen | Block::TeslaCoil
+            Block::Floodlight | Block::ElectricDoor | Block::ElectricDoorOpen | Block::TeslaCoil | Block::Radio
         )
     }
 
@@ -410,6 +412,7 @@ impl Block {
             Block::Part => [0.45, 0.45, 0.45],
             Block::Landmine => [0.3, 0.32, 0.28],
             Block::BearTrap => [0.5, 0.48, 0.45],
+            Block::Radio => [0.32, 0.36, 0.28],
         }
     }
 
@@ -471,6 +474,7 @@ impl Block {
             Block::Part => "Machine",
             Block::Landmine => "Mine",
             Block::BearTrap => "Piège à mâchoires",
+            Block::Radio => "Radio",
         }
     }
 
@@ -516,6 +520,7 @@ impl Block {
             Block::Part => 200,
             Block::Landmine => 10,
             Block::BearTrap => 60,
+            Block::Radio => 250,
         }
     }
 }
