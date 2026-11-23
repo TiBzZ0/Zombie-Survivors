@@ -417,7 +417,7 @@ pub fn armor_reduction(pieces: [Option<Item>; 2]) -> f32 {
 /// Ce que donne un bloc cassé (la pomme des feuilles est tirée au sort par le serveur).
 pub fn drop_for(block: Block) -> Option<Item> {
     match block {
-        Block::Air => None,
+        Block::Air | Block::TallGrass => None,
         Block::Grass => Some(Item::Block(Block::Dirt)),
         // Les filons donnent leur ressource, jamais le bloc lui-même (qui serait un filon neuf).
         Block::IronOre => Some(Item::RawIron),

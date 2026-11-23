@@ -180,7 +180,11 @@ impl WorldGenerator {
             if self.water_level().is_some_and(|level| y < level) {
                 return Block::Water;
             }
-            return self.tree_block_at(x, y, z);
+            let block = self.tree_block_at(x, y, z);
+            if block == Block::Air && y == surface && self.tall_grass_at(x, z, surface) {
+                return Block::TallGrass;
+            }
+            return block;
         }
         if y > 2 && y < surface - 4 && self.caves.get_noise_3d(x as f32, y as f32, z as f32) > 0.6 {
             return Block::Air;
@@ -199,6 +203,18 @@ impl WorldGenerator {
             4..=24 if self.coal.get_noise_3d(x as f32, y as f32, z as f32) > 0.78 => Block::CoalOre,
             _ => Block::Stone,
         }
+    }
+
+    /// Touffe d'herbes hautes sur l'herbe des plaines et des forêts (pas sous l'eau).
+    fn tall_grass_at(&self, x: i32, z: i32, surface: i32) -> bool {
+        let chance = match self.biome(x, z) {
+            Biome::Plains => 28,
+            Biome::Forest => 14,
+            Biome::Desert | Biome::Snow => return false,
+        };
+        !self.is_beach(surface)
+            && self.water_level().is_none_or(|level| surface >= level)
+            && hash3(self.config.seed.wrapping_add(131), x, z) % 100 < chance
     }
 
     /// Les colonnes trop basses sont des plages de sable, sans arbres.
@@ -472,6 +488,22 @@ mod tests {
         });
         let differs = (0..64).any(|i| a.surface_height(i * 13, i * 7) != b.surface_height(i * 13, i * 7));
         assert!(differs);
+    }
+
+    #[test]
+    fn tall_grass_grows_on_grass_only() {
+        let generator = WorldGenerator::new(WorldConfig::default());
+        let mut tufts = 0;
+        for x in (0..400).step_by(3) {
+            for z in (0..400).step_by(5) {
+                let ground = generator.surface_height(x, z);
+                if generator.block_at(x, ground, z) == Block::TallGrass {
+                    tufts += 1;
+                    assert_eq!(generator.block_at(x, ground - 1, z), Block::Grass);
+                }
+            }
+        }
+        assert!(tufts > 50, "{tufts} touffes");
     }
 
     #[test]

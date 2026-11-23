@@ -116,9 +116,10 @@ fn axes(normal: [i32; 3]) -> (usize, usize, usize) {
 /// Hauteur dont la surface de l'eau est abaissée sous le haut du bloc.
 const WATER_DROP: f32 = 0.125;
 
-/// Un bloc qui cache entièrement la face de son voisin (l'eau, transparente, ne cache rien).
+/// Un bloc qui cache entièrement la face de son voisin (l'eau, transparente, et les feuilles,
+/// trouées, ne cachent rien).
 pub fn hides_faces(block: Block) -> bool {
-    block.is_opaque() && !block.is_water()
+    block.is_opaque() && !block.is_water() && block != Block::Leaves
 }
 
 /// Construit les maillages d'un chunk.
@@ -145,6 +146,25 @@ pub fn build_chunk_mesh(chunk: &Chunk, outside: impl Fn(i32, i32, i32) -> Block)
         for z in 0..n {
             for x in 0..n {
                 let block = chunk.get(x, y, z);
+                if block.is_plant() {
+                    // Deux plans en diagonale, éclairés comme le dessus d'un bloc.
+                    let part = out.part(block);
+                    let o = [x as f32, y as f32, z as f32];
+                    let color = face_color(block, [0, 1, 0]);
+                    for (a, b) in [((0.15, 0.15), (0.85, 0.85)), ((0.15, 0.85), (0.85, 0.15))] {
+                        let base = part.positions.len() as u32;
+                        let corners = [(a, 0.0), (b, 0.0), (b, 1.0), (a, 1.0)];
+                        for (i, ((cx, cz), cy)) in corners.into_iter().enumerate() {
+                            part.positions.push([o[0] + cx, o[1] + cy, o[2] + cz]);
+                            part.normals.push([0.0, 1.0, 0.0]);
+                            part.colors.push(color);
+                            part.uvs.push([if i == 0 || i == 3 { 0.0 } else { 1.0 }, 1.0 - cy]);
+                        }
+                        part.indices
+                            .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+                    }
+                    continue;
+                }
                 let Some((min, max)) = block.partial_shape() else {
                     continue;
                 };
@@ -180,8 +200,10 @@ pub fn build_chunk_mesh(chunk: &Chunk, outside: impl Fn(i32, i32, i32) -> Block)
                     let neighbour = get(x + normal[0], y + normal[1], z + normal[2]);
                     let visible = block != Block::Air
                         && block.partial_shape().is_none()
+                        && !block.is_plant()
                         && !hides_faces(neighbour)
-                        && !(block.is_water() && neighbour.is_water());
+                        && !(block.is_water() && neighbour.is_water())
+                        && !(block == Block::Leaves && neighbour == Block::Leaves);
                     let lowered = block.is_water() && !get(x, y + 1, z).is_water();
                     mask[pv * n + pu] = visible.then_some((block, lowered));
                 }
@@ -256,6 +278,34 @@ fn srgb_to_linear(c: [f32; 3]) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plants_are_two_crossed_quads_and_hide_nothing() {
+        let mut chunk = Chunk::default();
+        chunk.set(5, 5, 5, Block::Stone);
+        chunk.set(5, 6, 5, Block::TallGrass);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
+        assert_eq!(mesh.quads(), 6 + 2, "la pierre garde son dessus");
+    }
+
+    #[test]
+    fn leaves_show_what_is_behind_them_but_not_their_inner_faces() {
+        let mut chunk = Chunk::default();
+        chunk.set(5, 5, 5, Block::Leaves);
+        chunk.set(6, 5, 5, Block::Leaves);
+        chunk.set(5, 4, 5, Block::Wood);
+        let mesh = build_chunk_mesh(&chunk, |_, _, _| Block::Air);
+        let count = |b: Block| {
+            mesh.parts
+                .iter()
+                .find(|(p, _)| *p == b)
+                .map_or(0, |(_, m)| m.indices.len() / 6)
+        };
+        // Le tronc garde son dessus sous les feuilles ; les deux feuilles fusionnent en 6 rectangles,
+        // sans la face qui les sépare ni celle posée sur le tronc.
+        assert_eq!(count(Block::Wood), 6);
+        assert_eq!(count(Block::Leaves), 6);
+    }
 
     #[test]
     fn single_block_has_six_faces() {

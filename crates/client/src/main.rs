@@ -33,6 +33,7 @@ mod terrain;
 mod textures;
 mod tutorial;
 mod viewmodel;
+mod wind;
 mod zombies;
 
 use bevy::prelude::*;
@@ -139,6 +140,7 @@ fn main() {
             electricity::ElectricityPlugin,
             inventory_ui::InventoryUiPlugin,
             viewmodel::ViewModelPlugin,
+            wind::WindPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
