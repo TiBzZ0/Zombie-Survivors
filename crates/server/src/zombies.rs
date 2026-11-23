@@ -20,7 +20,7 @@ use shared::zombie::{
 };
 
 use crate::daynight::Clock;
-use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, MAX_THIRST, WorldVersion, send_buffs, send_vitals};
+use crate::net::{Lobby, MAX_HUNGER, MAX_THIRST, WorldVersion, send_buffs, send_progress, send_vitals};
 use crate::survivors::Survivor;
 use crate::world::{Chests, GameWorld, SpawnPoint};
 
@@ -808,6 +808,9 @@ pub(crate) fn damage_block(
     true
 }
 
+/// Délai entre deux « Second souffle ».
+pub const SECOND_WIND_COOLDOWN: f32 = 300.0;
+
 /// Retire de la vie à un joueur et annonce sa mort si besoin.
 pub fn hurt_player(
     id: ClientId,
@@ -822,6 +825,23 @@ pub fn hurt_player(
     let before = player.health.ceil();
     player.health = (player.health - amount).max(0.0);
     player.since_hit = 0.0;
+    // Second souffle : un coup fatal laisse le joueur debout, une fois toutes les cinq minutes.
+    if player.health <= 0.0 && player.second_wind <= 0.0 && player.skills().second_wind {
+        player.health = player.max_health() * 0.25;
+        player.second_wind = SECOND_WIND_COOLDOWN;
+        if let Some(server) = server {
+            send_vitals(server, id, player);
+            server.send_message(
+                id,
+                DefaultChannel::ReliableOrdered,
+                encode(&ServerMessage::Chat {
+                    from: "Système".into(),
+                    text: "Second souffle ! Vous vous relevez.".into(),
+                }),
+            );
+        }
+        return;
+    }
     let Some(server) = server else { return };
     if player.health.ceil() != before || player.health <= 0.0 {
         send_vitals(server, id, player);
@@ -931,11 +951,24 @@ fn sun_and_cleanup(
 fn kill_dead_zombies(
     mut commands: Commands,
     zombies: Query<(Entity, &Zombie)>,
+    mut lobby: ResMut<Lobby>,
     mut server: Option<ResMut<RenetServer>>,
 ) {
     for (entity, zombie) in &zombies {
         if zombie.health <= 0.0 {
             commands.entity(entity).despawn();
+            // L'expérience revient au joueur qui a porté le dernier coup.
+            let killer = zombie
+                .last_attacker
+                .and_then(|id| lobby.players.get_mut(&id).map(|p| (id, p)));
+            if let Some((id, player)) = killer
+                && player.is_ready()
+            {
+                player.progress.add_xp(shared::skills::zombie_xp(zombie.kind));
+                if let Some(server) = server.as_deref_mut() {
+                    send_progress(server, id, player);
+                }
+            }
             if let Some(server) = server.as_deref_mut() {
                 server.broadcast_message(
                     DefaultChannel::ReliableOrdered,
@@ -985,6 +1018,8 @@ fn player_survival(
         // Les effets temporaires s'écoulent (et modifient faim, infection, régénération).
         let buffs_changed = player.buffs.tick(dt);
         let fx = player.buffs.effects();
+        let skills = player.skills();
+        player.second_wind = (player.second_wind - dt).max(0.0);
         let hunger_before = player.hunger.ceil();
         let thirst_before = player.thirst.ceil();
         let temp_before = (player.body_temp * 10.0).round();
@@ -1005,13 +1040,14 @@ fn player_survival(
         player.body_temp = shared::climate::step_body(player.body_temp, player.felt, dt);
 
         if player.infection > 0.0 {
-            player.infection = (player.infection + INFECTION_PER_SEC * fx.infection_rate * dt).min(100.0);
+            player.infection =
+                (player.infection + INFECTION_PER_SEC * fx.infection_rate * skills.infection_rate * dt).min(100.0);
         }
 
-        player.hunger = (player.hunger - HUNGER_PER_SEC * fx.hunger_rate * dt).max(0.0);
+        player.hunger = (player.hunger - HUNGER_PER_SEC * fx.hunger_rate * skills.hunger_rate * dt).max(0.0);
         if thirsty {
             let heat = if player.body_temp > OVERHEATING { 2.0 } else { 1.0 };
-            player.thirst = (player.thirst - THIRST_PER_SEC * heat * dt).max(0.0);
+            player.thirst = (player.thirst - THIRST_PER_SEC * heat * skills.thirst_rate * dt).max(0.0);
         }
         let infection_dps = if player.infection >= 100.0 {
             INFECTION_DPS * 2.0
@@ -1063,8 +1099,10 @@ fn player_survival(
         } else {
             0.0
         };
-        if (natural + fx.regen) > 0.0 && player.health < MAX_HEALTH {
-            player.health = (player.health + (natural + fx.regen) * dt).min(MAX_HEALTH);
+        let regen = natural + fx.regen + if natural > 0.0 { skills.regen } else { 0.0 };
+        let max = player.max_health();
+        if regen > 0.0 && player.health < max {
+            player.health = (player.health + regen * dt).min(max);
         }
         if (player.health.ceil() != health_before || vitals_changed(player))
             && let Some(server) = server.as_deref_mut()
@@ -1354,7 +1392,7 @@ mod climate_tests {
             "{} °C",
             player.body_temp
         );
-        assert!(player.health < MAX_HEALTH);
+        assert!(player.health < crate::net::MAX_HEALTH);
     }
 
     #[test]
@@ -1454,5 +1492,42 @@ mod fog_tests {
     fn fog_hides_the_sun_from_zombies() {
         assert!(daylight_zombie(false) < 90.0);
         assert_eq!(daylight_zombie(true), 100.0);
+    }
+    #[test]
+    fn killing_a_zombie_rewards_the_last_attacker() {
+        let mut app = App::new();
+        app.init_resource::<Lobby>().add_systems(Update, kill_dead_zombies);
+        let mut player = crate::net::ConnectedPlayer::new(Vec3::ZERO);
+        player.name = "Alice".into();
+        app.world_mut().resource_mut::<Lobby>().players.insert(1, player);
+        app.world_mut().spawn(Zombie {
+            id: 1,
+            kind: ZombieKind::Brute,
+            health: -5.0,
+            attack_cooldown: 0.0,
+            attacking: 0.0,
+            hurt_timer: 0.0,
+            knockback: Vec3::ZERO,
+            last_attacker: Some(1),
+            climb_from: None,
+            stuck: 0.0,
+        });
+        app.update();
+        let xp = app.world().resource::<Lobby>().players[&1].progress.xp;
+        assert_eq!(xp, shared::skills::zombie_xp(ZombieKind::Brute));
+    }
+
+    #[test]
+    fn second_wind_saves_once_then_needs_to_recharge() {
+        use shared::skills::Skill;
+        let mut player = crate::net::ConnectedPlayer::new(Vec3::ZERO);
+        player.name = "Alice".into();
+        player.progress.xp = u32::MAX / 2;
+        player.progress.skills.insert(Skill::SecondWind, 1);
+        hurt_player(1, &mut player, 500.0, "test", None);
+        assert_eq!(player.health, player.max_health() * 0.25);
+        assert!(player.second_wind > 0.0);
+        hurt_player(1, &mut player, 500.0, "test", None);
+        assert_eq!(player.health, 0.0);
     }
 }

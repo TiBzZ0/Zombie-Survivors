@@ -449,12 +449,13 @@ fn update_status(
         clock_text.0.push_str(&format!("\nJcJ activé{place}"));
     }
     let armor = player.inventory.armor_reduction();
+    let max = player.max_health();
     health_text.0 = if armor > 0.0 {
-        format!("{:.0} · armure {:.0} %", player.health.ceil(), armor * 100.0)
+        format!("{:.0}/{max:.0} · armure {:.0} %", player.health.ceil(), armor * 100.0)
     } else {
-        format!("{:.0}", player.health.ceil())
+        format!("{:.0}/{max:.0}", player.health.ceil())
     };
-    fill.width = percent(player.health.clamp(0.0, 100.0));
+    fill.width = percent((player.health / max * 100.0).clamp(0.0, 100.0));
     let hunger = if player.hunger <= 0.0 {
         "Affamé !".to_string()
     } else {

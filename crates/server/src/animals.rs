@@ -281,7 +281,14 @@ fn animal_deaths(
         if let Some(id) = a.last_attacker
             && let Some(player) = lobby.players.get_mut(&id)
         {
-            player.inventory.add(Item::RawMeat, fastrand::u32(min..=max));
+            // Chasseur : chaque rang donne une chance de viande en plus ; la chasse rapporte un peu d'expérience.
+            let extra_meat = player.skills().extra_meat;
+            let extra = extra_meat.floor() as u32 + u32::from(fastrand::f32() < extra_meat.fract());
+            player.inventory.add(Item::RawMeat, fastrand::u32(min..=max) + extra);
+            player.progress.add_xp(HUNT_XP);
+            if let Some(server) = server.as_deref_mut() {
+                crate::net::send_progress(server, id, player);
+            }
             let hides = a.kind.stats().hides;
             if hides > 0 {
                 player.inventory.add(Item::Hide, hides);
@@ -292,6 +299,9 @@ fn animal_deaths(
         }
     }
 }
+
+/// Expérience gagnée en abattant un animal.
+const HUNT_XP: u32 = 5;
 
 fn broadcast_animals(
     mut server: Option<ResMut<RenetServer>>,

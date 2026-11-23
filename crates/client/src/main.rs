@@ -27,6 +27,7 @@ mod particles;
 mod player;
 mod remote;
 mod settings;
+mod skills;
 mod sky;
 mod sound;
 mod survivors;
@@ -143,6 +144,7 @@ fn main() {
             viewmodel::ViewModelPlugin,
             wind::WindPlugin,
             particles::ParticlesPlugin,
+            skills::SkillsPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)

@@ -98,6 +98,7 @@ pub enum NetEvent {
         zombies_alive: u32,
     },
     Buffs(shared::buff::Buffs),
+    Progress(shared::skills::Progress),
     Vitals {
         health: f32,
         hunger: f32,
@@ -406,6 +407,9 @@ fn receive_messages(
             }
             ServerMessage::Buffs(buffs) => {
                 events.write(NetEvent::Buffs(buffs));
+            }
+            ServerMessage::Progress(progress) => {
+                events.write(NetEvent::Progress(progress));
             }
             ServerMessage::Died { cause } => {
                 events.write(NetEvent::Died(cause));

@@ -123,6 +123,10 @@ pub struct LocalPlayer {
     pub parry_flash: f32,
     /// Effets temporaires actifs (café, bière...).
     pub buffs: shared::buff::Buffs,
+    /// Expérience et compétences, envoyées par le serveur.
+    pub progress: shared::skills::Progress,
+    /// Arbre de compétences ouvert (touche K).
+    pub skills_open: bool,
     /// Objets déjà vus dans l'inventaire : seuls les nouveaux venus prennent une case libre
     /// de la barre (une case vidée à la main le reste).
     known: std::collections::BTreeSet<Item>,
@@ -141,7 +145,17 @@ impl LocalPlayer {
 
     /// Un panneau (fabrication, coffre) libère la souris.
     pub fn panel_open(&self) -> bool {
-        self.crafting_open || self.chest.is_some()
+        self.crafting_open || self.chest.is_some() || self.skills_open
+    }
+
+    /// Effets des compétences apprises.
+    pub fn skills(&self) -> shared::skills::SkillEffects {
+        self.progress.effects()
+    }
+
+    /// Santé maximale, compétences comprises.
+    pub fn max_health(&self) -> f32 {
+        self.skills().max_health
     }
 
     /// Objet de la case sélectionnée, s'il en reste.
@@ -212,15 +226,22 @@ fn grab_cursor(
     }
     let was_open = player.panel_open();
     if keys.just_pressed(KeyCode::KeyC) || keys.just_pressed(KeyCode::Tab) {
+        player.skills_open = false;
         if player.chest.is_some() {
             close_chest(&mut player, &mut client);
         } else {
             player.crafting_open = !player.crafting_open;
         }
     }
+    if keys.just_pressed(KeyCode::KeyK) {
+        close_chest(&mut player, &mut client);
+        player.crafting_open = false;
+        player.skills_open = !player.skills_open;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         let any_panel = player.panel_open();
         player.crafting_open = false;
+        player.skills_open = false;
         close_chest(&mut player, &mut client);
         if !any_panel {
             cursor.visible = true;
@@ -311,6 +332,9 @@ fn apply_teleports(
             }
             NetEvent::Buffs(buffs) => {
                 player.buffs = buffs.clone();
+            }
+            NetEvent::Progress(progress) => {
+                player.progress = progress.clone();
             }
             NetEvent::Vitals {
                 health,
@@ -404,8 +428,14 @@ fn move_player(
             .is_water()
     };
     player.swimming = wet(0.6) || wet(0.05);
-    let speed = if player.swimming { speed * SWIM_FACTOR } else { speed };
-    let speed = speed * player.buffs.effects().speed;
+    let skills = player.skills();
+    let speed = if player.swimming {
+        speed * SWIM_FACTOR * skills.swim_speed
+    } else {
+        speed
+    };
+    let health_part = player.health / skills.max_health;
+    let speed = speed * player.buffs.effects().speed * skills.move_speed(health_part);
     let wish = Quat::from_rotation_y(player.yaw) * wish.normalize_or_zero() * speed;
 
     let dt = time.delta_secs().min(0.05);
@@ -423,7 +453,7 @@ fn move_player(
             velocity.y.clamp(-SINK_SPEED, SWIM_UP_SPEED)
         };
     } else if player.on_ground && pressed(KeyCode::Space) {
-        velocity.y = JUMP_SPEED;
+        velocity.y = JUMP_SPEED * skills.jump.sqrt();
     }
 
     // Tant que le terrain sous le joueur n'est pas connu, il ne tombe pas dans le vide.
@@ -731,7 +761,8 @@ fn mine(
             0.0
         }
     };
-    let progress = progress + dt * player.buffs.effects().mining / duration.max(0.05);
+    let speed = player.buffs.effects().mining * player.skills().mining(block);
+    let progress = progress + dt * speed / duration.max(0.05);
     if progress < 1.0 {
         player.mining = Some((hit.block, progress));
         return;

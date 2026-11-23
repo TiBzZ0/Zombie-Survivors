@@ -117,6 +117,11 @@ fn main() {
                 inventory,
                 thirst: 100.0,
                 infection: 0.0,
+                // KIT_XP=5000 pour tester les compétences avec des points à dépenser.
+                progress: shared::skills::Progress {
+                    xp: std::env::var("KIT_XP").ok().and_then(|x| x.parse().ok()).unwrap_or(0),
+                    ..Default::default()
+                },
             },
         )],
         deposits: Vec::new(),
@@ -124,7 +129,14 @@ fn main() {
         survivors,
         infections: Vec::new(),
         claims: Vec::new(),
+        progress: Vec::new(),
     };
+    let mut save = save;
+    save.progress = save
+        .players
+        .iter()
+        .map(|(n, p)| (n.clone(), p.progress.clone()))
+        .collect();
     write(std::path::Path::new(&dir), &save).expect("écriture de la sauvegarde");
     println!("Sauvegarde écrite dans {dir}");
 }

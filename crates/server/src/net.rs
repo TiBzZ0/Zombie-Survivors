@@ -84,6 +84,10 @@ pub struct ConnectedPlayer {
     pub buffs: shared::buff::Buffs,
     /// Point de réapparition personnel, posé en se couchant dans un sac de couchage.
     pub home: Option<Vec3>,
+    /// Expérience et compétences apprises.
+    pub progress: shared::skills::Progress,
+    /// Temps avant que « Second souffle » puisse de nouveau sauver le joueur.
+    pub second_wind: f32,
 }
 
 /// Durée après avoir levé la garde pendant laquelle un coup est paré.
@@ -91,7 +95,10 @@ pub const PARRY_WINDOW: f32 = 0.3;
 /// Part des dégâts qui passe à travers la garde.
 const GUARD_FACTOR: f32 = 0.35;
 
-/// Santé maximale d'un joueur.
+/// Multiplicateur des coups critiques.
+pub const CRIT_FACTOR: f32 = 1.75;
+
+/// Santé maximale d'un joueur sans compétence.
 pub const MAX_HEALTH: f32 = 100.0;
 /// Faim maximale d'un joueur.
 pub const MAX_HUNGER: f32 = 100.0;
@@ -141,7 +148,39 @@ impl ConnectedPlayer {
             infection: 0.0,
             buffs: shared::buff::Buffs::default(),
             home: None,
+            progress: shared::skills::Progress::default(),
+            second_wind: 0.0,
         }
+    }
+
+    /// Effets cumulés des compétences apprises.
+    pub fn skills(&self) -> shared::skills::SkillEffects {
+        self.progress.effects()
+    }
+
+    /// Santé maximale, compétences comprises.
+    pub fn max_health(&self) -> f32 {
+        self.skills().max_health
+    }
+
+    /// Multiplicateur de coup critique : tiré au hasard selon « Précision ».
+    pub fn crit(&self) -> f32 {
+        if fastrand::f32() < self.skills().crit_chance {
+            CRIT_FACTOR
+        } else {
+            1.0
+        }
+    }
+
+    /// Dégâts d'un coup de mêlée de base `base` contre ce zombie (ou un autre adversaire),
+    /// avec boissons, compétences et coup critique.
+    pub fn melee_damage(&self, base: f32, kind: Option<shared::zombie::ZombieKind>) -> f32 {
+        base * self.buffs.effects().melee * self.skills().melee_against(kind, self.health_part()) * self.crit()
+    }
+
+    /// Part de vie restante, entre 0 et 1.
+    pub fn health_part(&self) -> f32 {
+        (self.health / self.max_health()).clamp(0.0, 1.0)
     }
 
     /// Garde levée avec une arme de mêlée en main.
@@ -154,15 +193,17 @@ impl ConnectedPlayer {
     /// les réduit (ou les annule si elle vient d'être levée : parade), l'armure aussi.
     /// Renvoie aussi vrai si le coup a été paré.
     pub fn incoming_damage(&self, amount: f32, from: Vec3) -> (f32, bool) {
+        let skills = self.skills();
         let look = Quat::from_rotation_y(self.state.yaw) * Vec3::NEG_Z;
         let to = Vec3::new(from.x - self.state.position.x, 0.0, from.z - self.state.position.z).normalize_or_zero();
         let facing = look.dot(to) > 0.2;
         let (amount, parried) = match self.guard_time() {
             Some(t) if facing && t <= PARRY_WINDOW => (0.0, true),
-            Some(_) if facing => (amount * GUARD_FACTOR, false),
+            Some(_) if facing => (amount * GUARD_FACTOR * (1.0 - skills.guard).max(0.0), false),
             _ => (amount, false),
         };
-        (amount * (1.0 - self.inventory.armor_reduction()), parried)
+        let armor = 1.0 - self.inventory.armor_reduction();
+        (amount * armor * skills.damage_taken.max(0.2), parried)
     }
 
     /// Objet en main s'il est encore dans l'inventaire.
@@ -185,6 +226,11 @@ pub fn send_vitals(server: &mut RenetServer, client: ClientId, player: &Connecte
             infection: player.infection,
         },
     );
+}
+
+/// Envoie au joueur son expérience et ses compétences.
+pub fn send_progress(server: &mut RenetServer, client: ClientId, player: &ConnectedPlayer) {
+    send(server, client, &ServerMessage::Progress(player.progress.clone()));
 }
 
 /// Envoie au joueur ses effets temporaires.
@@ -447,9 +493,11 @@ fn handle_reliable(
                     player.thirst = back.thirst;
                     player.infection = back.infection;
                     player.inventory = back.inventory;
+                    player.progress = back.progress;
                 }
                 send_inventory(server, client, player);
                 send_vitals(server, client, player);
+                send_progress(server, client, player);
                 if player.health <= 0.0 {
                     send(
                         server,
@@ -471,7 +519,6 @@ fn handle_reliable(
                 return;
             }
             let melee = Item::melee(player.held_item());
-            let melee_damage = melee.damage * player.buffs.effects().melee;
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
             let look = Quat::from_euler(EulerRot::YXZ, player.state.yaw, 0.0, 0.0) * Vec3::NEG_Z;
             let flat_look = Vec3::new(look.x, 0.0, look.z).normalize_or_zero();
@@ -498,7 +545,7 @@ fn handle_reliable(
                         && in_reach(&z, body)
                         && (ahead.dot(flat_look) > 0.5 || to.length() < 1.0));
                 if hit {
-                    z.health -= melee_damage;
+                    z.health -= player.melee_damage(melee.damage, Some(z.kind));
                     z.hurt_timer = 0.3;
                     z.knockback = flat_look * melee.knockback + Vec3::Y * 3.0;
                     z.last_attacker = Some(client);
@@ -536,7 +583,7 @@ fn handle_reliable(
                 return;
             }
             let melee = Item::melee(player.held_item());
-            let melee_damage = melee.damage * player.buffs.effects().melee;
+            let melee_damage = player.melee_damage(melee.damage, None);
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
             let in_reach = lobby
                 .players
@@ -594,7 +641,8 @@ fn handle_reliable(
                 // Mitrailleuse : légère dispersion.
                 let spread = Vec3::new(fastrand::f32() - 0.5, fastrand::f32() - 0.5, fastrand::f32() - 0.5) * 0.04;
                 let dir = (dir + spread).normalize_or_zero();
-                let end = hitscan(origin, dir, 70.0, gun.damage, 1, client, world, zombies, animals);
+                let damage = gun.damage * player.skills().gunner;
+                let end = hitscan(origin, dir, 70.0, damage, 1, client, world, zombies, animals);
                 broadcast(
                     server,
                     &ServerMessage::Shot {
@@ -605,6 +653,10 @@ fn handle_reliable(
                     },
                 );
             } else {
+                let gun = shared::block::Emplacement {
+                    damage: gun.damage * player.skills().gunner,
+                    ..gun
+                };
                 let shell = crate::explosives::Projectile::shell(client, gun, origin, dir);
                 broadcast(server, &shell.message());
                 projectiles.0.push(shell);
@@ -618,7 +670,7 @@ fn handle_reliable(
                 return;
             }
             let melee = Item::melee(player.held_item());
-            let melee_damage = melee.damage * player.buffs.effects().melee;
+            let melee_damage = player.melee_damage(melee.damage, None);
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
             let look = Quat::from_rotation_y(player.state.yaw) * Vec3::NEG_Z;
             if let Some(mut a) = animals.iter_mut().find(|a| a.id == id) {
@@ -656,6 +708,7 @@ fn handle_reliable(
             // Petite marge : le client et le serveur ne mesurent pas le temps tout à fait pareil.
             player.attack_cooldown = weapon.cooldown * 0.85;
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
+            let damage = weapon.damage * player.skills().ranged * player.crit();
             // En JcJ, un joueur sur la trajectoire arrête le tir.
             let victim = if pvp {
                 aimed_player(lobby, client, eye, dir, weapon.range, world)
@@ -663,21 +716,11 @@ fn handle_reliable(
                 None
             };
             let range = victim.map_or(weapon.range, |(_, t)| t);
-            let end = hitscan(
-                eye,
-                dir,
-                range,
-                weapon.damage,
-                weapon.pierce,
-                client,
-                world,
-                zombies,
-                animals,
-            );
+            let end = hitscan(eye, dir, range, damage, weapon.pierce, client, world, zombies, animals);
             if let Some((id, t)) = victim
                 && end.distance(eye) >= t - 0.05
             {
-                pvp_hit(server, lobby, claims, client, id, weapon.damage);
+                pvp_hit(server, lobby, claims, client, id, damage);
             }
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
@@ -706,7 +749,7 @@ fn handle_reliable(
                         spawn
                     }
                 };
-                player.health = MAX_HEALTH;
+                player.health = player.max_health();
                 player.hunger = player.hunger.max(MAX_HUNGER * 0.5);
                 player.thirst = player.thirst.max(MAX_THIRST * 0.5);
                 player.body_temp = shared::climate::BODY_NORMAL;
@@ -743,6 +786,22 @@ fn handle_reliable(
                 player.held = item;
             }
         }
+        ClientMessage::LearnSkill { skill } => {
+            if let Some(player) = lobby.players.get_mut(&client)
+                && player.progress.learn(skill)
+            {
+                send_progress(server, client, player);
+                send_vitals(server, client, player);
+            }
+        }
+        ClientMessage::ResetSkills => {
+            if let Some(player) = lobby.players.get_mut(&client) {
+                player.progress.reset();
+                player.health = player.health.min(player.max_health());
+                send_progress(server, client, player);
+                send_vitals(server, client, player);
+            }
+        }
         ClientMessage::Craft { recipe } => {
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
@@ -750,9 +809,18 @@ fn handle_reliable(
             let feet = player.state.position.floor().as_ivec3();
             if let Some(recipe) = RECIPES.get(recipe as usize)
                 && player.is_alive()
+                && player.progress.has_tech(recipe.tech())
                 && recipe.station.is_none_or(|s| station_near(feet, s, |p| world.block(p)))
+                && recipe.craft(&mut player.inventory)
             {
-                recipe.craft(&mut player.inventory);
+                // Économe : chaque ingrédient a une chance d'être rendu.
+                let thrifty = player.skills().thrifty;
+                for (item, n) in recipe.inputs {
+                    let back = (0..*n).filter(|_| fastrand::f32() < thrifty).count() as u32;
+                    if back > 0 {
+                        player.inventory.add(*item, back);
+                    }
+                }
             }
             send_inventory(server, client, player);
         }
@@ -873,7 +941,7 @@ fn handle_reliable(
             if consumable && player.is_alive() && player.inventory.remove(item, 1) {
                 if let Some((hunger, health)) = item.food() {
                     player.hunger = (player.hunger + hunger).min(MAX_HUNGER);
-                    player.health = (player.health + health).min(MAX_HEALTH);
+                    player.health = (player.health + health).min(player.max_health());
                 }
                 if let Some(thirst) = item.drink() {
                     // Une gourde bue rend la gourde vide ; un consommable fabriqué, non.
@@ -960,7 +1028,10 @@ fn handle_reliable(
             }
             let block = world.block(pos);
             // Les effets qui accélèrent le minage (café) raccourcissent le temps attendu.
-            let mining_mult = player.buffs.effects().mining as f64;
+            let skills = player.skills();
+            let mining_mult = (player.buffs.effects().mining * skills.mining(block)) as f64;
+            // Cueilleur : les chances de trouvailles augmentent.
+            let lucky = |chance: f32| fastrand::f32() < chance * skills.forage;
             let mined_long_enough = match (player.mining, break_time(block, player.held_item())) {
                 (Some((p, start)), Some(needed)) => {
                     p == pos && now - start >= needed as f64 * MINING_TOLERANCE / mining_mult - 0.1
@@ -978,7 +1049,9 @@ fn handle_reliable(
                 *remaining = remaining.saturating_sub(1);
                 let left = *remaining;
                 if let Some(item) = drop_for(block) {
-                    player.inventory.add(item, 1);
+                    // Prospecteur : parfois une ressource de plus.
+                    let extra = u32::from(fastrand::f32() < skills.extra_ore);
+                    player.inventory.add(item, 1 + extra);
                 }
                 send_inventory(server, client, player);
                 if left == 0 {
@@ -997,39 +1070,39 @@ fn handle_reliable(
                 version.0 += 1;
                 broadcast(server, &ServerMessage::BlockChanged { pos, block: Block::Air });
                 if let Some(item) = drop_for(block) {
-                    player.inventory.add(item, 1);
+                    let ore = matches!(block, Block::IronOre | Block::CoalOre);
+                    let extra = u32::from(ore && fastrand::f32() < skills.extra_ore);
+                    player.inventory.add(item, 1 + extra);
                 }
                 // Les pommiers donnent des pommes ; tout feuillage, parfois une pousse.
                 match block {
                     Block::RipeFruitLeaves => player.inventory.add(Item::Apple, 1 + fastrand::u32(..2)),
-                    Block::FruitLeaves | Block::Leaves if fastrand::f32() < APPLE_CHANCE => {
-                        player.inventory.add(Item::Apple, 1)
-                    }
+                    Block::FruitLeaves | Block::Leaves if lucky(APPLE_CHANCE) => player.inventory.add(Item::Apple, 1),
                     _ => {}
                 }
                 if let Some(sapling) = TreeKind::of_leaves(block).and_then(TreeKind::sapling)
-                    && fastrand::f32() < SAPLING_CHANCE
+                    && lucky(SAPLING_CHANCE)
                 {
                     player.inventory.add(Item::Block(sapling), 1);
                 }
-                if block == Block::Grass && fastrand::f32() < SEED_CHANCE {
+                if block == Block::Grass && lucky(SEED_CHANCE) {
                     player.inventory.add(Item::Seeds, 1);
                 }
                 if block == Block::TallGrass {
-                    if fastrand::f32() < GRASS_SEED_CHANCE {
+                    if lucky(GRASS_SEED_CHANCE) {
                         player.inventory.add(Item::Seeds, 1);
                     }
                     // Herboristerie : les herbes hautes cachent parfois une herbe médicinale,
                     // plus rarement des graines de carotte.
-                    if fastrand::f32() < HERB_CHANCE {
+                    if lucky(HERB_CHANCE) {
                         player.inventory.add(Item::Herb, 1);
                     }
-                    if fastrand::f32() < CARROT_SEED_CHANCE {
+                    if lucky(CARROT_SEED_CHANCE) {
                         player.inventory.add(Item::CarrotSeeds, 1);
                     }
                 }
                 // Les feuillages donnent parfois des baies (pas le pin).
-                if block.is_leaves() && block != Block::PineLeaves && fastrand::f32() < BERRY_CHANCE {
+                if block.is_leaves() && block != Block::PineLeaves && lucky(BERRY_CHANCE) {
                     player.inventory.add(Item::Berries, 1 + fastrand::u32(..2));
                 }
                 // Une plante privée de son sol disparaît avec lui.
@@ -1399,6 +1472,23 @@ mod tests {
         p.inventory.add(Item::BodyArmor(Tier::Iron), 1);
         let (dealt, _) = p.incoming_damage(20.0, back);
         assert!((dealt - 14.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn skills_change_damage_dealt_and_taken() {
+        use shared::skills::Skill;
+        let mut p = ConnectedPlayer::new(Vec3::ZERO);
+        p.progress.xp = u32::MAX / 2;
+        let front = Vec3::new(0.0, 0.0, -2.0);
+        assert_eq!(p.melee_damage(10.0, None), 10.0);
+        p.progress.skills.insert(Skill::Brawler, 2);
+        p.progress.skills.insert(Skill::GiantSlayer, 1);
+        p.progress.skills.insert(Skill::ThickSkin, 2);
+        p.progress.skills.insert(Skill::Toughness, 3);
+        assert!((p.melee_damage(10.0, Some(shared::zombie::ZombieKind::Walker)) - 11.6).abs() < 1e-4);
+        assert!((p.melee_damage(10.0, Some(shared::zombie::ZombieKind::Brute)) - 13.34).abs() < 1e-4);
+        assert!((p.incoming_damage(20.0, front).0 - 18.0).abs() < 1e-4);
+        assert_eq!(p.max_health(), 130.0);
     }
 
     #[test]

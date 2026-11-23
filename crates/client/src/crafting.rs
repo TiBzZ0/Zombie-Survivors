@@ -131,7 +131,7 @@ fn station_ok(recipe: &Recipe, player: &LocalPlayer, world: Option<&ClientWorld>
 }
 
 fn craftable(recipe: &Recipe, player: &LocalPlayer, world: Option<&ClientWorld>) -> bool {
-    recipe.can_craft(&player.inventory) && station_ok(recipe, player, world)
+    recipe.can_craft(&player.inventory) && station_ok(recipe, player, world) && player.progress.has_tech(recipe.tech())
 }
 
 /// Combien de fois on peut fabriquer la recette avec l'inventaire actuel.
@@ -486,8 +486,15 @@ fn update_panel(
         });
     }
     for (icon, mut image) in &mut icons {
-        let ok = craftable(&RECIPES[icon.0], &player, world.as_deref());
-        image.color = Color::srgba(1.0, 1.0, 1.0, if ok { 1.0 } else { 0.4 });
+        let recipe = &RECIPES[icon.0];
+        // Recette d'un palier technologique pas encore appris : icône rougie.
+        image.color = if !player.progress.has_tech(recipe.tech()) {
+            Color::srgba(0.9, 0.35, 0.3, 0.35)
+        } else if craftable(recipe, &player, world.as_deref()) {
+            Color::WHITE
+        } else {
+            Color::srgba(1.0, 1.0, 1.0, 0.4)
+        };
     }
     for (tab, over, mut color, mut border) in &mut tabs {
         let current = tab.0 == view.category;
@@ -553,6 +560,21 @@ fn update_detail(
             None => {
                 text.0 = "À la main, sans atelier".into();
                 color.0 = DIM;
+            }
+        }
+        // Palier technologique : une compétence de la branche Technologie à apprendre.
+        let tech = recipe.tech();
+        if let Some(skill) = tech.skill() {
+            if player.progress.has_tech(tech) {
+                text.0.push_str(&format!("\nTechnologie : {} (maîtrisée)", tech.name()));
+            } else {
+                text.0 = format!(
+                    "{}\nTechnologie : {} verrouillée. Apprenez « {} » (touche K)",
+                    text.0,
+                    tech.name(),
+                    skill.info().name
+                );
+                color.0 = BAD;
             }
         }
     }
