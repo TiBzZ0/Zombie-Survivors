@@ -270,6 +270,16 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
                 gray(0.8 + 0.2 * n)
             }
         }
+        // Sac de couchage : tissu matelassé, un oreiller plus clair en bout.
+        Block::Bedroll => {
+            if y > 12 {
+                gray(1.12 + 0.06 * n)
+            } else if (x / 4 + y / 4).is_multiple_of(2) {
+                gray(0.88 + 0.08 * coarse)
+            } else {
+                gray(1.0 + 0.08 * n)
+            }
+        }
         Block::Air => gray(1.0),
     }
 }
@@ -382,7 +392,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 53] = [
+const ALL_BLOCKS: [Block; 54] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -436,6 +446,7 @@ const ALL_BLOCKS: [Block; 53] = [
     Block::CarrotSprout,
     Block::CarrotPlant,
     Block::RipeCarrot,
+    Block::Bedroll,
 ];
 
 #[cfg(test)]

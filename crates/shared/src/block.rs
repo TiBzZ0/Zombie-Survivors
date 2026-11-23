@@ -102,6 +102,8 @@ pub enum Block {
     CarrotPlant,
     /// Carotte mûre, à récolter.
     RipeCarrot,
+    /// Sac de couchage : posé au sol, il devient le point de réapparition de son dormeur.
+    Bedroll,
 }
 
 /// Rayon (à l'horizontale, sur toute la hauteur) de la base protégée par une bannière.
@@ -160,6 +162,7 @@ impl Block {
                 | Block::TallGrass
                 | Block::FallenFruit
                 | Block::RottenFruit
+                | Block::Bedroll
         ) && !self.is_crop()
             && !self.is_sapling()
     }
@@ -220,8 +223,14 @@ impl Block {
                 | Block::TallGrass
                 | Block::FallenFruit
                 | Block::RottenFruit
+                | Block::Bedroll
         ) && !self.is_crop()
             && !self.is_sapling()
+    }
+
+    /// Sac de couchage : point de réapparition personnel.
+    pub const fn is_bed(self) -> bool {
+        matches!(self, Block::Bedroll)
     }
 
     /// Bloc qui garde des objets (ouvert avec le panneau du coffre).
@@ -317,6 +326,8 @@ impl Block {
             Block::CarrotPlant | Block::RipeCarrot => Some(([0.15, 0.0, 0.15], [0.85, 0.5, 0.85])),
             Block::RipeWheat => Some(([0.08, 0.0, 0.08], [0.92, 0.85, 0.92])),
             Block::Campfire => Some(([0.1, 0.0, 0.1], [0.9, 0.4, 0.9])),
+            // Sac de couchage : un matelas fin posé à même le sol.
+            Block::Bedroll => Some(([0.1, 0.0, 0.1], [0.9, 0.18, 0.9])),
             _ => None,
         }
     }
@@ -380,6 +391,7 @@ impl Block {
             Block::RipeCarrot => [0.5, 0.68, 0.28],
             Block::BirchSapling => [0.45, 0.65, 0.3],
             Block::PineSapling => [0.15, 0.38, 0.2],
+            Block::Bedroll => [0.78, 0.36, 0.30],
         }
     }
 
@@ -437,6 +449,7 @@ impl Block {
             Block::CarrotSprout => "Jeune carotte",
             Block::CarrotPlant => "Carotte",
             Block::RipeCarrot => "Carotte mûre",
+            Block::Bedroll => "Sac de couchage",
         }
     }
 
@@ -478,6 +491,22 @@ impl Block {
             Block::Water | Block::FlowingWater => 1,
             Block::Snow => 30,
             Block::Cactus => 30,
+            Block::Bedroll => 8,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bedroll_is_a_placeable_mat_you_can_walk_over() {
+        let bed = Block::Bedroll;
+        assert!(bed.is_bed());
+        assert!(bed.is_placeable(), "on peut le poser depuis l'inventaire");
+        assert!(!bed.is_solid(), "on se tient dessus sans buter");
+        assert!(bed.partial_shape().is_some(), "dessiné comme un matelas fin");
+        assert!(!Block::Grass.is_bed());
     }
 }
