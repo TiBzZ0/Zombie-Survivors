@@ -9,6 +9,7 @@ use shared::crafting::{RECIPES, Recipe, station_near};
 use shared::protocol::ClientMessage;
 
 use crate::AppState;
+use crate::icons::ItemIcons;
 use crate::net::{ClientWorld, send_reliable};
 use crate::player::LocalPlayer;
 
@@ -29,10 +30,11 @@ struct CraftingPanel;
 struct RecipeButton(usize);
 
 #[derive(Component)]
-struct RecipeLabel(usize);
+struct RecipeIcon(usize);
 
+/// Détail de la recette survolée.
 #[derive(Component)]
-struct InventoryText;
+struct RecipeHint;
 
 const AVAILABLE: Color = Color::srgb(0.18, 0.26, 0.18);
 const AVAILABLE_HOVER: Color = Color::srgb(0.28, 0.40, 0.26);
@@ -88,7 +90,7 @@ fn craftable(recipe: &Recipe, player: &LocalPlayer, world: Option<&ClientWorld>)
     recipe.can_craft(&player.inventory) && station_ok(recipe, player, world)
 }
 
-fn spawn_panel(mut commands: Commands) {
+fn spawn_panel(mut commands: Commands, mut icons: ResMut<ItemIcons>, mut images: ResMut<Assets<Image>>) {
     let panel = commands
         .spawn((
             CraftingPanel,
@@ -121,26 +123,69 @@ fn spawn_panel(mut commands: Commands) {
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: px(6),
+                row_gap: px(8),
+                width: px(10.0 * 52.0),
                 ..default()
             },
             ChildOf(content),
         ))
         .id();
     commands.spawn((label("FABRICATION", 24.0), ChildOf(recipes)));
+    let grid = commands
+        .spawn((
+            Node {
+                display: Display::Grid,
+                grid_template_columns: RepeatedGridTrack::px(10, 48.0),
+                column_gap: px(4),
+                row_gap: px(4),
+                ..default()
+            },
+            ChildOf(recipes),
+        ))
+        .id();
     for (index, recipe) in RECIPES.iter().enumerate() {
+        let count = if recipe.count > 1 {
+            recipe.count.to_string()
+        } else {
+            String::new()
+        };
         commands.spawn((
             Button,
             Hovered::default(),
             RecipeButton(index),
             Node {
-                width: px(460),
-                padding: UiRect::axes(px(10), px(6)),
+                width: px(48),
+                height: px(48),
+                border: UiRect::all(px(2)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
                 ..default()
             },
             BackgroundColor(UNAVAILABLE),
-            ChildOf(recipes),
-            children![(label(&recipe_text(index), 16.0), RecipeLabel(index))],
+            BorderColor::all(Color::srgba(0.3, 0.3, 0.3, 0.9)),
+            ChildOf(grid),
+            children![
+                (
+                    Node {
+                        width: px(36),
+                        height: px(36),
+                        ..default()
+                    },
+                    ImageNode::new(icons.get(&mut images, recipe.output)),
+                    RecipeIcon(index),
+                    Pickable::IGNORE,
+                ),
+                (
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: px(3),
+                        bottom: px(1),
+                        ..default()
+                    },
+                    label(&count, 13.0),
+                    Pickable::IGNORE,
+                )
+            ],
             observe(
                 move |_: On<Activate>,
                       mut client: ResMut<RenetClient>,
@@ -155,6 +200,15 @@ fn spawn_panel(mut commands: Commands) {
         ));
     }
     commands.spawn((
+        Node {
+            min_height: px(44),
+            ..default()
+        },
+        label("", 16.0),
+        RecipeHint,
+        ChildOf(recipes),
+    ));
+    commands.spawn((
         colored_label(
             "C / Tab : fermer · Clic : fabriquer · [Établi] / [Forge] : à moins de 4 blocs",
             14.0,
@@ -163,16 +217,18 @@ fn spawn_panel(mut commands: Commands) {
         ChildOf(recipes),
     ));
 
-    commands.spawn((
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: px(6),
-            min_width: px(220),
-            ..default()
-        },
-        ChildOf(content),
-        children![label("INVENTAIRE", 24.0), (label("", 16.0), InventoryText)],
-    ));
+    let inventory = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(8),
+                ..default()
+            },
+            ChildOf(content),
+            children![label("INVENTAIRE", 24.0)],
+        ))
+        .id();
+    crate::inventory_ui::spawn_grid(&mut commands, inventory);
 }
 
 fn despawn_panel(mut commands: Commands, panels: Query<Entity, With<CraftingPanel>>) {
@@ -185,8 +241,8 @@ fn update_panel(
     player: Res<LocalPlayer>,
     mut panel: Single<&mut Visibility, With<CraftingPanel>>,
     mut buttons: Query<(&RecipeButton, &Hovered, &mut BackgroundColor)>,
-    mut labels: Query<(&RecipeLabel, &mut TextColor)>,
-    mut inventory: Single<&mut Text, With<InventoryText>>,
+    mut icons: Query<(&RecipeIcon, &mut ImageNode)>,
+    mut hint: Single<(&mut Text, &mut TextColor), With<RecipeHint>>,
     world: Option<Res<ClientWorld>>,
 ) {
     **panel = if player.crafting_open && player.dead.is_none() {
@@ -197,26 +253,32 @@ fn update_panel(
     if !player.crafting_open {
         return;
     }
-    for (button, hovered, mut color) in &mut buttons {
+    let mut hovered = None;
+    for (button, over, mut color) in &mut buttons {
         let ok = craftable(&RECIPES[button.0], &player, world.as_deref());
-        color.0 = match (ok, hovered.get()) {
+        if over.get() {
+            hovered = Some((button.0, ok));
+        }
+        color.0 = match (ok, over.get()) {
             (true, true) => AVAILABLE_HOVER,
             (true, false) => AVAILABLE,
-            (false, _) => UNAVAILABLE,
+            (false, true) => Color::srgb(0.22, 0.22, 0.22),
+            (false, false) => UNAVAILABLE,
         };
     }
-    for (label, mut color) in &mut labels {
-        let ok = craftable(&RECIPES[label.0], &player, world.as_deref());
-        color.0 = if ok { Color::WHITE } else { Color::srgb(0.5, 0.5, 0.5) };
+    for (icon, mut image) in &mut icons {
+        let ok = craftable(&RECIPES[icon.0], &player, world.as_deref());
+        image.color = Color::srgba(1.0, 1.0, 1.0, if ok { 1.0 } else { 0.35 });
     }
-    inventory.0 = if player.inventory.is_empty() {
-        "(vide)".into()
-    } else {
-        player
-            .inventory
-            .iter()
-            .map(|(item, n)| format!("{} ×{n}", item.name()))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    let (text, color) = &mut *hint;
+    match hovered {
+        Some((index, ok)) => {
+            text.0 = recipe_text(index);
+            color.0 = if ok { Color::WHITE } else { Color::srgb(0.6, 0.6, 0.6) };
+        }
+        None => {
+            text.0 = "Survolez une recette pour voir ce qu'elle demande.".into();
+            color.0 = Color::srgb(0.6, 0.6, 0.6);
+        }
+    }
 }

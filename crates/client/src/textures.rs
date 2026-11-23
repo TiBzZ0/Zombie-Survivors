@@ -228,6 +228,13 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
     }
 }
 
+/// Couleur finale d'un pixel de la tuile (motif multiplié par la couleur du bloc), pour les icônes.
+pub fn tile_color(block: Block, x: u32, y: u32) -> [f32; 3] {
+    let p = pixel(block, x, y);
+    let c = block.color();
+    [(p[0] * c[0]).min(1.0), (p[1] * c[1]).min(1.0), (p[2] * c[2]).min(1.0)]
+}
+
 /// Texture d'un bloc, répétée sur les grandes faces fusionnées et échantillonnée sans lissage.
 pub fn build_block_texture(block: Block) -> Image {
     let mut data = vec![255u8; (TILE * TILE * 4) as usize];

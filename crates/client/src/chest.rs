@@ -10,11 +10,12 @@ use shared::item::{Inventory, Item};
 use shared::protocol::ClientMessage;
 
 use crate::AppState;
+use crate::icons::ItemIcons;
 use crate::net::{ClientWorld, send_reliable};
 use crate::player::LocalPlayer;
 
 /// Nombre de cases affichées de chaque côté.
-const SLOTS: usize = 30;
+const SLOTS: usize = 32;
 
 pub struct ChestPlugin;
 
@@ -41,9 +42,16 @@ struct Slot {
 }
 
 #[derive(Component)]
-struct SlotLabel(Slot);
+struct SlotIcon(Slot);
 
-const SLOT_COLOR: Color = Color::srgb(0.16, 0.18, 0.16);
+#[derive(Component)]
+struct SlotCount(Slot);
+
+/// Nom de l'objet survolé.
+#[derive(Component)]
+struct ChestHint;
+
+const SLOT_COLOR: Color = Color::srgba(0.05, 0.05, 0.05, 0.65);
 const SLOT_HOVER: Color = Color::srgb(0.28, 0.36, 0.26);
 
 fn label(value: &str, size: f32) -> impl Bundle {
@@ -141,7 +149,7 @@ fn spawn_panel(mut commands: Commands) {
         let grid = commands
             .spawn((
                 Node {
-                    width: px(420),
+                    width: px(8.0 * 52.0),
                     flex_wrap: FlexWrap::Wrap,
                     column_gap: px(4),
                     row_gap: px(4),
@@ -157,20 +165,45 @@ fn spawn_panel(mut commands: Commands) {
                 Hovered::default(),
                 slot,
                 Node {
-                    width: px(136),
-                    height: px(26),
-                    padding: UiRect::horizontal(px(6)),
+                    width: px(48),
+                    height: px(48),
+                    border: UiRect::all(px(2)),
                     align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
                     ..default()
                 },
                 BackgroundColor(SLOT_COLOR),
-                Visibility::Hidden,
+                BorderColor::all(Color::srgba(0.35, 0.35, 0.35, 0.9)),
                 ChildOf(grid),
-                children![(label("", 14.0), SlotLabel(slot))],
+                children![
+                    (
+                        Node {
+                            width: px(36),
+                            height: px(36),
+                            ..default()
+                        },
+                        ImageNode::default(),
+                        Visibility::Hidden,
+                        SlotIcon(slot),
+                        Pickable::IGNORE,
+                    ),
+                    (
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: px(3),
+                            bottom: px(1),
+                            ..default()
+                        },
+                        label("", 13.0),
+                        SlotCount(slot),
+                        Pickable::IGNORE,
+                    )
+                ],
                 observe(on_slot_click(slot)),
             ));
         }
     }
+    commands.spawn((label("", 15.0), ChestHint, ChildOf(content)));
     commands.spawn((
         colored_label(
             "Clic : toute la pile · Maj + clic : une unité · Échap : fermer",
@@ -187,12 +220,17 @@ fn despawn_panel(mut commands: Commands, panels: Query<Entity, With<ChestPanel>>
     }
 }
 
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update_panel(
     player: Res<LocalPlayer>,
-    mut panel: Single<&mut Visibility, (With<ChestPanel>, Without<Slot>)>,
-    mut slots: Query<(&Slot, &Hovered, &mut BackgroundColor, &mut Visibility), Without<ChestPanel>>,
-    mut labels: Query<(&SlotLabel, &mut Text), Without<StorageTitle>>,
-    mut title: Single<&mut Text, With<StorageTitle>>,
+    mut icons: ResMut<ItemIcons>,
+    mut images: ResMut<Assets<Image>>,
+    mut panel: Single<&mut Visibility, (With<ChestPanel>, Without<SlotIcon>)>,
+    mut slots: Query<(&Slot, &Hovered, &mut BackgroundColor)>,
+    mut icon_nodes: Query<(&SlotIcon, &mut ImageNode, &mut Visibility), Without<ChestPanel>>,
+    mut counts: Query<(&SlotCount, &mut Text), (Without<StorageTitle>, Without<ChestHint>)>,
+    mut title: Single<&mut Text, (With<StorageTitle>, Without<ChestHint>)>,
+    mut hint: Single<&mut Text, With<ChestHint>>,
     world: Res<ClientWorld>,
 ) {
     let Some((pos, chest)) = &player.chest else {
@@ -209,18 +247,42 @@ fn update_panel(
         title.0 = heading.into();
     }
     let source = |slot: &Slot| if slot.in_chest { chest } else { &player.inventory };
-    for (slot, hovered, mut color, mut visibility) in &mut slots {
-        let used = nth(source(slot), slot.index).is_some();
-        *visibility = if used {
-            Visibility::Inherited
+    let mut hovered = None;
+    for (slot, over, mut color) in &mut slots {
+        let item = nth(source(slot), slot.index);
+        if over.get() && item.is_some() {
+            hovered = item.map(|(i, _)| (i, slot.in_chest));
+        }
+        color.0 = if over.get() && item.is_some() {
+            SLOT_HOVER
         } else {
-            Visibility::Hidden
+            SLOT_COLOR
         };
-        color.0 = if hovered.get() { SLOT_HOVER } else { SLOT_COLOR };
     }
-    for (SlotLabel(slot), mut text) in &mut labels {
-        text.0 = nth(source(slot), slot.index)
-            .map(|(item, n)| format!("{} ×{n}", item.name()))
+    for (SlotIcon(slot), mut image, mut visibility) in &mut icon_nodes {
+        match nth(source(slot), slot.index) {
+            Some((item, _)) => {
+                let handle = icons.get(&mut images, item);
+                if image.image != handle {
+                    image.image = handle;
+                }
+                *visibility = Visibility::Inherited;
+            }
+            None => *visibility = Visibility::Hidden,
+        }
+    }
+    for (SlotCount(slot), mut text) in &mut counts {
+        let label = nth(source(slot), slot.index)
+            .filter(|(_, n)| *n > 1)
+            .map(|(_, n)| n.to_string())
             .unwrap_or_default();
+        if text.0 != label {
+            text.0 = label;
+        }
     }
+    hint.0 = match hovered {
+        Some((item, true)) => format!("{} : clic pour le prendre", item.name()),
+        Some((item, false)) => format!("{} : clic pour le déposer", item.name()),
+        None => String::new(),
+    };
 }

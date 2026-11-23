@@ -42,7 +42,13 @@ impl Plugin for MinimapPlugin {
             .add_systems(OnExit(AppState::Playing), despawn_minimap)
             .add_systems(
                 Update,
-                (toggle_minimap, forget_changed, finish_columns, draw_minimap)
+                (
+                    toggle_minimap,
+                    forget_changed,
+                    finish_columns,
+                    draw_minimap,
+                    update_coords,
+                )
                     .chain()
                     .run_if(in_state(AppState::Playing))
                     .run_if(resource_exists::<ClientWorld>),
@@ -97,7 +103,58 @@ fn spawn_minimap(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut 
         },
         BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.7)),
         ImageNode::new(handle),
+        children![
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: px(1),
+                    width: percent(100),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                children![(
+                    Text::new("N"),
+                    TextFont {
+                        font_size: FontSize::Px(14.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(1.0, 0.9, 0.5)),
+                    TextShadow::default(),
+                )],
+            ),
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: px(DISPLAY + 2.0),
+                    width: percent(100),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                children![(
+                    Text::new(""),
+                    TextFont {
+                        font_size: FontSize::Px(13.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
+                    TextShadow::default(),
+                    MinimapCoords,
+                )],
+            ),
+        ],
     ));
+}
+
+/// Position du joueur sous la carte.
+#[derive(Component)]
+struct MinimapCoords;
+
+fn update_coords(player: Res<LocalPlayer>, mut text: Single<&mut Text, With<MinimapCoords>>) {
+    let p = player.position.floor().as_ivec3();
+    let label = format!("X {} · Z {} · alt. {}", p.x, p.z, p.y);
+    if text.0 != label {
+        text.0 = label;
+    }
 }
 
 fn despawn_minimap(

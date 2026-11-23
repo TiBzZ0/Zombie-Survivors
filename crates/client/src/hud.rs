@@ -31,9 +31,6 @@ struct HudRoot;
 struct ConditionText;
 
 #[derive(Component)]
-struct HotbarText;
-
-#[derive(Component)]
 struct ChatText;
 
 #[derive(Component)]
@@ -159,17 +156,6 @@ fn spawn_hud(mut commands: Commands, mut chat: ResMut<ChatLog>) {
                 },
                 text("", 16.0),
                 ChatText,
-            ),
-            (
-                Node {
-                    position_type: PositionType::Absolute,
-                    bottom: px(16),
-                    width: percent(100),
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                Pickable::IGNORE,
-                children![(text("", 20.0), HotbarText)],
             ),
             // Heure et nombre de zombies, en haut à droite.
             (
@@ -297,31 +283,7 @@ fn collect_chat(mut events: MessageReader<NetEvent>, mut chat: ResMut<ChatLog>, 
     chat.0.retain(|(at, _)| now - at < 8.0);
 }
 
-fn update_hud(
-    player: Res<LocalPlayer>,
-    remotes: Res<RemotePlayers>,
-    chat: Res<ChatLog>,
-    mut hotbar: Single<&mut Text, (With<HotbarText>, Without<ChatText>)>,
-    mut chat_text: Single<&mut Text, (With<ChatText>, Without<HotbarText>)>,
-) {
-    let slots: Vec<String> = player
-        .hotbar
-        .iter()
-        .enumerate()
-        .map(|(i, slot)| {
-            let label = match slot {
-                Some(item) => format!("{} {} ×{}", i + 1, item.name(), player.inventory.count(*item)),
-                None => format!("{}", i + 1),
-            };
-            if i == player.selected {
-                format!("[{label}]")
-            } else {
-                format!(" {label} ")
-            }
-        })
-        .collect();
-    hotbar.0 = slots.join(" ");
-
+fn update_hud(remotes: Res<RemotePlayers>, chat: Res<ChatLog>, mut chat_text: Single<&mut Text, With<ChatText>>) {
     let mut lines = vec![format!("Joueurs en ligne : {}", remotes.names.len() + 1)];
     lines.extend(chat.0.iter().map(|(_, l)| l.clone()));
     chat_text.0 = lines.join("\n");
