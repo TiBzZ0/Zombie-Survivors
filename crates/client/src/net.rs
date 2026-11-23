@@ -107,6 +107,8 @@ pub enum NetEvent {
         felt: f32,
         infection: f32,
         breath: f32,
+        bleeding: f32,
+        sprain: f32,
     },
     Inventory(shared::item::Inventory),
     Deposit {
@@ -143,6 +145,11 @@ pub enum NetEvent {
     /// Brouillard ou non.
     Weather {
         fog: bool,
+        rain: shared::weather::Precipitation,
+    },
+    /// La foudre est tombée ici.
+    Lightning {
+        pos: Vec3,
     },
     /// Un coup de zombie a été paré.
     Parried,
@@ -404,6 +411,8 @@ fn receive_messages(
                 felt,
                 infection,
                 breath,
+                bleeding,
+                sprain,
             } => {
                 events.write(NetEvent::Vitals {
                     health,
@@ -413,6 +422,8 @@ fn receive_messages(
                     felt,
                     infection,
                     breath,
+                    bleeding,
+                    sprain,
                 });
             }
             ServerMessage::Buffs(buffs) => {
@@ -448,8 +459,11 @@ fn receive_messages(
                     offers,
                 });
             }
-            ServerMessage::Weather { fog } => {
-                events.write(NetEvent::Weather { fog });
+            ServerMessage::Weather { fog, rain } => {
+                events.write(NetEvent::Weather { fog, rain });
+            }
+            ServerMessage::Lightning { pos } => {
+                events.write(NetEvent::Lightning { pos });
             }
             ServerMessage::Parried => {
                 events.write(NetEvent::Parried);

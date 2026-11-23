@@ -137,6 +137,9 @@ pub struct LocalPlayer {
     pub skills_open: bool,
     /// Endurance : course, sauts et coups la consomment.
     pub stamina: shared::stamina::Stamina,
+    /// Secondes de saignement et d'entorse restantes (le serveur fait foi).
+    pub bleeding: f32,
+    pub sprain: f32,
     /// Ligne de pêche à l'eau : bloc d'eau du bouchon, et temps restant pour ferrer s'il plonge.
     pub fishing: Option<(IVec3, f32)>,
     /// Objets déjà vus dans l'inventaire : seuls les nouveaux venus prennent une case libre
@@ -362,8 +365,12 @@ fn apply_teleports(
                 felt,
                 infection,
                 breath,
+                bleeding,
+                sprain,
             } => {
                 player.breath = *breath;
+                player.bleeding = *bleeding;
+                player.sprain = *sprain;
                 player.body_temp = *body_temp;
                 player.felt = *felt;
                 player.infection = *infection;
@@ -407,6 +414,7 @@ fn move_player(
     time: Res<Time>,
     world: Res<ClientWorld>,
     mut player: ResMut<LocalPlayer>,
+    mut client: ResMut<RenetClient>,
 ) {
     if player.dead.is_some() {
         return;
@@ -431,8 +439,15 @@ fn move_player(
     use shared::stamina::{JUMP_COST, SPRINT_COST};
     let dt = time.delta_secs().min(0.05);
     let moving = wish != Vec3::ZERO;
-    let sprinting = pressed(KeyCode::ShiftLeft) && moving && player.stamina.can(SPRINT_COST * dt);
+    // Une cheville foulée empêche de courir et ralentit.
+    let sprained = player.sprain > 0.0;
+    let sprinting = pressed(KeyCode::ShiftLeft) && moving && !sprained && player.stamina.can(SPRINT_COST * dt);
     let speed = if sprinting { SPRINT_SPEED } else { WALK_SPEED };
+    let speed = if sprained {
+        speed * shared::injury::SPRAIN_SPEED
+    } else {
+        speed
+    };
     // Garde levée : on avance à petits pas ; aux commandes d'une arme fixe, on ne bouge plus.
     let speed = if player.mounted.is_some() {
         0.0
@@ -515,6 +530,16 @@ fn move_player(
     // Tant que le terrain sous le joueur n'est pas connu, il ne tombe pas dans le vide.
     let solid = |p: IVec3| world.is_solid(p) || !world.in_bounds(p) && p.y < 0;
     let result = step_body(player.position, velocity, PLAYER_SIZE, dt, &solid);
+    // Chute : la hauteur se déduit de la vitesse à l'atterrissage (l'eau amortit).
+    if result.on_ground && !player.on_ground && water == Immersion::Dry && velocity.y < 0.0 {
+        let height = velocity.y * velocity.y / (2.0 * shared::physics::GRAVITY);
+        if height > shared::injury::SAFE_FALL {
+            send_reliable(&mut client, &ClientMessage::Fell { height });
+        }
+    }
+    // Les blessures passent aussi côté client, entre deux nouvelles du serveur.
+    player.bleeding = (player.bleeding - dt).max(0.0);
+    player.sprain = (player.sprain - dt).max(0.0);
     player.position = result.position;
     player.velocity = result.velocity;
     player.on_ground = result.on_ground;

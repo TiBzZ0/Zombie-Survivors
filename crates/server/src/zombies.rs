@@ -653,6 +653,10 @@ fn zombie_ai(
                             {
                                 player.infection = 1.0;
                             }
+                            // Et faire saigner.
+                            if amount > 0.0 && fastrand::f32() < shared::injury::BLEED_CHANCE {
+                                player.bleeding = shared::injury::BLEED_SECS;
+                            }
                             hurt_player(
                                 player_id,
                                 player,
@@ -1115,10 +1119,12 @@ fn player_survival(
     world: Res<GameWorld>,
     mut lobby: ResMut<Lobby>,
     mut server: Option<ResMut<RenetServer>>,
+    weather: Option<Res<crate::events::Weather>>,
 ) {
     use shared::climate::*;
     let dt = time.delta_secs();
     let thirsty = world.generator().water_level().is_some();
+    let rain = weather.map_or(shared::weather::Precipitation::Clear, |w| w.rain);
     for (id, player) in lobby.players.iter_mut() {
         player.attack_cooldown -= dt;
         if let Some(t) = player.guarding.as_mut() {
@@ -1149,6 +1155,9 @@ fn player_survival(
             around,
         );
         let (warmth, cooling) = player.inventory.clothing();
+        // Sous la pluie, sans toit : on a froid, mais on peut boire.
+        let rained_on = rain.wet() && !around.sheltered && !around.in_water;
+        let air = if rained_on { air - rain.chill() } else { air };
         player.felt = felt(air, warmth, cooling);
         player.body_temp = shared::climate::step_body(player.body_temp, player.felt, dt);
 
@@ -1162,11 +1171,18 @@ fn player_survival(
             player.infection =
                 (player.infection + INFECTION_PER_SEC * fx.infection_rate * skills.infection_rate * dt).min(100.0);
         }
+        // Blessures : elles passent avec le temps (ou un bandage).
+        let injured_before = (player.bleeding > 0.0, player.sprain > 0.0);
+        player.bleeding = (player.bleeding - dt).max(0.0);
+        player.sprain = (player.sprain - dt).max(0.0);
 
         player.hunger = (player.hunger - HUNGER_PER_SEC * fx.hunger_rate * skills.hunger_rate * dt).max(0.0);
         if thirsty {
             let heat = if player.body_temp > OVERHEATING { 2.0 } else { 1.0 };
             player.thirst = (player.thirst - THIRST_PER_SEC * heat * skills.thirst_rate * dt).max(0.0);
+            if rained_on {
+                player.thirst = (player.thirst + shared::weather::RAIN_DRINK * dt).min(MAX_THIRST);
+            }
         }
         let infection_dps = if player.infection >= 100.0 {
             INFECTION_DPS * 2.0
@@ -1187,6 +1203,8 @@ fn player_survival(
             Some((EXPOSURE_DPS, "Terrassé par la chaleur"))
         } else if infection_dps > 0.0 {
             Some((infection_dps, "Emporté par l'infection"))
+        } else if player.bleeding > 0.0 {
+            Some((shared::injury::BLEED_DPS, "Vidé de son sang"))
         } else {
             None
         };
@@ -1197,6 +1215,7 @@ fn player_survival(
                 || p.felt.round() != felt_before
                 || p.infection.ceil() != infection_before
                 || p.breath.ceil() != breath_before
+                || (p.bleeding > 0.0, p.sprain > 0.0) != injured_before
         };
         if let Some((dps, cause)) = deprived {
             let since_hit = player.since_hit;
@@ -1544,6 +1563,50 @@ mod climate_tests {
     }
 
     #[test]
+    fn a_bleeding_player_loses_health_until_it_stops() {
+        let (mut app, _) = snowy_night();
+        // De jour, au chaud : seul le saignement compte.
+        app.insert_resource(Clock(GameTime { day: 1, phase: 0.3 }));
+        app.world_mut()
+            .resource_mut::<Lobby>()
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .body_temp = 37.0;
+        app.world_mut()
+            .resource_mut::<Lobby>()
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .bleeding = 5.0;
+        let player = run(&mut app, 4.0);
+        assert!(player.health < crate::net::MAX_HEALTH - 1.5, "{}", player.health);
+        assert!(player.bleeding > 0.0);
+        let player = run(&mut app, 2.0);
+        assert_eq!(player.bleeding, 0.0);
+    }
+
+    #[test]
+    fn rain_chills_and_quenches_a_player_in_the_open() {
+        let (mut app, _) = snowy_night();
+        app.insert_resource(Clock(GameTime { day: 1, phase: 0.3 }));
+        app.world_mut()
+            .resource_mut::<Lobby>()
+            .players
+            .get_mut(&1)
+            .unwrap()
+            .thirst = 50.0;
+        let dry = run(&mut app, 1.0);
+        app.insert_resource(crate::events::Weather {
+            fog: false,
+            rain: shared::weather::Precipitation::Storm,
+        });
+        let wet = run(&mut app, 3.0);
+        assert!(wet.felt < dry.felt - 5.0, "{} puis {}", dry.felt, wet.felt);
+        assert!(wet.thirst > dry.thirst, "{} puis {}", dry.thirst, wet.thirst);
+    }
+
+    #[test]
     fn a_snowy_night_freezes_an_unprotected_player() {
         let (mut app, _) = snowy_night();
         let player = run(&mut app, 90.0);
@@ -1606,7 +1669,10 @@ mod fog_tests {
         let mut app = App::new();
         app.insert_resource(GameWorld(WorldState::new(WorldConfig::default())))
             .insert_resource(Clock(GameTime { day: 3, phase: 0.2 }))
-            .insert_resource(crate::events::Weather { fog })
+            .insert_resource(crate::events::Weather {
+                fog,
+                ..Default::default()
+            })
             .init_resource::<Time>()
             .init_resource::<Waves>()
             .init_resource::<Lobby>()

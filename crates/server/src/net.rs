@@ -92,6 +92,9 @@ pub struct ConnectedPlayer {
     pub breath: f32,
     /// Ligne de pêche à l'eau.
     pub fishing: Option<crate::fishing::Line>,
+    /// Secondes de saignement et d'entorse restantes.
+    pub bleeding: f32,
+    pub sprain: f32,
 }
 
 /// Durée après avoir levé la garde pendant laquelle un coup est paré.
@@ -156,6 +159,8 @@ impl ConnectedPlayer {
             second_wind: 0.0,
             breath: shared::swim::BREATH_SECS,
             fishing: None,
+            bleeding: 0.0,
+            sprain: 0.0,
         }
     }
 
@@ -231,6 +236,8 @@ pub fn send_vitals(server: &mut RenetServer, client: ClientId, player: &Connecte
             felt: player.felt,
             infection: player.infection,
             breath: player.breath,
+            bleeding: player.bleeding,
+            sprain: player.sprain,
         },
     );
 }
@@ -774,6 +781,8 @@ fn handle_reliable(
                 player.thirst = player.thirst.max(MAX_THIRST * 0.5);
                 player.body_temp = shared::climate::BODY_NORMAL;
                 player.infection = 0.0;
+                player.bleeding = 0.0;
+                player.sprain = 0.0;
                 player.breath = shared::swim::BREATH_SECS;
                 player.since_hit = 0.0;
                 player.state.position = at;
@@ -978,6 +987,11 @@ fn handle_reliable(
                 if item == Item::Antidote {
                     player.infection = 0.0;
                 }
+                // Un bandage arrête le saignement et maintient une cheville foulée.
+                if item == Item::Bandage {
+                    player.bleeding = 0.0;
+                    player.sprain = 0.0;
+                }
                 send_vitals(server, client, player);
             }
             send_inventory(server, client, player);
@@ -992,6 +1006,22 @@ fn handle_reliable(
             {
                 player.fishing = Some(crate::fishing::Line::cast(at));
             }
+        }
+        ClientMessage::Fell { height } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if !player.is_alive() || !height.is_finite() {
+                return;
+            }
+            let damage = shared::injury::fall_damage(height);
+            if height >= shared::injury::SPRAIN_FALL {
+                player.sprain = shared::injury::SPRAIN_SECS;
+            }
+            if damage > 0.0 {
+                crate::zombies::hurt_player(client, player, damage, "Mort d'une chute", Some(server));
+            }
+            send_vitals(server, client, player);
         }
         ClientMessage::Reel => {
             if let Some(player) = lobby.players.get_mut(&client) {

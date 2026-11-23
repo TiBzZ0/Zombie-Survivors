@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_001F;
+pub const PROTOCOL_ID: u64 = 0x5A53_0020;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -155,6 +155,10 @@ pub enum ClientMessage {
     },
     /// Ferre si le bouchon plonge ; sinon, remonte la ligne.
     Reel,
+    /// Le joueur vient de retomber au sol après une chute de `height` blocs.
+    Fell {
+        height: f32,
+    },
 }
 
 /// Position compacte d'un survivant.
@@ -323,6 +327,9 @@ pub enum ServerMessage {
         infection: f32,
         /// Souffle restant sous l'eau, en secondes.
         breath: f32,
+        /// Secondes de saignement et d'entorse restantes (0 : rien).
+        bleeding: f32,
+        sprain: f32,
     },
     /// Effets temporaires actifs du joueur (café, bière...).
     Buffs(crate::buff::Buffs),
@@ -400,9 +407,14 @@ pub enum ServerMessage {
         origin: Vec3,
         end: Vec3,
     },
-    /// Temps qu'il fait : brouillard ou non (envoyé régulièrement).
+    /// Temps qu'il fait : brouillard, pluie ou orage (envoyé régulièrement).
     Weather {
         fog: bool,
+        rain: crate::weather::Precipitation,
+    },
+    /// La foudre est tombée ici.
+    Lightning {
+        pos: Vec3,
     },
     /// Générateurs en marche (tous ceux du monde), envoyés régulièrement.
     Power(Vec<IVec3>),

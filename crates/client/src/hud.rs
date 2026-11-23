@@ -414,6 +414,11 @@ fn update_status(
     mut death: Single<&mut Visibility, (With<DeathScreen>, Without<MiningBar>)>,
 ) {
     let t = clock.time;
+    let weather = match clock.rain {
+        shared::weather::Precipitation::Clear => "",
+        shared::weather::Precipitation::Rain => "\nPluie",
+        shared::weather::Precipitation::Storm => "\nOrage : gare à la foudre",
+    };
     clock_text.0 = if t.is_night() {
         let horde = if t.is_horde_night() {
             " · GRANDE HORDE"
@@ -423,7 +428,7 @@ fn update_status(
             ""
         };
         format!(
-            "Nuit {}{horde}\nAube dans {}\nZombies : {}",
+            "Nuit {}{horde}\nAube dans {}\nZombies : {}{weather}",
             t.day,
             format_secs(t.secs_until_dawn()),
             clock.zombies_alive
@@ -440,7 +445,7 @@ fn update_status(
             ""
         };
         format!(
-            "Jour {}\nNuit dans {}{next}{fog}",
+            "Jour {}\nNuit dans {}{next}{fog}{weather}",
             t.day,
             format_secs(t.secs_until_night())
         )
@@ -628,6 +633,16 @@ fn update_condition(player: Res<LocalPlayer>, mut text: Single<(&mut Text, &mut 
             color = Color::srgb(0.55, 0.9, 0.3);
         }
         parts.push(format!("Infecté {:.0} % · un antidote guérit", player.infection.ceil()));
+    }
+    if player.bleeding > 0.0 {
+        color = Color::srgb(1.0, 0.3, 0.3);
+        parts.push("Saignement · un bandage l'arrête".into());
+    }
+    if player.sprain > 0.0 {
+        parts.push(format!(
+            "Entorse ({:.0} s) · un bandage la soulage",
+            player.sprain.ceil()
+        ));
     }
     let joined = parts.join("\n");
     if text.0.0 != joined {

@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::transform::TransformSystems;
 use shared::daytime::{DAYLIGHT_FRACTION, GameTime};
+use shared::weather::Precipitation;
 
 use crate::AppState;
 use crate::net::NetEvent;
@@ -22,6 +23,9 @@ impl Plugin for SkyPlugin {
             zombies_alive: 0,
             fog: false,
             fog_level: 0.0,
+            rain: Precipitation::Clear,
+            rain_level: 0.0,
+            flash: 0.0,
         })
         .add_systems(Startup, spawn_sky)
         .add_systems(
@@ -42,11 +46,17 @@ pub struct GameClock {
     pub fog: bool,
     /// Épaisseur du brouillard affichée, de 0 à 1 (monte et descend en douceur).
     pub fog_level: f32,
+    /// Pluie annoncée par le serveur, et son intensité affichée (0 à 1, 1 = orage).
+    pub rain: Precipitation,
+    pub rain_level: f32,
+    /// Éclair : lueur qui s'éteint en une fraction de seconde.
+    pub flash: f32,
 }
 
 const DAY_SKY: Vec3 = Vec3::new(0.53, 0.72, 0.90);
 const DUSK_SKY: Vec3 = Vec3::new(0.85, 0.45, 0.30);
 const NIGHT_SKY: Vec3 = Vec3::new(0.02, 0.03, 0.07);
+const STORM_SKY: Vec3 = Vec3::new(0.42, 0.45, 0.5);
 const BLOOD_SKY: Vec3 = Vec3::new(0.16, 0.02, 0.02);
 const FOG_SKY: Vec3 = Vec3::new(0.68, 0.70, 0.72);
 
@@ -117,9 +127,21 @@ fn sync_clock(mut events: MessageReader<NetEvent>, mut clock: ResMut<GameClock>,
     let target = if clock.fog { 1.0 } else { 0.0 };
     let step = time.delta_secs() / 8.0;
     clock.fog_level += (target - clock.fog_level).clamp(-step, step);
+    let target = match clock.rain {
+        Precipitation::Clear => 0.0,
+        Precipitation::Rain => 0.55,
+        Precipitation::Storm => 1.0,
+    };
+    let step = time.delta_secs() / 10.0;
+    clock.rain_level += (target - clock.rain_level).clamp(-step, step);
+    clock.flash = (clock.flash - time.delta_secs() * 4.0).max(0.0);
     for event in events.read() {
-        if let NetEvent::Weather { fog } = event {
+        if let NetEvent::Weather { fog, rain } = event {
             clock.fog = *fog;
+            clock.rain = *rain;
+        }
+        if let NetEvent::Lightning { .. } = event {
+            clock.flash = 1.0;
         }
         if let NetEvent::Time { time, zombies_alive } = event {
             clock.time = *time;
@@ -146,6 +168,8 @@ fn update_sky(
     // Jour de brouillard : on n'y voit plus qu'à une trentaine de mètres.
     let thick = clock.fog_level;
     let end = end + (32.0 - end) * thick;
+    // Sous la pluie, on voit moins loin.
+    let end = end * (1.0 - 0.35 * clock.rain_level);
     fog.falloff = FogFalloff::Linear {
         start: end * (0.5 - 0.4 * thick),
         end,
@@ -156,6 +180,9 @@ fn update_sky(
     let low = (1.0 - (h.abs() * 4.0).min(1.0)) * if h > -0.25 { 1.0 } else { 0.0 };
     let base = NIGHT_SKY.lerp(DAY_SKY, (h * 2.0 + 0.3).clamp(0.0, 1.0));
     let sky_color = base.lerp(DUSK_SKY, low * 0.6);
+    // Nuages de pluie : un ciel gris, plus sombre sous l'orage.
+    let rain = clock.rain_level;
+    let sky_color = sky_color.lerp(STORM_SKY * (0.2 + 0.8 * day), rain * 0.75);
     let sky_color = sky_color.lerp(FOG_SKY * (0.25 + 0.75 * day), thick * 0.85);
     // Lune de sang : le ciel nocturne vire au rouge sombre.
     let blood = if clock.time.is_blood_moon() && clock.time.is_night() {
@@ -164,6 +191,8 @@ fn update_sky(
         0.0
     };
     let sky_color = sky_color.lerp(BLOOD_SKY, blood * 0.7);
+    // L'éclair blanchit le ciel un instant.
+    let sky_color = sky_color.lerp(Vec3::new(0.85, 0.88, 1.0), clock.flash * 0.7);
     let color = Color::srgb(sky_color.x, sky_color.y, sky_color.z);
     clear.0 = color;
     fog.color = color;
@@ -179,8 +208,8 @@ fn update_sky(
     let sky = Sky::at(clock.time);
     let (body, toward, strength) = sky.light();
     let (light, transform) = &mut *light;
-    // Le brouillard étouffe la lumière directe : les ombres s'estompent.
-    let veil = 1.0 - 0.7 * thick;
+    // Le brouillard et les nuages étouffent la lumière directe : les ombres s'estompent.
+    let veil = (1.0 - 0.7 * thick) * (1.0 - 0.55 * rain);
     light.illuminance = match body {
         SkyBody::Sun => SUN_LUX * strength * veil,
         SkyBody::Moon => MOON_LUX * strength * veil,
@@ -198,7 +227,7 @@ fn update_sky(
     **transform = Transform::default().looking_to(toward, Vec3::Y);
     // Sans lumière directe, l'ambiante seule dessine les reliefs : un peu plus forte la nuit
     // qu'avant, pour qu'on y voie quand même.
-    ambient.brightness = 220.0 + 380.0 * day;
+    ambient.brightness = 220.0 + 380.0 * day * (1.0 - 0.3 * rain) + 2500.0 * clock.flash;
     ambient.color = Color::srgb(0.85 + 0.15 * day, 0.88 + 0.12 * day, 1.0);
 
     // Astres et étoiles pâlissent dans le brouillard.
