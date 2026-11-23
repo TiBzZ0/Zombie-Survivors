@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_001A;
+pub const PROTOCOL_ID: u64 = 0x5A53_001B;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -309,6 +309,8 @@ pub enum ServerMessage {
         felt: f32,
         /// Avancée de l'infection, de 0 (sain) à 100.
         infection: f32,
+        /// Souffle restant sous l'eau, en secondes.
+        breath: f32,
     },
     /// Effets temporaires actifs du joueur (café, bière...).
     Buffs(crate::buff::Buffs),

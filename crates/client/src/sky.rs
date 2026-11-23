@@ -138,6 +138,7 @@ fn update_sky(
     stars: Query<&MeshMaterial3d<StandardMaterial>, With<Stars>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     settings: Res<crate::settings::Settings>,
+    player: Res<crate::player::LocalPlayer>,
 ) {
     // Le brouillard cache le bord du terrain chargé, quelle que soit la distance d'affichage.
     let end = settings.view_distance as f32 * 32.0 + 26.0;
@@ -158,6 +159,14 @@ fn update_sky(
     let color = Color::srgb(sky_color.x, sky_color.y, sky_color.z);
     clear.0 = color;
     fog.color = color;
+    // Sous l'eau : on n'y voit qu'à quelques mètres, dans une eau verte-bleue.
+    if player.immersion == shared::swim::Immersion::Under {
+        let light = 0.25 + 0.75 * day;
+        let water = Color::srgb(0.05 * light, 0.28 * light, 0.36 * light);
+        fog.color = water;
+        clear.0 = water;
+        fog.falloff = FogFalloff::Linear { start: 1.0, end: 22.0 };
+    }
 
     let sky = Sky::at(clock.time);
     let (body, toward, strength) = sky.light();

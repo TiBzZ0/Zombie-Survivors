@@ -31,6 +31,7 @@ mod skills;
 mod sky;
 mod sound;
 mod survivors;
+mod swim;
 mod terrain;
 mod textures;
 mod tutorial;
@@ -145,6 +146,7 @@ fn main() {
             wind::WindPlugin,
             particles::ParticlesPlugin,
             skills::SkillsPlugin,
+            swim::SwimUiPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)

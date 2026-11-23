@@ -34,7 +34,8 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | --- | --- |
 | `ZQSD` (AZERTY) ou `WASD` (QWERTY) | Se déplacer |
 | Espace | Sauter |
-| Maj gauche | Courir |
+| Maj gauche | Courir (dans l'eau : crawl) |
+| Ctrl (dans l'eau) | Plonger ; sous l'eau on nage là où l'on regarde, Espace pour remonter |
 | Souris | Regarder (clic dans la fenêtre pour capturer la souris, Échap pour la libérer) |
 | Clic gauche (maintenu) | Frapper un zombie, ou miner le bloc visé |
 | Clic gauche, arc ou fusil en main | Tirer |
@@ -67,7 +68,7 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 - Les filons de fer et de charbon (rochers sombres en surface, poches sous terre) se récoltent 20 fois par bloc. Lingot = minerai de fer + charbon.
 - Arc et flèches, puis fusil et cartouches, pour tenir les zombies à distance.
 - Portes (deux blocs empilés s'ouvrent ensemble) et coffres partagés pour la base. Un coffre cassé par un joueur lui rend son contenu ; cassé par un zombie, le contenu est perdu.
-- Le monde a ses **biomes** : prairies dégagées, forêts denses, déserts de sable et de cactus, terres enneigées. Les creux sont remplis de **lacs** où l'on nage (Espace pour remonter).
+- Le monde a ses **biomes** : prairies dégagées, forêts denses, déserts de sable et de cactus, terres enneigées. Les creux sont remplis de **lacs** où l'on nage : on flotte la tête hors de l'eau, on plonge avec Ctrl, et le **souffle** (bulles au-dessus de la barre) s'épuise sous l'eau avant la noyade. Pour sortir, il suffit d'avancer vers la rive.
 - La **soif** baisse plus vite que la faim (environ 10 minutes). Clic droit sur l'eau, main libre, pour boire. La **gourde** (établi : 1 lingot de fer et 1 bâton) se remplit au lac et se boit n'importe où. Sans boire, la vie ne remonte plus, puis diminue.
 - L'**eau** est transparente et **s'écoule** : creuser au bord d'un lac l'inonde, et l'eau courante s'étale jusqu'à 7 blocs à plat ou tombe dans les trous. Le **seau** (établi : 3 lingots de fer) se remplit à l'eau et se vide au clic droit : il crée une source, pratique pour des douves. Une source versée au seau se reprend ; l'eau courante se retire quand sa source disparaît.
 - La **température** compte dans la neige et le désert. La nuit enneigée glace en moins d'une minute à découvert : un **feu de camp** à quelques pas, un **toit** au-dessus de la tête ou un **manteau de fourrure** (établi : 4 peaux, prises sur le gibier) protègent. Le jour, le désert brûle : de l'ombre ou un **chapeau de paille** (4 blés). Sous 35 °C ou au-dessus de 39,5 °C, la vie baisse ; quand on a trop chaud, la soif se creuse deux fois plus vite.

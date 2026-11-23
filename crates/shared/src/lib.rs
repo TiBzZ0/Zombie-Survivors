@@ -20,6 +20,7 @@ pub mod raycast;
 pub mod skills;
 pub mod structure;
 pub mod survivor;
+pub mod swim;
 pub mod trees;
 pub mod world;
 pub mod worldgen;

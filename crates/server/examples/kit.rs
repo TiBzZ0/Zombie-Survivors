@@ -63,6 +63,17 @@ fn main() {
     }
     // Deux survivants devant le joueur (qui regarde vers -Z) : un à recruter, un déjà recruté.
     let spawn = server::world::find_spawn(&world);
+    // KIT_WATER=1 : le joueur apparaît au-dessus du lac le plus proche (essais de nage).
+    let spawn = match (std::env::var("KIT_WATER").is_ok(), world.generator().water_level()) {
+        (true, Some(level)) => (1..200)
+            .flat_map(|r: i32| (-r..=r).flat_map(move |dx| [(dx, -r), (dx, r), (-r, dx), (r, dx)]))
+            .map(|(dx, dz)| (spawn.x as i32 + dx, spawn.z as i32 + dz))
+            .find(|(x, z)| world.generator().surface_height(*x, *z) + 3 < level)
+            .map_or(spawn, |(x, z)| {
+                Vec3::new(x as f32 + 0.5, level as f32 + 0.5, z as f32 + 0.5)
+            }),
+        _ => spawn,
+    };
     let ground = |dx: f32, dz: f32| {
         let (x, z) = ((spawn.x + dx).floor(), (spawn.z + dz).floor());
         let y = world.generator().surface_height(x as i32, z as i32) as f32;
