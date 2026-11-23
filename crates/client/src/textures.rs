@@ -224,7 +224,31 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
                 gray(0.88 + 0.1 * coarse)
             }
         }
+        Block::TallGrass => gray(0.7 + 0.3 * (1.0 - y as f32 / 15.0) + 0.05 * n),
         Block::Air => gray(1.0),
+    }
+}
+
+/// Le pixel est-il opaque ? Les feuilles sont trouées (on voit à travers le feuillage) et
+/// les plantes, dessinées en croix, n'ont que leurs tiges.
+pub fn opaque(block: Block, x: u32, y: u32) -> bool {
+    let salt = block as u32 + 1;
+    match block {
+        Block::Leaves => hash(x / 2, y / 2, salt + 7) > 0.3,
+        Block::TallGrass => {
+            // Des brins de hauteurs variées, plus fournis au pied.
+            let height = 5.0 + 11.0 * hash(x, 1, salt);
+            hash(x, 0, salt) > 0.2 && (16 - y) as f32 <= height
+        }
+        Block::Sprout | Block::YoungWheat | Block::RipeWheat => {
+            let height = match block {
+                Block::Sprout => 6.0,
+                Block::YoungWheat => 11.0,
+                _ => 16.0,
+            };
+            x % 3 == 1 && hash(x, 0, salt) > 0.2 && (16 - y) as f32 <= height
+        }
+        _ => true,
     }
 }
 
@@ -244,6 +268,9 @@ pub fn build_block_texture(block: Block) -> Image {
             let i = ((y * TILE + x) * 4) as usize;
             for k in 0..3 {
                 data[i + k] = (c[k].clamp(0.0, 1.0) * 255.0) as u8;
+            }
+            if !opaque(block, x, y) {
+                data[i + 3] = 0;
             }
         }
     }
@@ -276,7 +303,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 37] = [
+const ALL_BLOCKS: [Block; 38] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -314,6 +341,7 @@ const ALL_BLOCKS: [Block; 37] = [
     Block::TeslaCoil,
     Block::SupplyCrate,
     Block::Banner,
+    Block::TallGrass,
 ];
 
 #[cfg(test)]

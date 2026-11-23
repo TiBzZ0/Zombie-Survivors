@@ -73,6 +73,8 @@ pub enum Block {
     SupplyCrate,
     /// Bannière : marque la base de son propriétaire, protégée des autres joueurs en JcJ.
     Banner,
+    /// Herbes hautes : décor qui ondule au vent, traversable ; on les fauche pour des graines.
+    TallGrass,
 }
 
 /// Rayon (à l'horizontale, sur toute la hauteur) de la base protégée par une bannière.
@@ -128,6 +130,7 @@ impl Block {
                 | Block::Campfire
                 | Block::Water
                 | Block::FlowingWater
+                | Block::TallGrass
         ) && !self.is_crop()
     }
 
@@ -145,7 +148,12 @@ impl Block {
     pub const fn is_opaque(self) -> bool {
         !matches!(
             self,
-            Block::Air | Block::DoorOpen | Block::ElectricDoorOpen | Block::BarbedWire | Block::Campfire
+            Block::Air
+                | Block::DoorOpen
+                | Block::ElectricDoorOpen
+                | Block::BarbedWire
+                | Block::Campfire
+                | Block::TallGrass
         ) && !self.is_crop()
     }
 
@@ -207,7 +215,12 @@ impl Block {
 
     /// Case où l'on peut poser un bloc : vide ou pleine d'eau.
     pub const fn is_replaceable(self) -> bool {
-        matches!(self, Block::Air | Block::Water | Block::FlowingWater)
+        matches!(self, Block::Air | Block::Water | Block::FlowingWater | Block::TallGrass)
+    }
+
+    /// Plante dessinée en croix (deux plans en diagonale) qui ondule au vent.
+    pub const fn is_plant(self) -> bool {
+        matches!(self, Block::TallGrass) || self.is_crop()
     }
 
     /// Un bloc visable par le joueur (pour casser ou utiliser), même s'il ne bloque pas.
@@ -275,6 +288,7 @@ impl Block {
             Block::Water | Block::FlowingWater => [0.20, 0.40, 0.75],
             Block::Snow => [0.95, 0.97, 1.0],
             Block::Cactus => [0.25, 0.55, 0.25],
+            Block::TallGrass => [0.42, 0.7, 0.3],
         }
     }
 
@@ -316,6 +330,7 @@ impl Block {
             Block::FlowingWater => "Eau courante",
             Block::Snow => "Neige",
             Block::Cactus => "Cactus",
+            Block::TallGrass => "Herbes hautes",
         }
     }
 
@@ -348,6 +363,7 @@ impl Block {
             Block::Cannon => 400,
             Block::Catapult => 260,
             Block::Sprout | Block::YoungWheat | Block::RipeWheat => 4,
+            Block::TallGrass => 2,
             Block::Campfire => 60,
             Block::Water | Block::FlowingWater => 1,
             Block::Snow => 30,

@@ -620,9 +620,15 @@ fn interact(
         Some(Item::Seeds) => {
             // Semer : sur le dessus d'un bloc de terre ou d'herbe.
             let Some(hit) = player.target else { return };
-            let pos = hit.block + IVec3::Y;
-            let soil = matches!(world.block(hit.block), Block::Grass | Block::Dirt);
-            if hit.normal == IVec3::Y && soil && world.block(pos) == Block::Air {
+            // Viser une touffe d'herbes hautes revient à viser le sol dessous.
+            let (ground, normal) = if world.block(hit.block) == Block::TallGrass {
+                (hit.block - IVec3::Y, IVec3::Y)
+            } else {
+                (hit.block, hit.normal)
+            };
+            let pos = ground + IVec3::Y;
+            let soil = matches!(world.block(ground), Block::Grass | Block::Dirt);
+            if normal == IVec3::Y && soil && matches!(world.block(pos), Block::Air | Block::TallGrass) {
                 world.set_block(pos, Block::Sprout);
                 player.inventory.remove(Item::Seeds, 1);
                 changes.write(NetEvent::BlockChanged(pos));
@@ -638,15 +644,15 @@ fn interact(
         }
         Some(Item::WaterBucket) => {
             let Some(hit) = player.target else { return };
-            let pos = hit.block + hit.normal;
-            if matches!(world.block(pos), Block::Air | Block::FlowingWater) {
+            let pos = placement(&world, hit);
+            if matches!(world.block(pos), Block::Air | Block::FlowingWater | Block::TallGrass) {
                 send_reliable(&mut client, &ClientMessage::PourWater { pos });
                 player.cooldown = ACTION_COOLDOWN;
             }
         }
         Some(Item::Block(block)) => {
             let Some(hit) = player.target else { return };
-            let pos = hit.block + hit.normal;
+            let pos = placement(&world, hit);
             let blocks_me = block.is_solid() && overlaps_solid(player.position, PLAYER_SIZE, &|b| b == pos);
             if !blocks_me && world.in_bounds(pos) && world.block(pos).is_replaceable() {
                 // Appliqué tout de suite pour la réactivité ; le serveur corrige s'il refuse.
@@ -709,6 +715,15 @@ fn mine(
     world.set_block(hit.block, Block::Air);
     changes.write(NetEvent::BlockChanged(hit.block));
     player.mining = None;
+}
+
+/// Case où poser un bloc visé : à côté du bloc, ou à sa place s'il se remplace (herbes hautes).
+fn placement(world: &ClientWorld, hit: shared::raycast::RayHit) -> IVec3 {
+    if world.block(hit.block) == Block::TallGrass {
+        hit.block
+    } else {
+        hit.block + hit.normal
+    }
 }
 
 fn update_camera(player: Res<LocalPlayer>, mut camera: Single<&mut Transform, With<Camera3d>>) {

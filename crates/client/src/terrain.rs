@@ -15,6 +15,7 @@ use crate::AppState;
 use crate::meshing::{ChunkMeshes, build_chunk_mesh};
 use crate::net::{ClientWorld, NetEvent};
 use crate::settings::Settings;
+use crate::wind::{Wind, WindMaterial};
 
 /// Distance d'affichage, en chunks.
 /// Nombre maximal de chunks en cours de génération en même temps.
@@ -49,7 +50,13 @@ struct Terrain {
 
 /// Un matériau par type de bloc, chacun avec sa texture répétée.
 #[derive(Resource)]
-struct TerrainMaterials(HashMap<Block, Handle<StandardMaterial>>);
+struct TerrainMaterials(HashMap<Block, TerrainMaterial>);
+
+/// Matériau d'un type de bloc : standard, ou animé par le vent.
+enum TerrainMaterial {
+    Plain(Handle<StandardMaterial>),
+    Wind(Handle<WindMaterial>),
+}
 
 #[derive(Component)]
 struct ChunkTask {
@@ -63,14 +70,15 @@ struct ChunkMesh;
 fn setup_material(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut wind_materials: ResMut<Assets<WindMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     let handles = crate::textures::all_blocks()
         .map(|block| {
             let texture = images.add(crate::textures::build_block_texture(block));
             let material = if block.is_water() {
-                // Eau translucide, visible des deux côtés (depuis la berge ou en nageant).
-                StandardMaterial {
+                // Eau translucide, visible des deux côtés (depuis la berge ou en nageant), ridée.
+                let base = StandardMaterial {
                     base_color: Color::srgba(0.8, 0.9, 1.0, 0.8),
                     base_color_texture: Some(texture),
                     alpha_mode: AlphaMode::Blend,
@@ -79,16 +87,36 @@ fn setup_material(
                     cull_mode: None,
                     double_sided: true,
                     ..default()
-                }
+                };
+                TerrainMaterial::Wind(wind_materials.add(WindMaterial {
+                    base,
+                    extension: Wind::water(),
+                }))
+            } else if block == Block::Leaves || block.is_plant() {
+                // Feuillage troué et plantes découpées, vus des deux côtés, qui bougent au vent.
+                let base = StandardMaterial {
+                    base_color: Color::WHITE,
+                    base_color_texture: Some(texture),
+                    alpha_mode: AlphaMode::Mask(0.5),
+                    perceptual_roughness: 1.0,
+                    cull_mode: None,
+                    double_sided: true,
+                    ..default()
+                };
+                let extension = if block == Block::Leaves {
+                    Wind::foliage()
+                } else {
+                    Wind::plants()
+                };
+                TerrainMaterial::Wind(wind_materials.add(WindMaterial { base, extension }))
             } else {
-                StandardMaterial {
+                TerrainMaterial::Plain(materials.add(StandardMaterial {
                     base_color: Color::WHITE,
                     base_color_texture: Some(texture),
                     perceptual_roughness: 1.0,
                     ..default()
-                }
+                }))
             };
-            let material = materials.add(material);
             (block, material)
         })
         .collect();
@@ -224,16 +252,16 @@ fn finish_chunks(
                 .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, data.uvs)
                 .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, data.colors)
                 .with_inserted_indices(Indices::U32(data.indices));
-            entities.push(
-                commands
-                    .spawn((
-                        ChunkMesh,
-                        Mesh3d(meshes.add(mesh)),
-                        MeshMaterial3d(material.clone()),
-                        Transform::from_xyz(ox as f32, oy as f32, oz as f32),
-                    ))
-                    .id(),
-            );
+            let mut entity = commands.spawn((
+                ChunkMesh,
+                Mesh3d(meshes.add(mesh)),
+                Transform::from_xyz(ox as f32, oy as f32, oz as f32),
+            ));
+            match material {
+                TerrainMaterial::Plain(handle) => entity.insert(MeshMaterial3d(handle.clone())),
+                TerrainMaterial::Wind(handle) => entity.insert(MeshMaterial3d(handle.clone())),
+            };
+            entities.push(entity.id());
         }
         terrain.loaded.insert(pos, entities);
     }

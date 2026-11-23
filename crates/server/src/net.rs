@@ -96,6 +96,8 @@ pub const MAX_THIRST: f32 = 100.0;
 const APPLE_CHANCE: f32 = 0.25;
 /// Chance qu'un bloc d'herbe donne aussi des graines.
 const SEED_CHANCE: f32 = 0.15;
+/// Chance qu'une touffe d'herbes hautes fauchée donne des graines.
+const GRASS_SEED_CHANCE: f32 = 0.3;
 /// Tolérance sur la durée de minage (latence, horloges).
 const MINING_TOLERANCE: f64 = 0.75;
 
@@ -927,6 +929,20 @@ fn handle_reliable(
                 }
                 if block == Block::Grass && fastrand::f32() < SEED_CHANCE {
                     player.inventory.add(Item::Seeds, 1);
+                }
+                if block == Block::TallGrass && fastrand::f32() < GRASS_SEED_CHANCE {
+                    player.inventory.add(Item::Seeds, 1);
+                }
+                // Une plante privée de son sol disparaît avec lui.
+                let above = pos + IVec3::Y;
+                if world.block(above).is_plant() && world.set_block(above, Block::Air) {
+                    broadcast(
+                        server,
+                        &ServerMessage::BlockChanged {
+                            pos: above,
+                            block: Block::Air,
+                        },
+                    );
                 }
                 if block == Block::RipeWheat {
                     // Une récolte : deux blés et de quoi ressemer.
