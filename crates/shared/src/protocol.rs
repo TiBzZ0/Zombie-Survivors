@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0015;
+pub const PROTOCOL_ID: u64 = 0x5A53_0016;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -26,6 +26,8 @@ pub struct PlayerState {
     pub position: Vec3,
     pub yaw: f32,
     pub pitch: f32,
+    /// Le joueur frappe ou mine (pour animer son bras chez les autres).
+    pub swinging: bool,
 }
 
 /// Messages du client vers le serveur.
@@ -265,8 +267,8 @@ pub enum ServerMessage {
     PlayerLeft {
         id: PlayerId,
     },
-    /// État de tous les joueurs (canal non fiable).
-    Players(Vec<(PlayerId, PlayerState)>),
+    /// État de tous les joueurs et objet qu'ils tiennent (canal non fiable).
+    Players(Vec<(PlayerId, PlayerState, Option<Item>)>),
     /// Le serveur replace le joueur (déplacement refusé, réapparition).
     Teleport {
         position: Vec3,
@@ -408,6 +410,7 @@ mod tests {
             position: Vec3::new(1.0, 2.0, 3.0),
             yaw: 0.5,
             pitch: -0.1,
+            swinging: true,
         });
         assert_eq!(decode::<ClientMessage>(&encode(&msg)), Some(msg));
     }

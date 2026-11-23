@@ -83,7 +83,7 @@ pub enum NetEvent {
         name: String,
     },
     PlayerLeft(PlayerId),
-    Players(Vec<(PlayerId, PlayerState)>),
+    Players(Vec<(PlayerId, PlayerState, Option<shared::item::Item>)>),
     Teleport(Vec3),
     Chat(String),
     Zombies(Vec<ZombieState>),

@@ -109,6 +109,7 @@ impl ConnectedPlayer {
                 position,
                 yaw: 0.0,
                 pitch: 0.0,
+                swinging: false,
             },
             health: MAX_HEALTH,
             since_hit: 0.0,
@@ -1229,7 +1230,7 @@ fn broadcast_players(mut server: ResMut<RenetServer>, lobby: Res<Lobby>) {
         .players
         .iter()
         .filter(|(_, p)| p.is_ready())
-        .map(|(id, p)| (*id, p.state))
+        .map(|(id, p)| (*id, p.state, p.held_item()))
         .collect();
     if !players.is_empty() {
         server.broadcast_message(DefaultChannel::Unreliable, encode(&ServerMessage::Players(players)));

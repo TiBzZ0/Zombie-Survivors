@@ -268,11 +268,15 @@ fn two_players_share_the_world() {
                 position: moved,
                 yaw: 1.0,
                 pitch: 0.0,
+                swinging: false,
             }),
             false,
         );
         c[1].find(|m| match m {
-            ServerMessage::Players(list) => list.iter().find(|(id, s)| *id == 1 && s.position == moved).map(|_| ()),
+            ServerMessage::Players(list) => list
+                .iter()
+                .find(|(id, s, _)| *id == 1 && s.position == moved)
+                .map(|_| ()),
             _ => None,
         })
         .is_some()
@@ -379,6 +383,7 @@ fn deposits_are_harvested_many_times() {
                     position,
                     yaw: 0.0,
                     pitch: 0.0,
+                    swinging: false,
                 }),
                 false,
             );

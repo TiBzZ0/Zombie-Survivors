@@ -32,6 +32,7 @@ mod survivors;
 mod terrain;
 mod textures;
 mod tutorial;
+mod viewmodel;
 mod zombies;
 
 use bevy::prelude::*;
@@ -137,6 +138,7 @@ fn main() {
             tutorial::TutorialPlugin,
             electricity::ElectricityPlugin,
             inventory_ui::InventoryUiPlugin,
+            viewmodel::ViewModelPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
