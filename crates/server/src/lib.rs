@@ -22,6 +22,7 @@ pub mod events;
 pub mod explosives;
 pub mod farming;
 pub mod net;
+pub mod pathfind;
 pub mod save;
 pub mod structure;
 pub mod survivors;

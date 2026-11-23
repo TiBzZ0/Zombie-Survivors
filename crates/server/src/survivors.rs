@@ -26,10 +26,14 @@ use crate::save::{SavedSurvivor, SavedSurvivors};
 use crate::world::{Chests, GameWorld};
 use crate::zombies::{BlockDamage, Zombie, ZombieBody, ZombieSet, find_spawn_spot};
 
-const JUMP_SPEED: f32 = 7.5;
+const JUMP_SPEED: f32 = 8.5;
 /// Portée d'un coup de survivant, en mètres.
 const ATTACK_RANGE: f32 = 1.7;
 const ATTACK_COOLDOWN: f32 = 0.9;
+/// Sous cette part de sa vie, un survivant au corps-à-corps se replie.
+const RETREAT_HEALTH: f32 = 0.3;
+/// Un tireur recule quand un zombie s'approche à moins de cette distance.
+const KITE_DIST: f32 = 4.0;
 /// Rayon défendu autour du survivant qui suit, ou autour de son poste.
 const DEFEND_RADIUS: f32 = 12.0;
 /// Un survivant sans chef ne se bat que si un zombie est tout près.
@@ -135,6 +139,10 @@ pub struct Survivor {
     scan_timer: f32,
     /// Marchés d'un marchand de passage (vide pour un survivant).
     pub offers: Vec<Offer>,
+    /// Chemin en cours (centres de cases), vers `path_goal`.
+    path: Vec<Vec3>,
+    path_goal: Vec3,
+    path_timer: f32,
 }
 
 impl Survivor {
@@ -170,6 +178,9 @@ impl Survivor {
             campfire: None,
             scan_timer: 0.0,
             offers: Vec::new(),
+            path: Vec::new(),
+            path_goal: Vec3::ZERO,
+            path_timer: 0.0,
         }
     }
 
@@ -556,11 +567,21 @@ fn survivor_ai(
         let melee_range = ATTACK_RANGE + (melee.reach - Item::melee(None).reach).max(0.0);
         // Avec une arme à distance, il vise plus loin que sa zone.
         let radius = if ranged.is_some() { radius + 8.0 } else { radius };
+        // Priorité au zombie qui menace le chef, puis au plus proche, puis au plus blessé.
+        let leader_pos = leader.map(|(_, p)| p);
         let threat = zombies
             .iter()
             .filter(|(z, b)| z.health > 0.0 && b.position.distance(center) < radius)
-            .map(|(z, b)| (z.id, b.position, b.position.distance(s.position)))
-            .min_by(|a, b| a.2.total_cmp(&b.2));
+            .map(|(z, b)| {
+                let dist = b.position.distance(s.position);
+                let on_leader = leader_pos.is_some_and(|l| l.distance(b.position) < 3.0);
+                let score = dist - if on_leader { 4.0 } else { 0.0 } - (1.0 - z.health / z.kind.stats().health) * 2.0;
+                (z.id, b.position, dist, score)
+            })
+            .min_by(|a, b| a.3.total_cmp(&b.3))
+            .map(|(id, pos, dist, _)| (id, pos, dist));
+        let leader_id = leader.map(|(id, _)| id);
+        let hurt = s.health < s.stats.max_health() * RETREAT_HEALTH;
 
         let mut goal: Option<Vec3> = None;
         let mut face: Option<Vec3> = None;
@@ -577,6 +598,12 @@ fn survivor_ai(
                 });
             if let Some((weapon, source)) = shot {
                 face = Some(target);
+                // Trop près : il recule en tirant.
+                if dist < KITE_DIST {
+                    let away = (s.position - target).with_y(0.0).normalize_or_zero();
+                    goal = Some(s.position + away * 3.0);
+                    speed = SURVIVOR_SPEED * 0.9;
+                }
                 if s.attack_cooldown <= 0.0 {
                     s.attack_cooldown = weapon.cooldown * 2.0;
                     s.attacking = 0.3;
@@ -584,6 +611,8 @@ fn survivor_ai(
                     if let Some((mut z, _)) = zombies.iter_mut().find(|(z, _)| z.id == zombie_id) {
                         z.health -= weapon.damage;
                         z.hurt_timer = 0.3;
+                        // L'expérience des zombies abattus revient au chef.
+                        z.last_attacker = leader_id.or(z.last_attacker);
                     }
                     if let Some(server) = server.as_deref_mut() {
                         broadcast(
@@ -597,8 +626,24 @@ fn survivor_ai(
                         );
                     }
                 }
+            } else if hurt && ranged.is_none() && dist < 6.0 {
+                // Blessé : il rompt le combat et se replie vers son chef ou son poste.
+                let away = (s.position - target).with_y(0.0).normalize_or_zero();
+                let refuge = leader_pos.unwrap_or(s.post);
+                goal = Some(if refuge.distance(target) > dist {
+                    refuge
+                } else {
+                    s.position + away * 4.0
+                });
+                speed = SURVIVOR_SPEED * 1.3;
             } else if flat.length() < melee_range && (target.y - s.position.y).abs() < 1.6 {
                 face = Some(target);
+                // Entre deux coups, il recule d'un pas pour esquiver la riposte, puis revient.
+                if s.attack_cooldown > ATTACK_COOLDOWN * 0.35 && flat.length() < melee_range * 0.85 {
+                    let away = (s.position - target).with_y(0.0).normalize_or_zero();
+                    goal = Some(s.position + away * 1.5);
+                    speed = SURVIVOR_SPEED * 0.8;
+                }
                 if s.attack_cooldown <= 0.0 {
                     // L'arme de mêlée ajoute ses dégâts à la force du survivant et règle sa cadence.
                     s.attack_cooldown = ATTACK_COOLDOWN * (melee.cooldown / Item::melee(None).cooldown).sqrt();
@@ -617,6 +662,7 @@ fn survivor_ai(
                         if hit {
                             z.health -= damage;
                             z.hurt_timer = 0.3;
+                            z.last_attacker = leader_id.or(z.last_attacker);
                             let push = to.normalize_or_zero() * melee.knockback * 0.8;
                             z.knockback = Vec3::new(push.x, 2.5, push.y);
                         }
@@ -977,10 +1023,39 @@ fn repair(pos: IVec3, amount: f32, damage: &mut BlockDamage, server: Option<&mut
     }
 }
 
+/// Délai entre deux recherches de chemin vers le même but.
+const REPATH_SECS: f32 = 0.8;
+
+/// Prochain point où aller pour rejoindre `goal` : le chemin trouvé par A* (marches, détours),
+/// ou tout droit si le but est proche ou introuvable.
+fn steer(s: &mut Survivor, goal: Vec3, dt: f32, world: &GameWorld) -> Vec3 {
+    s.path_timer -= dt;
+    let flat = |a: Vec3, b: Vec3| Vec2::new(a.x - b.x, a.z - b.z).length();
+    if flat(goal, s.position) < 1.5 && (goal.y - s.position.y).abs() < 1.0 {
+        s.path.clear();
+        return goal;
+    }
+    if s.path_timer <= 0.0 || s.path_goal.distance(goal) > 3.0 {
+        s.path_timer = REPATH_SECS * (0.8 + fastrand::f32() * 0.4);
+        s.path_goal = goal;
+        s.path = crate::pathfind::find_path(s.position, goal, |p| world.block(p)).unwrap_or_default();
+    }
+    // Les points déjà atteints sont retirés.
+    while let Some(next) = s.path.first() {
+        if flat(*next, s.position) < 0.45 && (next.y - s.position.y).abs() < 1.2 {
+            s.path.remove(0);
+        } else {
+            break;
+        }
+    }
+    s.path.first().copied().unwrap_or(goal)
+}
+
 /// Déplace le survivant vers `goal` (en sautant les marches), tourné vers `face` s'il y en a un.
 fn step(s: &mut Survivor, goal: Option<Vec3>, face: Option<Vec3>, speed: f32, dt: f32, world: &GameWorld) {
-    let mut wish = goal.map_or(Vec3::ZERO, |g| Vec3::new(g.x - s.position.x, 0.0, g.z - s.position.z));
-    if wish.length() < 0.3 {
+    let target = goal.map(|g| steer(s, g, dt, world));
+    let mut wish = target.map_or(Vec3::ZERO, |g| Vec3::new(g.x - s.position.x, 0.0, g.z - s.position.z));
+    if wish.length() < 0.15 {
         wish = Vec3::ZERO;
     }
     let wish = wish.normalize_or_zero() * speed;
@@ -990,8 +1065,16 @@ fn step(s: &mut Survivor, goal: Option<Vec3>, face: Option<Vec3>, speed: f32, dt
         s.yaw = (-wish.x).atan2(-wish.z);
     }
     let mut velocity = Vec3::new(wish.x, s.velocity.y, wish.z);
-    if s.on_ground && s.hit_wall && wish != Vec3::ZERO {
+    // Saute contre un mur, ou quand la prochaine case du chemin est une marche.
+    let step_up = target
+        .is_some_and(|t| t.y > s.position.y + 0.5 && Vec2::new(t.x - s.position.x, t.z - s.position.z).length() < 1.4);
+    if s.on_ground && wish != Vec3::ZERO && (s.hit_wall || step_up) {
         velocity.y = JUMP_SPEED;
+    }
+    // Dans l'eau, il nage vers la surface.
+    let feet = s.position.floor().as_ivec3();
+    if world.block(feet + IVec3::Y).is_water() {
+        velocity.y = velocity.y.max(2.5);
     }
     let result = step_body(s.position, velocity, SURVIVOR_SIZE, dt, &|p| {
         world.is_solid(p) || p.y < 0
@@ -1357,6 +1440,38 @@ mod tests {
     use shared::world::WorldState;
 
     use super::*;
+
+    #[test]
+    fn a_survivor_climbs_steps_and_walks_around_walls_to_reach_its_goal() {
+        let mut world = GameWorld(WorldState::new(WorldConfig::default()));
+        let y = world.generator().surface_height(100, 100) + 25;
+        for x in 85..=115 {
+            for z in 85..=115 {
+                world.set_block(IVec3::new(x, y - 1, z), Block::Stone);
+            }
+        }
+        // Un mur trop haut pour sauter, puis un escalier de deux marches vers une estrade.
+        for z in 95..=103 {
+            for dy in 0..3 {
+                world.set_block(IVec3::new(103, y + dy, z), Block::Stone);
+            }
+        }
+        for x in 106..=112 {
+            for z in 98..=102 {
+                world.set_block(IVec3::new(x, y, z), Block::Planks);
+                if x >= 108 {
+                    world.set_block(IVec3::new(x, y + 1, z), Block::Planks);
+                }
+            }
+        }
+        let start = Vec3::new(100.5, y as f32, 100.5);
+        let goal = Vec3::new(110.5, y as f32 + 2.0, 100.5);
+        let mut s = Survivor::new(1, "Marie".into(), SurvivorStats::from_seed(3), start);
+        for _ in 0..(20.0 * 30.0) as usize {
+            step(&mut s, Some(goal), None, SURVIVOR_SPEED, 1.0 / 30.0, &world);
+        }
+        assert!(s.position.distance(goal) < 1.5, "{:?}", s.position);
+    }
 
     /// Une dalle dans le ciel, un coffre près du poste, un survivant de Alice au travail.
     fn camp(order: Order) -> (App, IVec3, IVec3) {
