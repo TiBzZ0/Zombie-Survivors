@@ -13,7 +13,7 @@ use shared::item::{Item, Tier};
 
 use crate::textures::{TILE, tile_color};
 
-const N: usize = 16;
+pub const N: usize = 16;
 
 /// Icônes déjà dessinées.
 #[derive(Resource, Default)]
@@ -47,6 +47,11 @@ impl Canvas {
     #[cfg(test)]
     pub fn get(&self, x: usize, y: usize) -> Rgba {
         self.0[y][x]
+    }
+
+    /// Pixels, ligne par ligne (y vers le bas).
+    pub fn pixels(&self) -> &[[Rgba; N]; N] {
+        &self.0
     }
 
     fn set(&mut self, x: i32, y: i32, c: Rgba) {
