@@ -103,6 +103,8 @@ pub struct Zombie {
     pub frenzy: f32,
     /// Mèche d'un gonflé : secondes avant qu'il n'explose.
     pub fuse: Option<f32>,
+    /// Pris dans un piège à mâchoires : secondes restantes (négatif : vient de s'en libérer).
+    pub trapped: f32,
 }
 
 /// Corps physique d'un zombie.
@@ -214,6 +216,7 @@ fn spawn_zombie(commands: &mut Commands, ids: &mut NextZombieId, kind: ZombieKin
             stuck: 0.0,
             frenzy: 0.0,
             fuse: None,
+            trapped: 0.0,
         },
         ZombieBody {
             position,
@@ -490,7 +493,9 @@ fn zombie_ai(
     mut zombies: Query<(&mut Zombie, &mut ZombieBody)>,
     mut chests: ResMut<Chests>,
     mut survivors: Query<(Entity, &mut Survivor)>,
+    mut projectiles: Option<ResMut<crate::explosives::Projectiles>>,
 ) {
+    use shared::traps::*;
     let dt = time.delta_secs();
     let players: Vec<(ClientId, Vec3)> = lobby
         .players
@@ -532,6 +537,48 @@ fn zombie_ai(
 
         // Dans les barbelés : le zombie se blesse, ralentit et use le fil.
         let feet_block = block_containing(body.position + Vec3::Y * 0.1);
+        // Mine : elle saute sous le zombie.
+        if world.block(feet_block) == Block::Landmine && world.set_block(feet_block, Block::Air) {
+            version.0 += 1;
+            if let Some(server) = server.as_deref_mut() {
+                crate::net::broadcast(
+                    server,
+                    &ServerMessage::BlockChanged {
+                        pos: feet_block,
+                        block: Block::Air,
+                    },
+                );
+            }
+            if let Some(projectiles) = projectiles.as_deref_mut() {
+                projectiles.0.push(crate::explosives::Projectile::mine(
+                    feet_block.as_vec3() + Vec3::new(0.5, 0.3, 0.5),
+                ));
+            }
+        }
+        // Piège à mâchoires : il happe le zombie, le blesse et le retient un moment.
+        if zombie.trapped > 0.0 {
+            zombie.trapped -= dt;
+            if zombie.trapped <= 0.0 {
+                zombie.trapped = -TRAP_IMMUNITY;
+            }
+        } else if zombie.trapped < 0.0 {
+            zombie.trapped = (zombie.trapped + dt).min(0.0);
+        } else if world.block(feet_block) == Block::BearTrap {
+            let giant = matches!(zombie.kind, ZombieKind::Brute | ZombieKind::Colossus);
+            zombie.trapped = if giant { TRAP_HOLD_GIANT } else { TRAP_HOLD };
+            zombie.health -= TRAP_DAMAGE;
+            zombie.hurt_timer = 0.3;
+            damage_block(
+                feet_block,
+                TRAP_WEAR,
+                &mut damage,
+                &mut world,
+                &mut version,
+                server.as_deref_mut(),
+                &mut lobby,
+                &mut chests,
+            );
+        }
         let in_wire = world.block(feet_block) == Block::BarbedWire;
         if in_wire {
             zombie.health -= WIRE_DPS * dt;
@@ -735,7 +782,13 @@ fn zombie_ai(
         {
             zombie.fuse = Some(BLOAT_FUSE);
         }
-        let slow = if in_wire { WIRE_SLOW } else { 1.0 };
+        let slow = if zombie.trapped > 0.0 {
+            0.0
+        } else if in_wire {
+            WIRE_SLOW
+        } else {
+            1.0
+        };
         let rage = if zombie.frenzy > 0.0 { FRENZY_SPEED } else { 1.0 };
         let moon = if blood { BLOOD_MOON_SPEED } else { 1.0 };
         let speed = stats.speed * slow * rage * moon;
@@ -805,7 +858,7 @@ fn zombie_ai(
             && nearest.is_some_and(|n| n.2 > ZOMBIE_REACH + 1.0 && n.2 < 64.0)
             && moved < 0.01
             && wanted == 0.0;
-        if (blocked || pinned) && !climbing {
+        if (blocked || pinned) && !climbing && zombie.trapped <= 0.0 {
             zombie.stuck += dt;
         } else {
             zombie.stuck = (zombie.stuck - dt * 2.0).max(0.0);
@@ -1385,6 +1438,7 @@ mod tests {
                     stuck: 0.0,
                     frenzy: 0.0,
                     fuse: None,
+                    trapped: 0.0,
                 },
                 ZombieBody {
                     position: pos,
@@ -1697,6 +1751,7 @@ mod fog_tests {
                     stuck: 0.0,
                     frenzy: 0.0,
                     fuse: None,
+                    trapped: 0.0,
                 },
                 ZombieBody {
                     position: Vec3::new(50.0, 40.0, 50.0),
@@ -1741,6 +1796,7 @@ mod fog_tests {
             stuck: 0.0,
             frenzy: 0.0,
             fuse: None,
+            trapped: 0.0,
         });
         app.update();
         let xp = app.world().resource::<Lobby>().players[&1].progress.xp;
@@ -1777,6 +1833,7 @@ mod fog_tests {
                 stuck: 0.0,
                 frenzy: 0.0,
                 fuse: None,
+                trapped: 0.0,
             },
             ZombieBody {
                 position,
@@ -1837,5 +1894,42 @@ mod fog_tests {
             .map(|z| z.frenzy)
             .collect();
         assert!(frenzy.iter().all(|f| *f > 0.0), "{frenzy:?}");
+    }
+
+    #[test]
+    fn traps_catch_and_mines_blow_up_zombies() {
+        let (mut app, wall_z) = super::tests::arena(6, 0);
+        app.init_resource::<crate::explosives::Projectiles>();
+        let y = app.world().resource::<Lobby>().players[&1].state.position.y;
+        // Un piège et une mine sur le chemin, devant le mur.
+        let trap = IVec3::new(100, y as i32, wall_z - 4);
+        let mine = IVec3::new(104, y as i32, wall_z - 4);
+        let mut world = app.world_mut().resource_mut::<GameWorld>();
+        assert!(world.set_block(trap, Block::BearTrap) && world.set_block(mine, Block::Landmine));
+        add_zombie(
+            &mut app,
+            1,
+            ZombieKind::Walker,
+            trap.as_vec3() + Vec3::new(0.5, 0.0, 0.5),
+        );
+        add_zombie(
+            &mut app,
+            2,
+            ZombieKind::Walker,
+            mine.as_vec3() + Vec3::new(0.5, 0.0, 0.5),
+        );
+        step(&mut app, 1.0);
+        let zombies: Vec<(u32, f32, f32)> = app
+            .world_mut()
+            .query::<&Zombie>()
+            .iter(app.world())
+            .map(|z| (z.id, z.trapped, z.health))
+            .collect();
+        let caught = zombies.iter().find(|z| z.0 == 1).unwrap();
+        assert!(caught.1 > 0.0, "le piège retient le zombie : {zombies:?}");
+        assert!(caught.2 < ZombieKind::Walker.stats().health);
+        let world = app.world().resource::<GameWorld>();
+        assert_eq!(world.block(mine), Block::Air, "la mine a sauté");
+        assert_eq!(app.world().resource::<crate::explosives::Projectiles>().0.len(), 1);
     }
 }

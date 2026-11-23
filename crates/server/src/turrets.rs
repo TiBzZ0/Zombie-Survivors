@@ -159,6 +159,7 @@ mod tests {
                     stuck: 0.0,
                     frenzy: 0.0,
                     fuse: None,
+                    trapped: 0.0,
                 },
                 ZombieBody {
                     position: Vec3::new(x, y as f32, 0.5),

@@ -59,6 +59,8 @@ fn main() {
         (Item::HerbalTea, 2),
         (Item::Stew, 2),
         (Item::FishingRod, 1),
+        (Item::Block(Block::BearTrap), 4),
+        (Item::Block(Block::Landmine), 4),
     ] {
         inventory.add(item, n);
     }

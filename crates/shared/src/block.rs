@@ -107,6 +107,10 @@ pub enum Block {
     /// Case occupée par une grande machine (établi, tourelle...) posée à côté : on ne la voit
     /// pas, la machine la recouvre, et la casser casse toute la machine.
     Part,
+    /// Mine : explose sous le premier zombie qui marche dessus.
+    Landmine,
+    /// Piège à mâchoires : happe et retient le zombie qui marche dessus (et s'use).
+    BearTrap,
 }
 
 /// Rayon (à l'horizontale, sur toute la hauteur) de la base protégée par une bannière.
@@ -166,6 +170,8 @@ impl Block {
                 | Block::FallenFruit
                 | Block::RottenFruit
                 | Block::Bedroll
+                | Block::Landmine
+                | Block::BearTrap
         ) && !self.is_crop()
             && !self.is_sapling()
     }
@@ -227,6 +233,8 @@ impl Block {
                 | Block::FallenFruit
                 | Block::RottenFruit
                 | Block::Bedroll
+                | Block::Landmine
+                | Block::BearTrap
         ) && !self.is_crop()
             && !self.is_sapling()
     }
@@ -332,6 +340,9 @@ impl Block {
             Block::Campfire => Some(([0.1, 0.0, 0.1], [0.9, 0.4, 0.9])),
             // Sac de couchage : un matelas fin posé à même le sol.
             Block::Bedroll => Some(([0.1, 0.0, 0.1], [0.9, 0.18, 0.9])),
+            // Pièges : à ras du sol.
+            Block::Landmine => Some(([0.25, 0.0, 0.25], [0.75, 0.12, 0.75])),
+            Block::BearTrap => Some(([0.1, 0.0, 0.1], [0.9, 0.15, 0.9])),
             _ => None,
         }
     }
@@ -397,6 +408,8 @@ impl Block {
             Block::PineSapling => [0.15, 0.38, 0.2],
             Block::Bedroll => [0.78, 0.36, 0.30],
             Block::Part => [0.45, 0.45, 0.45],
+            Block::Landmine => [0.3, 0.32, 0.28],
+            Block::BearTrap => [0.5, 0.48, 0.45],
         }
     }
 
@@ -456,6 +469,8 @@ impl Block {
             Block::RipeCarrot => "Carotte mûre",
             Block::Bedroll => "Sac de couchage",
             Block::Part => "Machine",
+            Block::Landmine => "Mine",
+            Block::BearTrap => "Piège à mâchoires",
         }
     }
 
@@ -499,6 +514,8 @@ impl Block {
             Block::Cactus => 30,
             Block::Bedroll => 8,
             Block::Part => 200,
+            Block::Landmine => 10,
+            Block::BearTrap => 60,
         }
     }
 }

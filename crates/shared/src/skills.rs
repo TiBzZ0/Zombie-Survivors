@@ -414,9 +414,9 @@ impl Tech {
         match item {
             Item::Block(block) => match block {
                 Block::Generator | Block::Floodlight | Block::ElectricDoor | Block::TeslaCoil => Tech::Electricity,
-                Block::Cannon | Block::MachineGun => Tech::Gunpowder,
+                Block::Cannon | Block::MachineGun | Block::Landmine => Tech::Gunpowder,
                 Block::Turret | Block::Catapult => Tech::Mechanics,
-                Block::Forge | Block::ReinforcedWall | Block::BarbedWire => Tech::Metallurgy,
+                Block::Forge | Block::ReinforcedWall | Block::BarbedWire | Block::BearTrap => Tech::Metallurgy,
                 _ => Tech::Primitive,
             },
             Item::Rifle | Item::Ammo | Item::Grenade | Item::Dynamite | Item::CannonBall => Tech::Gunpowder,
