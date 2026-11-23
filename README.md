@@ -45,7 +45,7 @@ En partie locale, le client héberge le serveur : les joueurs du même réseau p
 | F11 | Plein écran |
 | `T` | Écrire dans la discussion (Entrée pour envoyer) |
 | `1` à `9`, molette | Choisir l'objet en main |
-| `C` ou `Tab` | Ouvrir le panneau de fabrication |
+| `C` ou `Tab` | Fabrication et inventaire : survoler une icône pour le détail, cliquer pour fabriquer ou ranger l'objet dans la case choisie |
 | Entrée | Réapparaître après la mort |
 
 ### Survivre

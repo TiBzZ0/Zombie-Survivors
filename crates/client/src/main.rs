@@ -17,6 +17,8 @@ mod crafting;
 mod effects;
 mod electricity;
 mod hud;
+mod icons;
+mod inventory_ui;
 mod menu;
 mod meshing;
 mod minimap;
@@ -134,6 +136,7 @@ fn main() {
             minimap::MinimapPlugin,
             tutorial::TutorialPlugin,
             electricity::ElectricityPlugin,
+            inventory_ui::InventoryUiPlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
