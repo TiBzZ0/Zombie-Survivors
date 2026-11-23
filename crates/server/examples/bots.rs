@@ -89,6 +89,8 @@ fn main() {
                     position: spawn,
                     yaw: bot.yaw,
                     pitch: 0.0,
+                    // Frappe une seconde sur deux, pour voir l'animation chez les autres.
+                    swinging: bot.yaw % 2.0 < 1.0,
                 };
                 bot.client
                     .send_message(DefaultChannel::Unreliable, encode(&ClientMessage::State(state)));

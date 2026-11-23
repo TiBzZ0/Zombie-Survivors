@@ -721,6 +721,7 @@ fn send_position(mut player: ResMut<LocalPlayer>, mut client: ResMut<RenetClient
         position: player.position,
         yaw: player.yaw,
         pitch: player.pitch,
+        swinging: player.mining.is_some() || player.cooldown > 0.0,
     };
     let mut last = player.last_sent;
     send_state(&mut client, state, &time, &mut last);
