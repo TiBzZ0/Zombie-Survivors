@@ -13,6 +13,7 @@ pub mod config;
 pub mod crafting;
 pub mod daytime;
 pub mod item;
+pub mod multiblock;
 pub mod pathfinding;
 pub mod physics;
 pub mod protocol;

@@ -119,7 +119,12 @@ const WATER_DROP: f32 = 0.125;
 /// Un bloc qui cache entièrement la face de son voisin (l'eau, transparente, et les feuilles,
 /// trouées, ne cachent rien).
 pub fn hides_faces(block: Block) -> bool {
-    block.is_opaque() && !block.is_water() && !block.is_leaves()
+    block.is_opaque() && !block.is_water() && !block.is_leaves() && !is_modelled(block)
+}
+
+/// Bloc dessiné par un modèle (ou caché sous celui de sa machine) plutôt qu'en cube.
+fn is_modelled(block: Block) -> bool {
+    block == Block::Part || crate::models::model(block).is_some()
 }
 
 /// Construit les maillages d'un chunk.
@@ -165,6 +170,42 @@ pub fn build_chunk_mesh(chunk: &Chunk, outside: impl Fn(i32, i32, i32) -> Block)
                     }
                     continue;
                 }
+                if let Some(pieces) = crate::models::model(block) {
+                    // Machine couchée le long de Z : les pavés pivotent (X et Z échangés).
+                    let (xi, yi, zi) = (x as i32, y as i32, z as i32);
+                    let local = |p: bevy::math::IVec3| get(p.x, p.y, p.z);
+                    let turned = shared::multiblock::is_multiblock(block)
+                        && shared::multiblock::along_z(bevy::math::IVec3::new(xi, yi, zi), local);
+                    let offset = [x as f32, y as f32, z as f32];
+                    for piece in pieces {
+                        let (mut min, mut max) = (piece.min, piece.max);
+                        if turned {
+                            min.swap(0, 2);
+                            max.swap(0, 2);
+                        }
+                        let size = [0, 1, 2].map(|i| max[i] - min[i]);
+                        let part = out.part(piece.tex);
+                        for (normal, corners) in FACES {
+                            let mut color = face_color(piece.tex, normal);
+                            for c in color.iter_mut().take(3) {
+                                *c *= piece.tint;
+                            }
+                            let uv = match normal {
+                                [x, 0, 0] if x != 0 => [size[2], size[1]],
+                                [0, y, 0] if y != 0 => [size[0], size[2]],
+                                _ => [size[0], size[1]],
+                            };
+                            part.push_quad(
+                                normal,
+                                corners,
+                                |c| [0, 1, 2].map(|i| offset[i] + min[i] + c[i] * size[i]),
+                                color,
+                                uv,
+                            );
+                        }
+                    }
+                    continue;
+                }
                 let Some((min, max)) = block.partial_shape() else {
                     continue;
                 };
@@ -199,6 +240,7 @@ pub fn build_chunk_mesh(chunk: &Chunk, outside: impl Fn(i32, i32, i32) -> Block)
                     let (x, y, z) = (p[0] as i32, p[1] as i32, p[2] as i32);
                     let neighbour = get(x + normal[0], y + normal[1], z + normal[2]);
                     let visible = block != Block::Air
+                        && !is_modelled(block)
                         && block.partial_shape().is_none()
                         && !block.is_plant()
                         && !hides_faces(neighbour)

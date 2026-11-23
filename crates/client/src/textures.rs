@@ -196,6 +196,7 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
                 [0.3, 0.22, 0.14]
             }
         }
+        Block::Part => gray(0.8 + 0.1 * n),
         Block::Campfire => {
             // Bûches croisées et braises.
             let log = (x + y) % 8 < 2 || (x + 16 - y) % 8 < 2;
@@ -392,7 +393,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 54] = [
+const ALL_BLOCKS: [Block; 55] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -447,6 +448,7 @@ const ALL_BLOCKS: [Block; 54] = [
     Block::CarrotPlant,
     Block::RipeCarrot,
     Block::Bedroll,
+    Block::Part,
 ];
 
 #[cfg(test)]

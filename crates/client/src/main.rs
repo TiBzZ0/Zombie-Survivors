@@ -22,6 +22,7 @@ mod inventory_ui;
 mod menu;
 mod meshing;
 mod minimap;
+mod models;
 mod net;
 mod particles;
 mod player;

@@ -38,6 +38,59 @@ pub struct Fall {
     pub block: Block,
 }
 
+/// Casse les grandes machines amputées d'une case, et les cases dont la machine a disparu.
+/// Renvoie les cases vidées avec ce qu'elles contenaient.
+pub fn break_machines(world: &mut GameWorld) -> Vec<(IVec3, Block)> {
+    use shared::multiblock::{cells, footprint, is_multiblock, origin_of, turned};
+    const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z];
+    let mut broken = Vec::new();
+    let mut seen_removals = 0;
+    loop {
+        let mut todo = Vec::new();
+        // Une case perdue emporte sa machine (et ses autres cases).
+        for lost in world.take_lost_parts() {
+            for shape in [Block::Workbench, Block::Turret] {
+                for z in [false, true] {
+                    for offset in footprint(shape) {
+                        let origin = lost - turned(*offset, z);
+                        let owner = world.block(origin);
+                        if is_multiblock(owner) && cells(origin, owner, z).contains(&lost) {
+                            todo.push(origin);
+                            todo.extend(
+                                cells(origin, owner, z)
+                                    .into_iter()
+                                    .filter(|p| world.block(*p) == Block::Part),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // Une machine disparue laisse ses cases orphelines : elles partent aussi.
+        let removals = world.peek_removals();
+        for p in &removals[seen_removals.min(removals.len())..] {
+            for side in SIDES {
+                let n = *p + side;
+                if world.block(n) == Block::Part && origin_of(n, |q| world.block(q)).is_none() {
+                    todo.push(n);
+                }
+            }
+        }
+        seen_removals = removals.len();
+        todo.retain(|p| world.block(*p) != Block::Air);
+        if todo.is_empty() {
+            break;
+        }
+        for p in todo {
+            let block = world.block(p);
+            if block != Block::Air && world.set_block(p, Block::Air) {
+                broken.push((p, block));
+            }
+        }
+    }
+    broken
+}
+
 /// Fait tomber les blocs posés qui ne tiennent plus depuis les dernières disparitions.
 pub fn settle(world: &mut GameWorld) -> Vec<Fall> {
     world.track_removals();
@@ -78,6 +131,28 @@ fn collapse_structures(
     mut zombies: Query<(&mut Zombie, &ZombieBody)>,
     mut server: Option<ResMut<RenetServer>>,
 ) {
+    let broken = break_machines(&mut world);
+    if !broken.is_empty() {
+        version.0 += 1;
+        if let Some(server) = server.as_deref_mut() {
+            for (pos, block) in &broken {
+                if block.is_storage() {
+                    chest_destroyed(server, &mut lobby, &mut chests, *pos, None);
+                }
+                broadcast(
+                    server,
+                    &ServerMessage::BlockChanged {
+                        pos: *pos,
+                        block: Block::Air,
+                    },
+                );
+            }
+        } else {
+            for (pos, _) in &broken {
+                chests.0.remove(pos);
+            }
+        }
+    }
     let falls = settle(&mut world);
     if falls.is_empty() {
         return;
@@ -159,6 +234,34 @@ mod tests {
     use shared::world::WorldState;
 
     use super::*;
+
+    #[test]
+    fn a_machine_breaks_whole_whichever_cell_goes() {
+        let (mut world, base) = site();
+        // Un établi couché le long de X : casser sa seconde case emporte l'établi.
+        world.set_block(base, Block::Workbench);
+        world.set_block(base + IVec3::X, Block::Part);
+        world.take_removals();
+        world.set_block(base + IVec3::X, Block::Air);
+        let broken = break_machines(&mut world);
+        assert_eq!(broken, vec![(base, Block::Workbench)]);
+        assert_eq!(world.block(base), Block::Air);
+        // Une tourelle : casser le pied emporte la tête.
+        let turret = base + IVec3::new(3, 0, 0);
+        world.set_block(turret, Block::Turret);
+        world.set_block(turret + IVec3::Y, Block::Part);
+        world.take_removals();
+        world.set_block(turret, Block::Air);
+        let broken = break_machines(&mut world);
+        assert_eq!(broken, vec![(turret + IVec3::Y, Block::Part)]);
+        // Une ancienne tourelle d'une seule case ne casse pas pour un bloc voisin enlevé.
+        world.set_block(turret, Block::Turret);
+        world.set_block(turret + IVec3::Y, Block::Planks);
+        world.take_removals();
+        world.set_block(turret + IVec3::Y, Block::Air);
+        assert!(break_machines(&mut world).is_empty());
+        assert_eq!(world.block(turret), Block::Turret);
+    }
 
     /// Un bout de terrain naturel plat et sec, sur lequel on construit.
     fn site() -> (GameWorld, IVec3) {
