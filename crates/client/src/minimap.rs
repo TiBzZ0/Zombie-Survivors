@@ -177,7 +177,8 @@ fn toggle_minimap(
         settings.minimap = !settings.minimap;
         settings.save();
     }
-    let wanted = if settings.minimap {
+    // Masquée quand un panneau (fabrication, coffre) est ouvert, pour ne pas le recouvrir.
+    let wanted = if settings.minimap && !player.panel_open() {
         Visibility::Inherited
     } else {
         Visibility::Hidden

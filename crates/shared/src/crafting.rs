@@ -409,7 +409,78 @@ pub const RECIPES: &[Recipe] = &[
     },
 ];
 
+/// Rubrique du panneau de fabrication.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Category {
+    Materials,
+    Tools,
+    Weapons,
+    Armor,
+    Building,
+    Defense,
+    Food,
+    Care,
+}
+
+pub const CATEGORIES: [Category; 8] = [
+    Category::Materials,
+    Category::Tools,
+    Category::Weapons,
+    Category::Armor,
+    Category::Building,
+    Category::Defense,
+    Category::Food,
+    Category::Care,
+];
+
+impl Category {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Category::Materials => "Matériaux",
+            Category::Tools => "Outils",
+            Category::Weapons => "Armes",
+            Category::Armor => "Tenues",
+            Category::Building => "Construction",
+            Category::Defense => "Défense",
+            Category::Food => "Cuisine",
+            Category::Care => "Soins",
+        }
+    }
+
+    /// Rubrique d'un objet fabriqué.
+    pub fn of(item: Item) -> Category {
+        match item {
+            Item::Block(block) => match block {
+                Block::Spikes
+                | Block::Turret
+                | Block::BarbedWire
+                | Block::MachineGun
+                | Block::Cannon
+                | Block::Catapult
+                | Block::ReinforcedWall
+                | Block::Floodlight
+                | Block::TeslaCoil
+                | Block::ElectricDoor => Category::Defense,
+                Block::Planks => Category::Materials,
+                _ => Category::Building,
+            },
+            Item::Stick | Item::IronIngot | Item::Coal | Item::Flask | Item::Hide => Category::Materials,
+            Item::Pickaxe(_) | Item::Bucket | Item::WaterBucket | Item::Seeds | Item::CarrotSeeds => Category::Tools,
+            Item::Helmet(_) | Item::BodyArmor(_) | Item::FurCoat | Item::StrawHat => Category::Armor,
+            Item::Bandage | Item::Antidote | Item::HerbalTea => Category::Care,
+            item if item.is_weapon() || item.throwable().is_some() => Category::Weapons,
+            Item::Arrow | Item::Ammo | Item::Bolt | Item::CannonBall => Category::Weapons,
+            item if item.is_consumable() => Category::Food,
+            _ => Category::Materials,
+        }
+    }
+}
+
 impl Recipe {
+    pub fn category(&self) -> Category {
+        Category::of(self.output)
+    }
+
     pub fn can_craft(&self, inventory: &Inventory) -> bool {
         self.inputs.iter().all(|(item, n)| inventory.has(*item, *n))
     }
@@ -433,6 +504,19 @@ mod tests {
 
     fn recipe(output: Item) -> &'static Recipe {
         RECIPES.iter().find(|r| r.output == output).unwrap()
+    }
+
+    #[test]
+    fn every_category_has_recipes_and_items_land_where_expected() {
+        for category in CATEGORIES {
+            assert!(RECIPES.iter().any(|r| r.category() == category), "{}", category.name());
+        }
+        assert_eq!(Category::of(Item::Pickaxe(Tier::Wood)), Category::Tools);
+        assert_eq!(Category::of(Item::Sword(Tier::Iron)), Category::Weapons);
+        assert_eq!(Category::of(Item::Block(Block::Turret)), Category::Defense);
+        assert_eq!(Category::of(Item::Stew), Category::Food);
+        assert_eq!(Category::of(Item::Helmet(Tier::Stone)), Category::Armor);
+        assert!(!Item::Sword(Tier::Iron).description().is_empty());
     }
 
     #[test]

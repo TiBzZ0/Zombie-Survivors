@@ -123,6 +123,9 @@ pub struct LocalPlayer {
     pub parry_flash: f32,
     /// Effets temporaires actifs (café, bière...).
     pub buffs: shared::buff::Buffs,
+    /// Objets déjà vus dans l'inventaire : seuls les nouveaux venus prennent une case libre
+    /// de la barre (une case vidée à la main le reste).
+    known: std::collections::BTreeSet<Item>,
     cooldown: f32,
     last_sent: f64,
 }
@@ -157,12 +160,25 @@ impl LocalPlayer {
             .inventory
             .iter()
             .map(|(item, _)| item)
-            .filter(|item| !self.hotbar.contains(&Some(*item)))
+            .filter(|item| !self.hotbar.contains(&Some(*item)) && !self.known.contains(item))
             .collect();
         for item in missing {
             if let Some(slot) = self.hotbar.iter_mut().find(|s| s.is_none()) {
                 *slot = Some(item);
             }
+        }
+        self.known = self.inventory.iter().map(|(item, _)| item).collect();
+    }
+
+    /// Range un objet dans une case de la barre (il quitte sa case précédente).
+    pub fn assign_hotbar(&mut self, slot: usize, item: Item) {
+        for s in self.hotbar.iter_mut() {
+            if *s == Some(item) {
+                *s = None;
+            }
+        }
+        if let Some(s) = self.hotbar.get_mut(slot) {
+            *s = Some(item);
         }
     }
 }

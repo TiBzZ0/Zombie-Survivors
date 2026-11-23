@@ -1,7 +1,9 @@
 //! Barre d'objets en bas de l'écran (icônes, quantités, case choisie) et grille d'inventaire
 //! dans le panneau de fabrication : un clic sur un objet le range dans la case choisie.
 
+use bevy::picking::events::{PointerDragDrop, PointerPress};
 use bevy::picking::hover::Hovered;
+use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button, observe};
 use shared::item::Item;
@@ -17,7 +19,10 @@ impl Plugin for InventoryUiPlugin {
         app.init_resource::<ItemIcons>()
             .add_systems(OnEnter(AppState::Playing), spawn_hotbar)
             .add_systems(OnExit(AppState::Playing), despawn_hotbar)
-            .add_systems(Update, (update_hotbar, update_grid).run_if(in_state(AppState::Playing)));
+            .add_systems(
+                Update,
+                (update_hotbar, update_grid, assign_with_keys, update_panel_hotbar).run_if(in_state(AppState::Playing)),
+            );
     }
 }
 
@@ -60,6 +65,16 @@ struct GridCount(usize);
 /// Nom de l'objet survolé dans la grille.
 #[derive(Component)]
 struct GridHint;
+
+/// Case de la barre d'outils reproduite dans le panneau (clic : la choisir, clic droit : la vider).
+#[derive(Component)]
+struct PanelSlot(usize);
+
+#[derive(Component)]
+struct PanelIcon(usize);
+
+#[derive(Component)]
+struct PanelCount(usize);
 
 fn small_text(value: &str, size: f32) -> impl Bundle {
     colored_text(value, size, Color::WHITE)
@@ -259,22 +274,156 @@ pub fn spawn_grid(commands: &mut Commands, parent: Entity) {
                         return;
                     };
                     let selected = player.selected;
-                    for slot in player.hotbar.iter_mut() {
-                        if *slot == Some(item) {
-                            *slot = None;
-                        }
-                    }
-                    player.hotbar[selected] = Some(item);
+                    player.assign_hotbar(selected, item);
                 }),
             ))
             .id();
         slot_children(commands, slot, GridIcon(i), GridCount(i));
     }
     commands.spawn((
-        colored_text("", 15.0, Color::srgb(0.85, 0.85, 0.75)),
+        Node {
+            min_height: px(40),
+            max_width: px(GRID_COLUMNS as f32 * (SLOT + 4.0)),
+            ..default()
+        },
+        colored_text("", 14.0, Color::srgb(0.85, 0.85, 0.75)),
         GridHint,
         ChildOf(parent),
     ));
+    commands.spawn((
+        colored_text(
+            "BARRE D'OUTILS · glisser un objet dessus pour l'y ranger · clic droit : vider",
+            13.0,
+            Color::srgb(0.6, 0.6, 0.6),
+        ),
+        ChildOf(parent),
+    ));
+    let row = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: px(4),
+                ..default()
+            },
+            ChildOf(parent),
+        ))
+        .id();
+    for i in 0..HOTBAR_SLOTS {
+        let slot = commands
+            .spawn((
+                slot_node(),
+                Hovered::default(),
+                BackgroundColor(SLOT_BG),
+                BorderColor::all(SLOT_BORDER),
+                PanelSlot(i),
+                ChildOf(row),
+                observe(
+                    move |press: On<PointerPress>, mut player: ResMut<LocalPlayer>| match press.button {
+                        PointerButton::Secondary => player.hotbar[i] = None,
+                        _ => player.selected = i,
+                    },
+                ),
+            ))
+            .id();
+        // Glisser un objet de l'inventaire sur une case de la barre l'y range.
+        commands.entity(slot).observe(
+            move |drop: On<PointerDragDrop>, grid: Query<&GridSlot>, mut player: ResMut<LocalPlayer>| {
+                let Ok(from) = grid.get(drop.dropped) else { return };
+                let item = player.inventory.iter().nth(from.0).map(|(item, _)| item);
+                if let Some(item) = item {
+                    player.assign_hotbar(i, item);
+                    player.selected = i;
+                }
+            },
+        );
+        commands.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(3),
+                top: px(0),
+                ..default()
+            },
+            colored_text(&format!("{}", i + 1), 11.0, Color::srgba(1.0, 1.0, 1.0, 0.6)),
+            Pickable::IGNORE,
+            ChildOf(slot),
+        ));
+        slot_children(commands, slot, PanelIcon(i), PanelCount(i));
+    }
+}
+
+/// Survoler un objet de l'inventaire et appuyer sur 1 à 9 le range dans cette case de la barre.
+fn assign_with_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut player: ResMut<LocalPlayer>,
+    slots: Query<(&GridSlot, &Hovered)>,
+) {
+    if !player.crafting_open || player.typing {
+        return;
+    }
+    let Some(index) = slots.iter().find(|(_, h)| h.get()).map(|(s, _)| s.0) else {
+        return;
+    };
+    let Some((item, _)) = player.inventory.iter().nth(index) else {
+        return;
+    };
+    for (slot, key) in [
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+        KeyCode::Digit5,
+        KeyCode::Digit6,
+        KeyCode::Digit7,
+        KeyCode::Digit8,
+        KeyCode::Digit9,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if keys.just_pressed(key) {
+            player.assign_hotbar(slot, item);
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn update_panel_hotbar(
+    player: Res<LocalPlayer>,
+    mut icons: ResMut<ItemIcons>,
+    mut images: ResMut<Assets<Image>>,
+    mut slots: Query<(&PanelSlot, &Hovered, &mut BackgroundColor, &mut BorderColor)>,
+    mut icon_nodes: Query<(&PanelIcon, &mut ImageNode, &mut Visibility)>,
+    mut counts: Query<(&PanelCount, &mut Text)>,
+) {
+    if !player.crafting_open {
+        return;
+    }
+    for (slot, hovered, mut bg, mut border) in &mut slots {
+        bg.0 = if hovered.get() { HOVER_BG } else { SLOT_BG };
+        *border = BorderColor::all(if slot.0 == player.selected {
+            SELECTED_BORDER
+        } else {
+            SLOT_BORDER
+        });
+    }
+    for (icon, mut image, mut visibility) in &mut icon_nodes {
+        match player.hotbar[icon.0].filter(|i| player.inventory.has(*i, 1)) {
+            Some(item) => {
+                let handle = icons.get(&mut images, item);
+                if image.image != handle {
+                    image.image = handle;
+                }
+                *visibility = Visibility::Inherited;
+            }
+            None => *visibility = Visibility::Hidden,
+        }
+    }
+    for (count, mut text) in &mut counts {
+        let label = player.hotbar[count.0].map_or(String::new(), |i| count_label(player.inventory.count(i)));
+        if text.0 != label {
+            text.0 = label;
+        }
+    }
 }
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -329,11 +478,19 @@ fn update_grid(
     }
     for mut text in &mut hint {
         text.0 = match hovered_item {
-            Some(item) => format!(
-                "{} : clic pour le mettre dans la case {}",
-                item.name(),
-                player.selected + 1
-            ),
+            Some(item) => {
+                let about = item.description();
+                let about = if about.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{about}")
+                };
+                format!(
+                    "{} : clic → case {} · ou touche 1 à 9{about}",
+                    item.name(),
+                    player.selected + 1
+                )
+            }
             None => "Clic sur un objet : le ranger dans la case choisie (1 à 9)".into(),
         };
     }
