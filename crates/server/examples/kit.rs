@@ -42,6 +42,8 @@ fn main() {
         (Item::RawMeat, 3),
         (Item::Wheat, 6),
         (Item::Block(Block::Campfire), 1),
+        (Item::Block(Block::Bedroll), 1),
+        (Item::Hide, 6),
         (Item::Block(Block::Stone), 32),
         (Item::Helmet(Tier::Iron), 1),
         (Item::BodyArmor(Tier::Wood), 1),

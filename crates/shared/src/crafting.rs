@@ -401,6 +401,12 @@ pub const RECIPES: &[Recipe] = &[
         inputs: &[(Item::CookedMeat, 1), (Item::Carrot, 2)],
         station: Some(Block::Campfire),
     },
+    Recipe {
+        output: b(Block::Bedroll),
+        count: 1,
+        inputs: &[(Item::Hide, 3), (b(Block::Leaves), 4)],
+        station: Some(Block::Workbench),
+    },
 ];
 
 impl Recipe {

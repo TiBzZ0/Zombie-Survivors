@@ -12,7 +12,7 @@ use crate::survivor::{Order, SurvivorStats};
 use crate::zombie::ZombieKind;
 
 /// Change à chaque modification incompatible du protocole.
-pub const PROTOCOL_ID: u64 = 0x5A53_0018;
+pub const PROTOCOL_ID: u64 = 0x5A53_0019;
 
 /// Portée maximale pour casser ou poser un bloc, en mètres.
 pub const REACH: f32 = 6.0;
@@ -71,6 +71,10 @@ pub enum ClientMessage {
     },
     /// Ouvre ou ferme une porte (et les portes empilées avec elle).
     ToggleDoor {
+        pos: IVec3,
+    },
+    /// Se couche dans un sac de couchage : en fait le point de réapparition du joueur.
+    Rest {
         pos: IVec3,
     },
     /// Ouvre un coffre : le serveur répond avec son contenu et le tient à jour.

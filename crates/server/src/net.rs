@@ -82,6 +82,8 @@ pub struct ConnectedPlayer {
     pub infection: f32,
     /// Effets temporaires actifs (café, bière...).
     pub buffs: shared::buff::Buffs,
+    /// Point de réapparition personnel, posé en se couchant dans un sac de couchage.
+    pub home: Option<Vec3>,
 }
 
 /// Durée après avoir levé la garde pendant laquelle un coup est paré.
@@ -138,6 +140,7 @@ impl ConnectedPlayer {
             felt: 18.0,
             infection: 0.0,
             buffs: shared::buff::Buffs::default(),
+            home: None,
         }
     }
 
@@ -695,15 +698,39 @@ fn handle_reliable(
                 return;
             };
             if player.health <= 0.0 {
+                // Réapparition au sac de couchage s'il en reste un, sinon au point de départ du monde.
+                let at = match player.home {
+                    Some(h) if world.block(h.floor().as_ivec3()).is_bed() => h,
+                    _ => {
+                        player.home = None;
+                        spawn
+                    }
+                };
                 player.health = MAX_HEALTH;
                 player.hunger = player.hunger.max(MAX_HUNGER * 0.5);
                 player.thirst = player.thirst.max(MAX_THIRST * 0.5);
                 player.body_temp = shared::climate::BODY_NORMAL;
                 player.infection = 0.0;
                 player.since_hit = 0.0;
-                player.state.position = spawn;
-                send(server, client, &ServerMessage::Teleport { position: spawn });
+                player.state.position = at;
+                send(server, client, &ServerMessage::Teleport { position: at });
                 send_vitals(server, client, player);
+            }
+        }
+        ClientMessage::Rest { pos } => {
+            let Some(player) = lobby.players.get_mut(&client) else {
+                return;
+            };
+            if player.is_alive() && world.block(pos).is_bed() && within_reach(player, pos) {
+                player.home = Some(pos.as_vec3() + Vec3::new(0.5, 0.0, 0.5));
+                send(
+                    server,
+                    client,
+                    &ServerMessage::Chat {
+                        from: "Système".into(),
+                        text: "Point de réapparition défini sur ce sac de couchage.".into(),
+                    },
+                );
             }
         }
         ClientMessage::StartMining { pos } => {

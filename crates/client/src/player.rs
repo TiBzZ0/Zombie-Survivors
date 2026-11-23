@@ -616,6 +616,11 @@ fn interact(
             player.cooldown = 0.35;
             return;
         }
+        if block.is_bed() && mouse.just_pressed(MouseButton::Right) {
+            send_reliable(&mut client, &ClientMessage::Rest { pos: hit.block });
+            player.cooldown = 0.35;
+            return;
+        }
         if block.is_storage() && mouse.just_pressed(MouseButton::Right) {
             send_reliable(&mut client, &ClientMessage::OpenChest { pos: hit.block });
             player.crafting_open = false;
