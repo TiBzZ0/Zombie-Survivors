@@ -6,6 +6,7 @@
 
 pub mod animal;
 pub mod block;
+pub mod buff;
 pub mod chunk;
 pub mod climate;
 pub mod config;

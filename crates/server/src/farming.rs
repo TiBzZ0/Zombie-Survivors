@@ -24,6 +24,8 @@ pub const fn next_stage(block: Block) -> Option<Block> {
     match block {
         Block::Sprout => Some(Block::YoungWheat),
         Block::YoungWheat => Some(Block::RipeWheat),
+        Block::CarrotSprout => Some(Block::CarrotPlant),
+        Block::CarrotPlant => Some(Block::RipeCarrot),
         _ => None,
     }
 }

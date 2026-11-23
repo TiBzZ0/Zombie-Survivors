@@ -151,7 +151,7 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         output: Item::Bandage,
         count: 1,
-        inputs: &[(b(Block::Leaves), 4), (Item::Stick, 1)],
+        inputs: &[(b(Block::Leaves), 3), (Item::Herb, 1)],
         station: None,
     },
     Recipe {
@@ -367,7 +367,7 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         output: Item::Antidote,
         count: 1,
-        inputs: &[(Item::Coal, 1), (Item::Apple, 2), (Item::Bandage, 1)],
+        inputs: &[(Item::Herb, 2), (Item::Apple, 1), (Item::Bandage, 1)],
         station: Some(Block::Workbench),
     },
     Recipe {
@@ -375,6 +375,31 @@ pub const RECIPES: &[Recipe] = &[
         count: 2,
         inputs: &[(Item::Bread, 1), (Item::CookedMeat, 1)],
         station: None,
+    },
+    // Consommables à effets.
+    Recipe {
+        output: Item::Coffee,
+        count: 1,
+        inputs: &[(Item::Berries, 3)],
+        station: Some(Block::Campfire),
+    },
+    Recipe {
+        output: Item::Beer,
+        count: 1,
+        inputs: &[(Item::Wheat, 4), (Item::WaterFlask, 1)],
+        station: Some(Block::Workbench),
+    },
+    Recipe {
+        output: Item::HerbalTea,
+        count: 1,
+        inputs: &[(Item::Herb, 2), (Item::WaterFlask, 1)],
+        station: Some(Block::Campfire),
+    },
+    Recipe {
+        output: Item::Stew,
+        count: 1,
+        inputs: &[(Item::CookedMeat, 1), (Item::Carrot, 2)],
+        station: Some(Block::Campfire),
     },
 ];
 

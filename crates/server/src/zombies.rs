@@ -20,7 +20,7 @@ use shared::zombie::{
 };
 
 use crate::daynight::Clock;
-use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, MAX_THIRST, WorldVersion, send_vitals};
+use crate::net::{Lobby, MAX_HEALTH, MAX_HUNGER, MAX_THIRST, WorldVersion, send_buffs, send_vitals};
 use crate::survivors::Survivor;
 use crate::world::{Chests, GameWorld, SpawnPoint};
 
@@ -982,6 +982,9 @@ fn player_survival(
         if !player.is_alive() {
             continue;
         }
+        // Les effets temporaires s'écoulent (et modifient faim, infection, régénération).
+        let buffs_changed = player.buffs.tick(dt);
+        let fx = player.buffs.effects();
         let hunger_before = player.hunger.ceil();
         let thirst_before = player.thirst.ceil();
         let temp_before = (player.body_temp * 10.0).round();
@@ -1002,10 +1005,10 @@ fn player_survival(
         player.body_temp = shared::climate::step_body(player.body_temp, player.felt, dt);
 
         if player.infection > 0.0 {
-            player.infection = (player.infection + INFECTION_PER_SEC * dt).min(100.0);
+            player.infection = (player.infection + INFECTION_PER_SEC * fx.infection_rate * dt).min(100.0);
         }
 
-        player.hunger = (player.hunger - HUNGER_PER_SEC * dt).max(0.0);
+        player.hunger = (player.hunger - HUNGER_PER_SEC * fx.hunger_rate * dt).max(0.0);
         if thirsty {
             let heat = if player.body_temp > OVERHEATING { 2.0 } else { 1.0 };
             player.thirst = (player.thirst - THIRST_PER_SEC * heat * dt).max(0.0);
@@ -1050,18 +1053,26 @@ fn player_survival(
         }
         player.since_hit += dt;
         let health_before = player.health.ceil();
-        if player.since_hit > 8.0
-            && player.health < MAX_HEALTH
+        // Régénération normale (si rassasié et sain) et soin des effets (tisane, ragoût).
+        let natural = if player.since_hit > 8.0
             && player.hunger > REGEN_MIN_HUNGER
             && player.thirst > REGEN_MIN_THIRST
             && player.infection <= 0.0
         {
-            player.health = (player.health + 2.0 * dt).min(MAX_HEALTH);
+            2.0
+        } else {
+            0.0
+        };
+        if (natural + fx.regen) > 0.0 && player.health < MAX_HEALTH {
+            player.health = (player.health + (natural + fx.regen) * dt).min(MAX_HEALTH);
         }
         if (player.health.ceil() != health_before || vitals_changed(player))
             && let Some(server) = server.as_deref_mut()
         {
             send_vitals(server, *id, player);
+        }
+        if buffs_changed && let Some(server) = server.as_deref_mut() {
+            send_buffs(server, *id, player);
         }
     }
 }

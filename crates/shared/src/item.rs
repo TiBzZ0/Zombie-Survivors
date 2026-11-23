@@ -62,6 +62,22 @@ pub enum Item {
     Bucket,
     /// Seau plein : se vide au clic droit et crée une source d'eau (douves, champs).
     WaterBucket,
+    /// Baies cueillies sur le feuillage : se mangent telles quelles.
+    Berries,
+    /// Herbe médicinale, cueillie dans les herbes hautes : entre dans les remèdes et la tisane.
+    Herb,
+    /// Graines de carotte : se sèment comme le blé.
+    CarrotSeeds,
+    /// Carotte récoltée : nourrissante.
+    Carrot,
+    /// Café (baies torréfiées) : rend vif.
+    Coffee,
+    /// Bière (blé fermenté) : donne du courage.
+    Beer,
+    /// Tisane (herbes infusées) : apaise et soigne.
+    HerbalTea,
+    /// Ragoût (viande et carottes) : rassasie longtemps.
+    Stew,
 }
 
 /// Caractéristiques d'un explosif qu'on lance.
@@ -170,6 +186,14 @@ impl Item {
             Item::Antidote => "Antidote".into(),
             Item::Bucket => "Seau".into(),
             Item::WaterBucket => "Seau d'eau".into(),
+            Item::Berries => "Baies".into(),
+            Item::Herb => "Herbe médicinale".into(),
+            Item::CarrotSeeds => "Graines de carotte".into(),
+            Item::Carrot => "Carotte".into(),
+            Item::Coffee => "Café".into(),
+            Item::Beer => "Bière".into(),
+            Item::HerbalTea => "Tisane".into(),
+            Item::Stew => "Ragoût".into(),
         }
     }
 
@@ -258,6 +282,20 @@ impl Item {
             Item::Bread => Some((40.0, 0.0)),
             Item::RawMeat => Some((12.0, 0.0)),
             Item::CookedMeat => Some((60.0, 8.0)),
+            Item::Berries => Some((12.0, 2.0)),
+            Item::Carrot => Some((22.0, 0.0)),
+            Item::Stew => Some((70.0, 10.0)),
+            _ => None,
+        }
+    }
+
+    /// Effet temporaire accordé par ce consommable.
+    pub const fn buff(self) -> Option<crate::buff::Buff> {
+        match self {
+            Item::Coffee => Some(crate::buff::Buff::Energized),
+            Item::Beer => Some(crate::buff::Buff::Emboldened),
+            Item::HerbalTea => Some(crate::buff::Buff::Soothed),
+            Item::Stew => Some(crate::buff::Buff::WellFed),
             _ => None,
         }
     }
@@ -288,7 +326,7 @@ impl Item {
 
     /// Objet qu'on consomme au clic droit (aliment, boisson ou remède).
     pub const fn is_consumable(self) -> bool {
-        self.food().is_some() || self.drink().is_some() || matches!(self, Item::Antidote)
+        self.food().is_some() || self.drink().is_some() || self.buff().is_some() || matches!(self, Item::Antidote)
     }
 
     /// Arme qu'on peut confier à un survivant.
@@ -431,6 +469,8 @@ pub fn drop_for(block: Block) -> Option<Item> {
         // Les cultures rendent leurs graines, le blé mûr du blé (le serveur ajoute des graines).
         Block::Sprout | Block::YoungWheat => Some(Item::Seeds),
         Block::RipeWheat => Some(Item::Wheat),
+        Block::CarrotSprout | Block::CarrotPlant => Some(Item::CarrotSeeds),
+        Block::RipeCarrot => Some(Item::Carrot),
         other => Some(Item::Block(other)),
     }
 }

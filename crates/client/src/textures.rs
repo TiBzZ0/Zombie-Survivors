@@ -184,6 +184,18 @@ fn pixel(block: Block, x: u32, y: u32) -> [f32; 3] {
                 [0.35, 0.25, 0.15]
             }
         }
+        Block::CarrotSprout | Block::CarrotPlant | Block::RipeCarrot => {
+            // Fanes vertes, et une racine orange qui pointe quand la carotte est mûre.
+            let frond = x % 4 < 2 && hash(x, y, salt) > 0.3;
+            let root = block == Block::RipeCarrot && y > 11 && (6..10).contains(&x);
+            if root {
+                [2.6, 1.3, 0.3]
+            } else if frond {
+                gray(0.7 + 0.2 * n)
+            } else {
+                [0.3, 0.22, 0.14]
+            }
+        }
         Block::Campfire => {
             // Bûches croisées et braises.
             let log = (x + y) % 8 < 2 || (x + 16 - y) % 8 < 2;
@@ -306,6 +318,15 @@ pub fn opaque(block: Block, x: u32, y: u32) -> bool {
             };
             x % 3 == 1 && hash(x, 0, salt) > 0.2 && (16 - y) as f32 <= height
         }
+        Block::CarrotSprout | Block::CarrotPlant | Block::RipeCarrot => {
+            let height = match block {
+                Block::CarrotSprout => 6.0,
+                Block::CarrotPlant => 11.0,
+                _ => 16.0,
+            };
+            (x % 4 < 2 && hash(x, y, salt) > 0.3 && (16 - y) as f32 <= height)
+                || (block == Block::RipeCarrot && y > 11 && (6..10).contains(&x))
+        }
         _ => true,
     }
 }
@@ -361,7 +382,7 @@ fn block_from_index(index: u32) -> Option<Block> {
     ALL_BLOCKS.iter().copied().find(|b| *b as u32 == index)
 }
 
-const ALL_BLOCKS: [Block; 50] = [
+const ALL_BLOCKS: [Block; 53] = [
     Block::Air,
     Block::Grass,
     Block::Dirt,
@@ -412,6 +433,9 @@ const ALL_BLOCKS: [Block; 50] = [
     Block::BirchSapling,
     Block::PineSapling,
     Block::AppleSapling,
+    Block::CarrotSprout,
+    Block::CarrotPlant,
+    Block::RipeCarrot,
 ];
 
 #[cfg(test)]

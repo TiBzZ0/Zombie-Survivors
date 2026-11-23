@@ -80,6 +80,8 @@ pub struct ConnectedPlayer {
     pub felt: f32,
     /// Avancée de l'infection : 0 = sain, puis de 1 à 100.
     pub infection: f32,
+    /// Effets temporaires actifs (café, bière...).
+    pub buffs: shared::buff::Buffs,
 }
 
 /// Durée après avoir levé la garde pendant laquelle un coup est paré.
@@ -101,6 +103,12 @@ const SAPLING_CHANCE: f32 = 0.1;
 const SEED_CHANCE: f32 = 0.15;
 /// Chance qu'une touffe d'herbes hautes fauchée donne des graines.
 const GRASS_SEED_CHANCE: f32 = 0.3;
+/// Chance qu'une touffe d'herbes hautes donne une herbe médicinale.
+const HERB_CHANCE: f32 = 0.22;
+/// Chance qu'une touffe d'herbes hautes donne des graines de carotte.
+const CARROT_SEED_CHANCE: f32 = 0.1;
+/// Chance qu'un feuillage cassé donne des baies.
+const BERRY_CHANCE: f32 = 0.18;
 /// Tolérance sur la durée de minage (latence, horloges).
 const MINING_TOLERANCE: f64 = 0.75;
 
@@ -129,6 +137,7 @@ impl ConnectedPlayer {
             body_temp: shared::climate::BODY_NORMAL,
             felt: 18.0,
             infection: 0.0,
+            buffs: shared::buff::Buffs::default(),
         }
     }
 
@@ -173,6 +182,11 @@ pub fn send_vitals(server: &mut RenetServer, client: ClientId, player: &Connecte
             infection: player.infection,
         },
     );
+}
+
+/// Envoie au joueur ses effets temporaires.
+pub fn send_buffs(server: &mut RenetServer, client: ClientId, player: &ConnectedPlayer) {
+    send(server, client, &ServerMessage::Buffs(player.buffs.clone()));
 }
 
 pub(crate) fn send_inventory(server: &mut RenetServer, client: ClientId, player: &ConnectedPlayer) {
@@ -454,6 +468,7 @@ fn handle_reliable(
                 return;
             }
             let melee = Item::melee(player.held_item());
+            let melee_damage = melee.damage * player.buffs.effects().melee;
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
             let look = Quat::from_euler(EulerRot::YXZ, player.state.yaw, 0.0, 0.0) * Vec3::NEG_Z;
             let flat_look = Vec3::new(look.x, 0.0, look.z).normalize_or_zero();
@@ -480,7 +495,7 @@ fn handle_reliable(
                         && in_reach(&z, body)
                         && (ahead.dot(flat_look) > 0.5 || to.length() < 1.0));
                 if hit {
-                    z.health -= melee.damage;
+                    z.health -= melee_damage;
                     z.hurt_timer = 0.3;
                     z.knockback = flat_look * melee.knockback + Vec3::Y * 3.0;
                     z.last_attacker = Some(client);
@@ -518,6 +533,7 @@ fn handle_reliable(
                 return;
             }
             let melee = Item::melee(player.held_item());
+            let melee_damage = melee.damage * player.buffs.effects().melee;
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
             let in_reach = lobby
                 .players
@@ -529,7 +545,7 @@ fn handle_reliable(
             if let Some(player) = lobby.players.get_mut(&client) {
                 player.attack_cooldown = melee.cooldown * 0.85;
             }
-            pvp_hit(server, lobby, claims, client, id, melee.damage);
+            pvp_hit(server, lobby, claims, client, id, melee_damage);
         }
         ClientMessage::Throw { direction } => {
             let Some(player) = lobby.players.get_mut(&client) else {
@@ -599,13 +615,14 @@ fn handle_reliable(
                 return;
             }
             let melee = Item::melee(player.held_item());
+            let melee_damage = melee.damage * player.buffs.effects().melee;
             let eye = player.state.position + Vec3::Y * PLAYER_EYE_HEIGHT;
             let look = Quat::from_rotation_y(player.state.yaw) * Vec3::NEG_Z;
             if let Some(mut a) = animals.iter_mut().find(|a| a.id == id) {
                 let (min, max) = a.bounds();
                 if ((min + max) * 0.5).distance(eye) <= melee.reach + 1.0 {
                     player.attack_cooldown = melee.cooldown * 0.85;
-                    a.hurt(melee.damage, Some(client), look * melee.knockback * 0.5);
+                    a.hurt(melee_damage, Some(client), look * melee.knockback * 0.5);
                 }
             }
         }
@@ -823,23 +840,28 @@ fn handle_reliable(
             let Some(player) = lobby.players.get_mut(&client) else {
                 return;
             };
-            if let Some((hunger, health)) = item.food()
-                && player.is_alive()
-                && player.inventory.remove(item, 1)
-            {
-                player.hunger = (player.hunger + hunger).min(MAX_HUNGER);
-                player.health = (player.health + health).min(MAX_HEALTH);
-                send_vitals(server, client, player);
-            } else if let Some(thirst) = item.drink()
-                && player.is_alive()
-                && player.inventory.remove(item, 1)
-            {
-                // La gourde vidée reste dans l'inventaire.
-                player.inventory.add(Item::Flask, 1);
-                player.thirst = (player.thirst + thirst).min(MAX_THIRST);
-                send_vitals(server, client, player);
-            } else if item == Item::Antidote && player.is_alive() && player.inventory.remove(item, 1) {
-                player.infection = 0.0;
+            // Un consommable donne parfois à la fois de la nourriture, de la boisson et un effet.
+            let consumable =
+                item.food().is_some() || item.drink().is_some() || item.buff().is_some() || item == Item::Antidote;
+            if consumable && player.is_alive() && player.inventory.remove(item, 1) {
+                if let Some((hunger, health)) = item.food() {
+                    player.hunger = (player.hunger + hunger).min(MAX_HUNGER);
+                    player.health = (player.health + health).min(MAX_HEALTH);
+                }
+                if let Some(thirst) = item.drink() {
+                    // Une gourde bue rend la gourde vide ; un consommable fabriqué, non.
+                    if item == Item::WaterFlask {
+                        player.inventory.add(Item::Flask, 1);
+                    }
+                    player.thirst = (player.thirst + thirst).min(MAX_THIRST);
+                }
+                if let Some(buff) = item.buff() {
+                    player.buffs.grant(buff);
+                    send_buffs(server, client, player);
+                }
+                if item == Item::Antidote {
+                    player.infection = 0.0;
+                }
                 send_vitals(server, client, player);
             }
             send_inventory(server, client, player);
@@ -910,8 +932,12 @@ fn handle_reliable(
                 return;
             }
             let block = world.block(pos);
+            // Les effets qui accélèrent le minage (café) raccourcissent le temps attendu.
+            let mining_mult = player.buffs.effects().mining as f64;
             let mined_long_enough = match (player.mining, break_time(block, player.held_item())) {
-                (Some((p, start)), Some(needed)) => p == pos && now - start >= needed as f64 * MINING_TOLERANCE - 0.1,
+                (Some((p, start)), Some(needed)) => {
+                    p == pos && now - start >= needed as f64 * MINING_TOLERANCE / mining_mult - 0.1
+                }
                 _ => false,
             };
             let allowed = pos.y > 0 && within_reach(player, pos) && block.is_placeable() && mined_long_enough;
@@ -962,8 +988,22 @@ fn handle_reliable(
                 if block == Block::Grass && fastrand::f32() < SEED_CHANCE {
                     player.inventory.add(Item::Seeds, 1);
                 }
-                if block == Block::TallGrass && fastrand::f32() < GRASS_SEED_CHANCE {
-                    player.inventory.add(Item::Seeds, 1);
+                if block == Block::TallGrass {
+                    if fastrand::f32() < GRASS_SEED_CHANCE {
+                        player.inventory.add(Item::Seeds, 1);
+                    }
+                    // Herboristerie : les herbes hautes cachent parfois une herbe médicinale,
+                    // plus rarement des graines de carotte.
+                    if fastrand::f32() < HERB_CHANCE {
+                        player.inventory.add(Item::Herb, 1);
+                    }
+                    if fastrand::f32() < CARROT_SEED_CHANCE {
+                        player.inventory.add(Item::CarrotSeeds, 1);
+                    }
+                }
+                // Les feuillages donnent parfois des baies (pas le pin).
+                if block.is_leaves() && block != Block::PineLeaves && fastrand::f32() < BERRY_CHANCE {
+                    player.inventory.add(Item::Berries, 1 + fastrand::u32(..2));
                 }
                 // Une plante privée de son sol disparaît avec lui.
                 let above = pos + IVec3::Y;
@@ -980,6 +1020,10 @@ fn handle_reliable(
                     // Une récolte : deux blés et de quoi ressemer.
                     player.inventory.add(Item::Wheat, 1);
                     player.inventory.add(Item::Seeds, 1 + fastrand::u32(0..2));
+                }
+                if block == Block::RipeCarrot {
+                    player.inventory.add(Item::Carrot, 1);
+                    player.inventory.add(Item::CarrotSeeds, 1 + fastrand::u32(0..2));
                 }
                 send_inventory(server, client, player);
                 if block.is_storage() {
@@ -1009,14 +1053,14 @@ fn handle_reliable(
                 return;
             }
             // Une pousse se sème avec des graines, sur de la terre ou de l'herbe.
-            let cost = if block == Block::Sprout {
-                Item::Seeds
-            } else {
-                Item::Block(block)
+            let cost = match block {
+                Block::Sprout => Item::Seeds,
+                Block::CarrotSprout => Item::CarrotSeeds,
+                _ => Item::Block(block),
             };
             let on_soil = matches!(world.block(pos - IVec3::Y), Block::Grass | Block::Dirt);
-            let soil =
-                !(block.is_crop() || block.is_sapling()) || ((block == Block::Sprout || block.is_sapling()) && on_soil);
+            let plantable = matches!(block, Block::Sprout | Block::CarrotSprout) || block.is_sapling();
+            let soil = !(block.is_crop() || block.is_sapling()) || (plantable && on_soil);
             // Les barbelés se posent même là où un joueur se tient.
             let allowed = block.is_placeable()
                 && soil

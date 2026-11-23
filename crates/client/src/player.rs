@@ -121,6 +121,8 @@ pub struct LocalPlayer {
     pub mounted: Option<IVec3>,
     /// Intensité de l'effet « paré ! » (0 à 1).
     pub parry_flash: f32,
+    /// Effets temporaires actifs (café, bière...).
+    pub buffs: shared::buff::Buffs,
     cooldown: f32,
     last_sent: f64,
 }
@@ -291,6 +293,9 @@ fn apply_teleports(
                 player.position = *position;
                 player.velocity = Vec3::ZERO;
             }
+            NetEvent::Buffs(buffs) => {
+                player.buffs = buffs.clone();
+            }
             NetEvent::Vitals {
                 health,
                 hunger,
@@ -384,6 +389,7 @@ fn move_player(
     };
     player.swimming = wet(0.6) || wet(0.05);
     let speed = if player.swimming { speed * SWIM_FACTOR } else { speed };
+    let speed = speed * player.buffs.effects().speed;
     let wish = Quat::from_rotation_y(player.yaw) * wish.normalize_or_zero() * speed;
 
     let dt = time.delta_secs().min(0.05);
@@ -622,7 +628,7 @@ fn interact(
             send_reliable(&mut client, &ClientMessage::Eat { item });
             player.cooldown = EAT_COOLDOWN;
         }
-        Some(Item::Seeds) => {
+        Some(item @ (Item::Seeds | Item::CarrotSeeds)) => {
             // Semer : sur le dessus d'un bloc de terre ou d'herbe.
             let Some(hit) = player.target else { return };
             // Viser une touffe d'herbes hautes revient à viser le sol dessous.
@@ -633,17 +639,16 @@ fn interact(
             };
             let pos = ground + IVec3::Y;
             let soil = matches!(world.block(ground), Block::Grass | Block::Dirt);
+            let crop = if item == Item::CarrotSeeds {
+                Block::CarrotSprout
+            } else {
+                Block::Sprout
+            };
             if normal == IVec3::Y && soil && matches!(world.block(pos), Block::Air | Block::TallGrass) {
-                world.set_block(pos, Block::Sprout);
-                player.inventory.remove(Item::Seeds, 1);
+                world.set_block(pos, crop);
+                player.inventory.remove(item, 1);
                 changes.write(NetEvent::BlockChanged(pos));
-                send_reliable(
-                    &mut client,
-                    &ClientMessage::PlaceBlock {
-                        pos,
-                        block: Block::Sprout,
-                    },
-                );
+                send_reliable(&mut client, &ClientMessage::PlaceBlock { pos, block: crop });
                 player.cooldown = ACTION_COOLDOWN;
             }
         }
@@ -705,7 +710,7 @@ fn mine(
             0.0
         }
     };
-    let progress = progress + dt / duration.max(0.05);
+    let progress = progress + dt * player.buffs.effects().mining / duration.max(0.05);
     if progress < 1.0 {
         player.mining = Some((hit.block, progress));
         return;

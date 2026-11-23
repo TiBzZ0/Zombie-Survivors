@@ -97,6 +97,7 @@ pub enum NetEvent {
         time: GameTime,
         zombies_alive: u32,
     },
+    Buffs(shared::buff::Buffs),
     Vitals {
         health: f32,
         hunger: f32,
@@ -402,6 +403,9 @@ fn receive_messages(
                     felt,
                     infection,
                 });
+            }
+            ServerMessage::Buffs(buffs) => {
+                events.write(NetEvent::Buffs(buffs));
             }
             ServerMessage::Died { cause } => {
                 events.write(NetEvent::Died(cause));
