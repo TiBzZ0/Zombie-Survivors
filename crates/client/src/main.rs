@@ -14,6 +14,7 @@ mod animals;
 mod chat;
 mod chest;
 mod crafting;
+mod damage;
 mod effects;
 mod electricity;
 mod fishing;
@@ -42,6 +43,7 @@ mod textures;
 mod tutorial;
 mod viewmodel;
 mod wind;
+mod worldmap;
 mod zombies;
 
 use bevy::prelude::*;
@@ -155,6 +157,8 @@ fn main() {
             fishing::FishingPlugin,
             rain::RainPlugin,
             swim::SwimUiPlugin,
+            worldmap::WorldMapPlugin,
+            damage::DamagePlugin,
         ))
         .add_systems(PreStartup, install_font)
         .add_systems(Startup, setup_scene)
